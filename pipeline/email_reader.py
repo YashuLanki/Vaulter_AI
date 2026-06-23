@@ -220,33 +220,50 @@ def _store_attachment_chunks(name, msg_id, subject, text, file_type, collection,
     return len(chunks)
 
 
-def _match_and_log(name, subject, text) -> dict:
-    """Run property matcher and log result."""
+def _match_and_log(name, subject, text) -> tuple:
+    """Run property matcher and log result. Returns (prop_tags, matches)."""
     matches      = match_properties(f"{subject} {text[:500]}")
     prop_tags    = matched_property_tags(matches)
     matched_desc = format_matched_properties(matches)
     log.info(f"  Matched properties: {matched_desc}")
-    return prop_tags
+    return prop_tags, matches
 
 
-def _save_to_processed(raw_path: Path, name: str, prop_tags: dict, ts: str):
+def _save_to_processed(raw_path: Path, name: str, prop_tags: dict, ts: str,
+                       matches: list = None):
     """
-    Copy an attachment to processed/State/Property/ so it's accessible
-    via the /files/ route and Claude can link to it.
+    Copy an attachment to processed/State/Property/ so it is accessible
+    via File Explorer.
+
+    Only routes to a property folder on strong matches (name_match or city_match).
+    Weak matches (state_match, category_match only) go to processed/general/
+    so files are not placed in the wrong property folder.
     """
     try:
         from config import PROCESSED_DIR
-        state    = prop_tags.get("matched_states", "").split("|")[0].strip().lower().replace(" ", "_")
-        prop     = prop_tags.get("matched_properties", "").split("|")[0].strip()
-        if state and prop:
+
+        # Check if we have a strong match
+        strong_match = False
+        if matches:
+            for m in matches:
+                reasons = m.get("match_reasons", [])
+                if "name_match" in reasons or "city_match" in reasons:
+                    strong_match = True
+                    break
+
+        if strong_match:
+            state    = prop_tags.get("matched_states", "").split("|")[0].strip().lower().replace(" ", "_")
+            prop     = prop_tags.get("matched_properties", "").split("|")[0].strip()
             dest_dir = PROCESSED_DIR / state / prop
+            log.info(f"  Saved to processed: {state}/{prop}/{name}")
         else:
-            dest_dir = PROCESSED_DIR / "unknown"
+            dest_dir = PROCESSED_DIR / "general"
+            log.info(f"  Saved to processed/general/ (no strong property match): {name}")
+
         dest_dir.mkdir(parents=True, exist_ok=True)
-        # Save with original filename so Claude can reference it by name
         dest = dest_dir / name
         shutil.copy(str(raw_path), str(dest))
-        log.info(f"  Saved to processed: {state}/{prop}/{name}")
+
     except Exception as e:
         log.debug(f"  Could not save to processed: {e}")
 
@@ -327,10 +344,10 @@ def route_attachment(token, msg_id, att, subject, collection):
             if len(text) < 50:
                 log.info(f"  Word doc too short: {name}")
                 return
-            prop_tags = _match_and_log(name, subject, text)
+            prop_tags, matches = _match_and_log(name, subject, text)
             n = _store_attachment_chunks(name, msg_id, subject, text, "docx",
                                          collection, prop_tags)
-            _save_to_processed(raw_path, name, prop_tags, ts)
+            _save_to_processed(raw_path, name, prop_tags, ts, matches)
             log.info(f"  ✓ Word doc stored: {name} ({n} chunks)")
         except ImportError:
             log.warning(f"  mammoth not installed — pip install mammoth")
@@ -352,10 +369,10 @@ def route_attachment(token, msg_id, att, subject, collection):
             if len(text) < 50:
                 log.info(f"  Excel too short: {name}")
                 return
-            prop_tags = _match_and_log(name, subject, text)
+            prop_tags, matches = _match_and_log(name, subject, text)
             n = _store_attachment_chunks(name, msg_id, subject, text, "excel",
                                          collection, prop_tags)
-            _save_to_processed(raw_path, name, prop_tags, ts)
+            _save_to_processed(raw_path, name, prop_tags, ts, matches)
             log.info(f"  ✓ Excel stored: {name} ({n} chunks)")
         except ImportError:
             log.warning(f"  openpyxl not installed — pip install openpyxl")
@@ -377,10 +394,10 @@ def route_attachment(token, msg_id, att, subject, collection):
             if len(text) < 50:
                 log.info(f"  PowerPoint too short: {name}")
                 return
-            prop_tags = _match_and_log(name, subject, text)
+            prop_tags, matches = _match_and_log(name, subject, text)
             n = _store_attachment_chunks(name, msg_id, subject, text, "pptx",
                                          collection, prop_tags)
-            _save_to_processed(raw_path, name, prop_tags, ts)
+            _save_to_processed(raw_path, name, prop_tags, ts, matches)
             log.info(f"  ✓ PowerPoint stored: {name} ({n} chunks)")
         except ImportError:
             log.warning(f"  python-pptx not installed — pip install python-pptx")
@@ -398,7 +415,7 @@ def route_attachment(token, msg_id, att, subject, collection):
             if len(text) < 50:
                 log.info(f"  CSV too short: {name}")
                 return
-            prop_tags = _match_and_log(name, subject, text)
+            prop_tags, matches = _match_and_log(name, subject, text)
             n = _store_attachment_chunks(name, msg_id, subject, text, "csv",
                                          collection, prop_tags)
             log.info(f"  ✓ CSV stored: {name} ({n} chunks)")
@@ -419,7 +436,7 @@ def route_attachment(token, msg_id, att, subject, collection):
             if len(text) < 50:
                 log.info(f"  Image OCR too short: {name}")
                 return
-            prop_tags = _match_and_log(name, subject, text)
+            prop_tags, matches = _match_and_log(name, subject, text)
             n = _store_attachment_chunks(name, msg_id, subject, text, "image_ocr",
                                          collection, prop_tags)
             log.info(f"  ✓ Image OCR stored: {name} ({n} chunks)")
@@ -431,7 +448,7 @@ def route_attachment(token, msg_id, att, subject, collection):
     # ── Plain Text ────────────────────────────────────────────────
     elif "text" in mime_type or nl.endswith(".txt"):
         text = data.decode("utf-8", errors="replace")
-        prop_tags = _match_and_log(name, subject, text)
+        prop_tags, matches = _match_and_log(name, subject, text)
         n = _store_attachment_chunks(name, msg_id, subject, text, "text",
                                      collection, prop_tags)
         log.info(f"  ✓ Text stored: {name} ({n} chunks)")
