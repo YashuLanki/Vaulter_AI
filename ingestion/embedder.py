@@ -17,6 +17,8 @@ Examples:
 
 import hashlib
 import logging
+import threading
+import time
 
 import numpy as np
 import chromadb
@@ -58,17 +60,74 @@ class LocalHashEmbedding(EmbeddingFunction):
         return result
 
 
-# ─── ChromaDB Client ──────────────────────────────────────────────────────────
+# ─── ChromaDB Singleton ───────────────────────────────────────────────────────
+#
+# Problem: creating a new PersistentClient on every call causes
+# "Could not connect to tenant default_tenant" errors when the scheduler,
+# watcher, and MCP server all call get_collection() from different threads
+# simultaneously — each tries to open the SQLite database at the same time.
+#
+# Fix: one client, one collection, shared across all threads.
+# _INIT_LOCK ensures only one thread initializes at a time.
+# _WRITE_LOCK serializes all writes so concurrent upserts don't conflict.
+
+_CLIENT:     chromadb.PersistentClient | None = None
+_COLLECTION: object | None                    = None
+_INIT_LOCK  = threading.Lock()
+_WRITE_LOCK = threading.Lock()
+
 
 def get_collection():
-    """Initialize and return the ChromaDB collection."""
-    client = chromadb.PersistentClient(path=str(CHROMA_DIR))
-    collection = client.get_or_create_collection(
-        name=CHROMA_COLLECTION_NAME,
-        embedding_function=LocalHashEmbedding(),
-        metadata={"hnsw:space": "cosine"},
-    )
-    return collection
+    """
+    Return the shared ChromaDB collection.
+    Initializes once on first call (thread-safe).
+    Retries up to 3 times on connection errors before raising.
+    """
+    global _CLIENT, _COLLECTION
+
+    # Fast path — already initialized
+    if _COLLECTION is not None:
+        return _COLLECTION
+
+    # Slow path — initialize with lock (double-checked locking pattern)
+    with _INIT_LOCK:
+        if _COLLECTION is not None:
+            return _COLLECTION
+
+        last_error: Exception | None = None
+        for attempt in range(3):
+            try:
+                _CLIENT = chromadb.PersistentClient(path=str(CHROMA_DIR))
+                _COLLECTION = _CLIENT.get_or_create_collection(
+                    name=CHROMA_COLLECTION_NAME,
+                    embedding_function=LocalHashEmbedding(),
+                    metadata={"hnsw:space": "cosine"},
+                )
+                log.debug("ChromaDB collection initialized")
+                return _COLLECTION
+            except Exception as e:
+                last_error = e
+                log.warning(f"ChromaDB init attempt {attempt + 1}/3 failed: {e}")
+                if attempt < 2:
+                    time.sleep(0.5 * (attempt + 1))
+
+        raise RuntimeError(
+            f"ChromaDB could not be initialized after 3 attempts: {last_error}\n"
+            f"Path: {CHROMA_DIR}\n"
+            f"Tip: make sure no other process has the database locked, "
+            f"and try 'pip install --upgrade chromadb' if the error mentions RustBindingsAPI."
+        )
+
+
+def _reset_collection():
+    """
+    Force re-initialization of the ChromaDB client on next call.
+    Called automatically after write errors so the singleton recovers.
+    """
+    global _CLIENT, _COLLECTION
+    with _INIT_LOCK:
+        _CLIENT     = None
+        _COLLECTION = None
 
 
 # ─── Storage ──────────────────────────────────────────────────────────────────
@@ -77,12 +136,14 @@ def store_chunks(chunks: list[str], metadata: dict, doc_hash: str):
     """
     Store text chunks in ChromaDB with full metadata tags including
     property, state, and category for property-aware search.
+
+    Write operations are serialized with _WRITE_LOCK to prevent
+    concurrent-write conflicts across the watcher, scheduler, and
+    MCP server threads.
     """
     if not chunks:
         log.warning(f"No chunks to store for {metadata['filename']}")
         return
-
-    collection = get_collection()
 
     ids = [f"{doc_hash}_{i}" for i in range(len(chunks))]
     metadatas = [
@@ -102,8 +163,15 @@ def store_chunks(chunks: list[str], metadata: dict, doc_hash: str):
         for i in range(len(chunks))
     ]
 
-    collection.add(documents=chunks, metadatas=metadatas, ids=ids)
-    log.info(f"  Stored {len(chunks)} chunks in ChromaDB")
+    with _WRITE_LOCK:
+        try:
+            collection = get_collection()
+            collection.add(documents=chunks, metadatas=metadatas, ids=ids)
+            log.info(f"  Stored {len(chunks)} chunks in ChromaDB")
+        except Exception as e:
+            log.error(f"  ChromaDB write failed: {e} — resetting client for next attempt")
+            _reset_collection()
+            raise
 
 
 # ─── Retrieval ────────────────────────────────────────────────────────────────

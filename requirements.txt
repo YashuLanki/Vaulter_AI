@@ -5,7 +5,7 @@
 pdfplumber          # PDF text and table extraction
 pytesseract         # Python wrapper for Tesseract OCR
 pdf2image           # Convert PDF pages to images for OCR
-chromadb            # Vector database for storing document chunks
+chromadb>=0.5.20        # Vector database — 0.5.20+ fixes RustBindingsAPI concurrent access bug
 numpy               # Numerical computing (used for embeddings)
 watchdog            # File system monitoring for watched_folder
 openpyxl            # Excel .xlsx file reading (Stage 1 + email attachments)
