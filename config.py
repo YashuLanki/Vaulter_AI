@@ -146,6 +146,12 @@ OUTLOOK_LOOKBACK_DAYS = 30
 
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
 
+# ─── Google Places API ────────────────────────────────────────────
+# Add to confidentials/.env:
+#   GOOGLE_PLACES_API_KEY=AIzaSy...
+
+GOOGLE_PLACES_API_KEY = os.getenv("GOOGLE_PLACES_API_KEY", "")
+
 # ══════════════════════════════════════════════════════════════════
 # Stage 3 — MCP Server
 # ══════════════════════════════════════════════════════════════════
@@ -158,6 +164,56 @@ ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
 
 MCP_API_KEY = os.getenv("MCP_API_KEY", "")
 MCP_PORT    = int(os.getenv("MCP_PORT", "8765"))
+
+# ─── Proximity Search ────────────────────────────────────────────
+# Categories and settings for the proximity_search MCP tool.
+# Edit PROXIMITY_CATEGORIES to add/remove/change search categories.
+# google_types reference: https://developers.google.com/maps/documentation/places/web-service/supported_types
+
+PROXIMITY_DEFAULT_RADIUS_MILES          = 5.0
+PROXIMITY_SUMMARY_RESULTS_PER_CATEGORY  = 10
+PROXIMITY_GEOCODING_TIMEOUT             = 10
+PROXIMITY_PLACES_REQUEST_DELAY          = 0.15
+
+PROXIMITY_CATEGORIES = [
+    {"label": "Retail & Big Box",              "icon": "🛒", "color": "#E74C3C",
+     "google_types": ["supermarket", "department_store", "shopping_mall",
+                      "home_goods_store", "hardware_store", "warehouse_store"]},
+    {"label": "Shopping Mall & Outlets",       "icon": "🏬", "color": "#C0392B",
+     "google_types": ["shopping_mall"]},
+    {"label": "Hospitality",                   "icon": "🏨", "color": "#9B59B6",
+     "google_types": ["lodging"]},
+    {"label": "Industrial & Logistics",        "icon": "🏭", "color": "#F39C12",
+     "google_types": ["storage", "moving_company"]},
+    {"label": "Major Corporate HQ",            "icon": "🏢", "color": "#2C3E50",
+     "google_types": ["corporate_office"]},
+    {"label": "Technology & Innovation",       "icon": "💻", "color": "#1A5276",
+     "google_types": ["electronics_store"]},
+    {"label": "Healthcare",                    "icon": "🏥", "color": "#2ECC71",
+     "google_types": ["hospital", "doctor", "pharmacy", "health"]},
+    {"label": "School & University",           "icon": "🎓", "color": "#3498DB",
+     "google_types": ["school", "university", "secondary_school"]},
+    {"label": "Government & Civic",            "icon": "🏛️", "color": "#5D6D7E",
+     "google_types": ["city_hall", "local_government_office",
+                      "courthouse", "post_office", "fire_station"]},
+    {"label": "Military Base",                 "icon": "🪖", "color": "#6D4C41",
+     "google_types": ["local_government_office"]},
+    {"label": "Sports & Entertainment",        "icon": "🏟️", "color": "#E67E22",
+     "google_types": ["stadium", "amusement_park", "movie_theater", "casino"]},
+    {"label": "Restaurant & QSR",              "icon": "🍔", "color": "#1ABC9C",
+     "google_types": ["restaurant", "meal_takeaway", "cafe", "bakery"]},
+    {"label": "Grocery & Specialty Food",      "icon": "🛍️", "color": "#27AE60",
+     "google_types": ["grocery_or_supermarket", "supermarket"]},
+    {"label": "Gas & Convenience",             "icon": "⛽", "color": "#F1C40F",
+     "google_types": ["gas_station", "convenience_store"]},
+    {"label": "Financial Services",            "icon": "🏦", "color": "#2E86C1",
+     "google_types": ["bank", "atm"]},
+    {"label": "Parks & Recreation",            "icon": "🌳", "color": "#229954",
+     "google_types": ["park", "campground"]},
+    {"label": "Transportation & Infrastructure","icon": "🛣️", "color": "#717D7E",
+     "google_types": ["transit_station", "bus_station", "train_station",
+                      "airport", "subway_station"]},
+]
 
 # ─── Logging ──────────────────────────────────────────────────────
 

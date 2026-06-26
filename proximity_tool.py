@@ -56,39 +56,33 @@ def _norm_state(raw: str) -> str:
 
 
 # ── Config loader ──────────────────────────────────────────────────────────
-def _load_config(config_path: Path) -> dict:
+def _load_config() -> tuple:
     """
-    Load data/config.json. Raises if missing or invalid.
-    config.json is the single source of truth — no hardcoded fallback.
+    Load categories and settings directly from config.py.
+    config.py is the central Vaulter AI config — no separate config.json needed.
+    Returns (categories, settings).
     """
-    if not config_path.exists():
-        raise FileNotFoundError(
-            f"config.json not found at {config_path}\n"
-            f"Add data/config.json to define your search categories and settings."
-        )
     try:
-        data = json.loads(config_path.read_text(encoding="utf-8"))
-    except Exception as e:
-        raise ValueError(f"Could not parse config.json: {e}")
-
-    if not data.get("search_categories"):
-        raise ValueError("config.json has no search_categories defined.")
-
-    return data
-
-
-def _load_categories(config: dict) -> list:
-    return config["search_categories"]
-
-
-def _load_settings(config: dict) -> dict:
-    s = config.get("settings", {})
-    return {
-        "default_radius_miles":         s.get("default_radius_miles", 5.0),
-        "summary_results_per_category": s.get("summary_results_per_category", 10),
-        "geocoding_timeout_seconds":    s.get("geocoding_timeout_seconds", 10),
-        "places_request_delay_seconds": s.get("places_request_delay_seconds", 0.15),
-    }
+        from config import (
+            PROXIMITY_CATEGORIES,
+            PROXIMITY_DEFAULT_RADIUS_MILES,
+            PROXIMITY_SUMMARY_RESULTS_PER_CATEGORY,
+            PROXIMITY_GEOCODING_TIMEOUT,
+            PROXIMITY_PLACES_REQUEST_DELAY,
+        )
+        categories = PROXIMITY_CATEGORIES
+        settings = {
+            "default_radius_miles":         PROXIMITY_DEFAULT_RADIUS_MILES,
+            "summary_results_per_category": PROXIMITY_SUMMARY_RESULTS_PER_CATEGORY,
+            "geocoding_timeout_seconds":    PROXIMITY_GEOCODING_TIMEOUT,
+            "places_request_delay_seconds": PROXIMITY_PLACES_REQUEST_DELAY,
+        }
+        return categories, settings
+    except ImportError as e:
+        raise ImportError(
+            f"Missing proximity settings in config.py: {e}\n"
+            f"Add PROXIMITY_CATEGORIES and settings to config.py."
+        )
 
 
 # ── Project Master loader ──────────────────────────────────────────────────
@@ -99,8 +93,12 @@ def _load_project_master(data_dir: Path) -> dict:
     """
     properties = {}
 
+    # Project Master lives in data/project_master/
+    pm_dir = data_dir / "project_master"
+    search_dir = pm_dir if pm_dir.exists() else data_dir
+
     candidates = sorted(
-        [f for f in glob.glob(str(data_dir / "*"))
+        [f for f in glob.glob(str(search_dir / "*"))
          if Path(f).suffix.lower() in (".csv", ".xlsx", ".xls", ".pdf")
          and not Path(f).name.startswith(".")],
         key=lambda f: {".csv": 0, ".xlsx": 1, ".xls": 2, ".pdf": 3}.get(
@@ -297,17 +295,14 @@ def run_proximity_search(property_name: str,
     """
     import requests
 
-    data_dir    = vaulter_dir / "data"
-    prox_dir    = vaulter_dir / "data" / "proximity_output"
-    config_path = data_dir / "config.json"
+    data_dir = vaulter_dir / "data"
+    prox_dir = vaulter_dir / "data" / "proximity_output"
     prox_dir.mkdir(exist_ok=True)
 
-    # ── Load config (required — no hardcoded fallback) ────────────
+    # ── Load config from config.py ───────────────────────────────
     try:
-        config     = _load_config(config_path)
-        categories = _load_categories(config)
-        settings   = _load_settings(config)
-    except (FileNotFoundError, ValueError) as e:
+        categories, settings = _load_config()
+    except (ImportError, Exception) as e:
         return f"Configuration error: {e}"
 
     # Use config default radius if caller passed 0 or didn't specify
