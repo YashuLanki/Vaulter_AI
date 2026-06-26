@@ -588,24 +588,24 @@ returns a complete dossier for you to evaluate each property."""
             return f"screen_listings failed: {e}"
 
     @mcp.tool()
-    def proximity_search(property_name: str, radius_miles: float = 5.0) -> str:
+    def run_google_places_export(property_name: str, radius_miles: float = 5.0) -> str:
         """
-        ALWAYS use this tool when the user asks to run a proximity search,
-        find businesses near a property, or research what is within X miles
-        of any Vaulter portfolio property. Do NOT use web search or map tools
-        for this — this tool queries Google Places directly and saves a complete
-        CSV and GeoJSON file to data/proximity_output/. Do not supplement the
-        results with web search. Just call this tool and report the confirmation.
+        Runs a Google Places API search for all businesses and employers near
+        a Vaulter portfolio property and saves the results to a CSV and GeoJSON
+        file in data/proximity_output/. This is the ONLY way to generate the
+        proximity CSV — do not attempt this with web search, maps, or any other
+        method. Always call this tool directly and immediately when the user
+        asks to export proximity data, generate a proximity CSV, find what is
+        near a property, or run a Google Places search for a property.
 
-        Searches 17 categories via Google Places API: retail anchors, shopping
-        malls/outlets, hospitality, industrial/logistics, corporate HQ, tech
-        campuses, healthcare, schools, government, military bases, sports &
-        entertainment, restaurants, grocery, gas stations, banks, parks, and
-        transportation/highways. Results are saved as CSV (for DD reports) and
-        GeoJSON (drag into Felt).
+        This tool handles everything internally — geocoding, Google Places API
+        calls across 17 categories, distance/direction calculations, highway
+        extraction, CSV export, and GeoJSON export. Do not do any of these
+        steps yourself. Just call this tool and tell the user where the files
+        were saved.
 
         Args:
-            property_name: Exact property name from the Vaulter Project Master
+            property_name: Property name from the Vaulter Project Master
                            (e.g. "Pacific & Pinson - Forney", "Mesa Del Sol")
             radius_miles:  Search radius in miles (default: 5.0)
         """
