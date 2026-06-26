@@ -36,13 +36,17 @@ os.chdir(str(Path(__file__).parent))
 from config import LOG_DIR
 
 # ─── Logging ──────────────────────────────────────────────────────
+# When running as MCP server, only log to file — NOT stdout.
+# stdout is used for MCP stdio transport; any extra output breaks the connection.
+_mcp_mode = len(sys.argv) > 1 and sys.argv[1] == "mcp"
+_handlers = [logging.FileHandler(LOG_DIR / "vaulter.log", encoding="utf-8")]
+if not _mcp_mode:
+    _handlers.append(logging.StreamHandler())
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s  [%(levelname)s]  %(message)s",
-    handlers=[
-        logging.FileHandler(LOG_DIR / "vaulter.log", encoding="utf-8"),
-        logging.StreamHandler(),
-    ],
+    handlers=_handlers,
 )
 log = logging.getLogger("vaulter")
 
