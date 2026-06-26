@@ -517,13 +517,4 @@ def run_proximity_search(property_name: str,
             lines.append(f"  ... and {len(rows) - top_n} more")
         lines.append("")
 
-    # Also show highways if they exist
-    highway_rows = by_cat.get("Transportation & Infrastructure", [])
-    road_rows = [r for r in highway_rows if r.get("source") == "Derived from Google Places addresses"]
-    if road_rows:
-        lines.append("🛣️   HIGHWAYS & ROADS NEARBY")
-        for r in road_rows:
-            lines.append(f"  {r['name']:<20}  {r['notes']:<25}  {r['distance_label']}")
-        lines.append("")
-
     return "\n".join(lines)
