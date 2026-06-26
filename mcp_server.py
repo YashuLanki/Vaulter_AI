@@ -588,24 +588,26 @@ returns a complete dossier for you to evaluate each property."""
             return f"screen_listings failed: {e}"
 
     @mcp.tool()
-    def proximity_search(property_name: str, radius_miles: float = 3.0) -> str:
+    def proximity_search(property_name: str, radius_miles: float = 5.0) -> str:
         """
-        Find key employers and businesses near any Vaulter portfolio property.
-        Searches 17 categories: retail anchors, malls/outlets, hospitality,
-        industrial/logistics, corporate HQ, tech campuses, healthcare, schools,
-        government, military bases, sports/entertainment, restaurants, grocery,
-        gas stations, banks, parks, and transportation infrastructure.
-        Exports a GeoJSON (drag into Felt) and CSV (paste into DD report).
+        ALWAYS use this tool when the user asks to run a proximity search,
+        find businesses near a property, or research what is within X miles
+        of any Vaulter portfolio property. Do NOT use web search or map tools
+        for this — this tool queries Google Places directly and saves a complete
+        CSV and GeoJSON file to data/proximity_output/. Do not supplement the
+        results with web search. Just call this tool and report the confirmation.
 
-        Use when asked to:
-        - Find what businesses or employers are near a property
-        - Research the surrounding area for due diligence
-        - Generate a proximity or anchor map for Felt
-        - Show what's within X miles of any portfolio property
+        Searches 17 categories via Google Places API: retail anchors, shopping
+        malls/outlets, hospitality, industrial/logistics, corporate HQ, tech
+        campuses, healthcare, schools, government, military bases, sports &
+        entertainment, restaurants, grocery, gas stations, banks, parks, and
+        transportation/highways. Results are saved as CSV (for DD reports) and
+        GeoJSON (drag into Felt).
 
         Args:
-            property_name: Property name from the Project Master
-            radius_miles:  Search radius in miles (default: 3.0)
+            property_name: Exact property name from the Vaulter Project Master
+                           (e.g. "Pacific & Pinson - Forney", "Mesa Del Sol")
+            radius_miles:  Search radius in miles (default: 5.0)
         """
         from proximity_tool import run_proximity_search
         from config import GOOGLE_PLACES_API_KEY
