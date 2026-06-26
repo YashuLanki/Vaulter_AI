@@ -587,6 +587,40 @@ returns a complete dossier for you to evaluate each property."""
             log.error(f"[MCP] screen_listings failed: {e}", exc_info=True)
             return f"screen_listings failed: {e}"
 
+    @mcp.tool()
+    def proximity_search(property_name: str, radius_miles: float = 3.0) -> str:
+        """
+        Find key employers and businesses near any Vaulter portfolio property.
+        Searches 17 categories: retail anchors, malls/outlets, hospitality,
+        industrial/logistics, corporate HQ, tech campuses, healthcare, schools,
+        government, military bases, sports/entertainment, restaurants, grocery,
+        gas stations, banks, parks, and transportation infrastructure.
+        Exports a GeoJSON (drag into Felt) and CSV (paste into DD report).
+
+        Use when asked to:
+        - Find what businesses or employers are near a property
+        - Research the surrounding area for due diligence
+        - Generate a proximity or anchor map for Felt
+        - Show what's within X miles of any portfolio property
+
+        Args:
+            property_name: Property name from the Project Master
+            radius_miles:  Search radius in miles (default: 3.0)
+        """
+        from proximity_tool import run_proximity_search
+        from config import GOOGLE_PLACES_API_KEY
+        from pathlib import Path
+
+        api_key = GOOGLE_PLACES_API_KEY.strip()
+        if not api_key:
+            return "GOOGLE_PLACES_API_KEY not set. Add it to confidentials/.env and restart."
+
+        return run_proximity_search(
+            property_name=property_name,
+            radius_miles=radius_miles,
+            vaulter_dir=Path(__file__).parent,
+            api_key=api_key,
+        )
 
     return mcp
 
@@ -600,7 +634,7 @@ def run_mcp_server(port: int = 8765):
     Start background services then launch the MCP server.
     This is the single command that runs everything.
     """
-    # ── Start PDF watcher in background ───────────────────────────
+    # ── Start PDF watcher in background ──────────────────────────
     watcher_thread = threading.Thread(target=_start_watcher, daemon=True)
     watcher_thread.start()
 

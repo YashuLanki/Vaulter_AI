@@ -298,7 +298,7 @@ def run_proximity_search(property_name: str,
     import requests
 
     data_dir    = vaulter_dir / "data"
-    prox_dir    = vaulter_dir / "proximity_output"
+    prox_dir    = vaulter_dir / "data" / "proximity_output"
     config_path = data_dir / "config.json"
     prox_dir.mkdir(exist_ok=True)
 
@@ -504,7 +504,7 @@ def run_proximity_search(property_name: str,
         f"Radius      : {radius_miles} miles",
         f"Results     : {len(deduped)} unique businesses & employers found",
         f"",
-        f"Files saved to proximity_output/:",
+        f"Files saved to data/proximity_output/:",
         f"  GeoJSON -> {gj_path.name}  (drag into Felt)",
         f"  CSV     -> {csv_path.name}  (open in Excel for DD report)",
         f"",
