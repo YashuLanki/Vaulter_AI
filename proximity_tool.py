@@ -488,33 +488,10 @@ def run_proximity_search(property_name: str,
 
     log.info(f"[PROXIMITY] {matched_name} — {len(deduped)} results → {gj_path.name}")
 
-    # ── Summary ───────────────────────────────────────────────────
-    by_cat = {}
-    for r in deduped:
-        by_cat.setdefault(r["category"], []).append(r)
-
-    lines = [
-        f"PROXIMITY SEARCH — {matched_name}",
-        f"Coordinates : {lat:.5f}, {lon:.5f}",
-        f"Radius      : {radius_miles} miles",
-        f"Results     : {len(deduped)} unique businesses & employers found",
-        f"",
-        f"Files saved to data/proximity_output/:",
-        f"  GeoJSON -> {gj_path.name}  (drag into Felt)",
-        f"  CSV     -> {csv_path.name}  (open in Excel for DD report)",
-        f"",
-    ]
-
-    for cat in categories:
-        rows = by_cat.get(cat["label"], [])
-        if not rows:
-            continue
-        lines.append(f"{cat.get('icon','')  }  {cat['label'].upper()} ({len(rows)})")
-        for r in rows[:top_n]:
-            rating = f"  *{r['rating']}" if r.get("rating") else ""
-            lines.append(f"  {r['name'][:42]:<42}  {r['distance_label']}{rating}")
-        if len(rows) > top_n:
-            lines.append(f"  ... and {len(rows) - top_n} more")
-        lines.append("")
-
-    return "\n".join(lines)
+    return (
+        f"Proximity search complete for {matched_name}.\n"
+        f"Radius: {radius_miles} miles | {len(deduped)} unique results found.\n\n"
+        f"Files saved to data/proximity_output/:\n"
+        f"  CSV     -> {csv_path.name}\n"
+        f"  GeoJSON -> {gj_path.name} (drag into Felt)"
+    )
