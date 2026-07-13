@@ -527,9 +527,9 @@ tabs, per-listing analyst notes, and a direct Excel download) in a browser."""
             property_name: Property name to find matching files (e.g. "Mesa Del Sol")
         """
         import subprocess
-        from config import DATA_DIR
+        from config import PROXIMITY_OUTPUT_DIR
         try:
-            proximity_dir = DATA_DIR / "proximity_output"
+            proximity_dir = PROXIMITY_OUTPUT_DIR
             proximity_dir.mkdir(parents=True, exist_ok=True)
             all_files = sorted([f for f in proximity_dir.iterdir() if f.is_file()], reverse=True)
             if not all_files:
@@ -963,3 +963,4 @@ def run_mcp_server(port: int = 8765):
 
 if __name__ == "__main__":
     run_mcp_server()
+

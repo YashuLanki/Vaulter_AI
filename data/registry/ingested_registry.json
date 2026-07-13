@@ -8,5 +8,15 @@
     "property": "Pacific & Pinson - Forney",
     "state": "texas",
     "category": "Pre-Plat"
+  },
+  "8c2527518c22b3bc7b09881be59a885fda08039ec4431755145a39a57809e177": {
+    "filename": "email_20260629_094105_251125_Seller_2016_Commit_Tr_12-B_13___15_MDS.pdf",
+    "ingested_at": "2026-07-13T15:44:45.367154",
+    "chunks": 94,
+    "pages": 20,
+    "ocr_used": false,
+    "property": "Mesa Del Sol",
+    "state": "new_mexico",
+    "category": "Acquisition"
   }
 }

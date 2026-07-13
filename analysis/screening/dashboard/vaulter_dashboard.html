@@ -306,7 +306,7 @@ table.deal-table tbody tr.data-row:hover { background: #f7f8f2; }
 // Output directory served by dashboard_server.py's start_dashboard_server(),
 // relative to the project root it serves (root_dir must be the merged
 // project's root -- see analysis/screening/dashboard_server.py docstring).
-const OUTPUT_DIR = '/data/screening_output';
+const OUTPUT_DIR = '/data/output/screening';
 
 let store = { screening: null, ranked: null, deep: null, final: null };
 let records = [];
@@ -697,3 +697,4 @@ loadManifest();
 </script>
 </body>
 </html>
+

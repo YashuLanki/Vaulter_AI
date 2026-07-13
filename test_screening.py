@@ -26,13 +26,14 @@ from pathlib import Path
 # Make sure the project root is on the path so `analysis.screening...` resolves
 sys.path.insert(0, str(Path(__file__).parent))
 
+from pathlib import Path
 from analysis.screening.pipeline import run_full_screening
 import config  # loads confidentials/.env the same way mcp_server.py does
 
 # ── Fill these in (or leave as-is to pull from confidentials/.env) ─────
 ANTHROPIC_API_KEY = config.ANTHROPIC_API_KEY
 GOOGLE_MAPS_API_KEY = config.GOOGLE_MAPS_API_KEY or None  # None = skip Phase 4 enrichment
-COSTAR_FILE = Path("data/CostarExport.xlsx")  # <-- point this at a real file
+COSTAR_FILE = Path("data/watched_folder/unknown/CostarExport.xlsx")  # <-- point this at a real file
 TOP_N = 10
 
 if __name__ == "__main__":
