@@ -32,7 +32,7 @@ import config  # loads confidentials/.env the same way mcp_server.py does
 # ── Fill these in (or leave as-is to pull from confidentials/.env) ─────
 ANTHROPIC_API_KEY = config.ANTHROPIC_API_KEY
 GOOGLE_MAPS_API_KEY = config.GOOGLE_MAPS_API_KEY or None  # None = skip Phase 4 enrichment
-COSTAR_FILE = Path("data/screening_uploads/CostarExport.xlsx")  # <-- point this at a real file
+COSTAR_FILE = Path("data/CostarExport.xlsx")  # <-- point this at a real file
 TOP_N = 10
 
 if __name__ == "__main__":
