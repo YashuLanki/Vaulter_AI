@@ -5,14 +5,18 @@ confidentials/
 outlook_token.json
 
 # ── Database & Data ───────────────────────────────────────────────
+data/registry/
+data/output/
+data/screening_uploads/
+
+# ── Database & Data ───────────────────────────────────────────────
 data/chroma_db/*
 data/raw_web/*
 data/raw_email/*
 data/logs/*
-data/ingested_registry.json
-data/web_registry.json
-data/email_registry.json
-data/property_scrape_registry.json
+data/registry/
+data/output/
+data/screening_uploads/
 
 # ── Processed Files (ingested documents) ──────────────────────────
 data/processed/*
