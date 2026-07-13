@@ -27,7 +27,7 @@ Output location:
   uploaded/pasted CoStar files live under DATA_DIR / "screening_uploads".
 """
 
-from config import DATA_DIR, SCREENING_OUTPUT_DIR, SCREENING_UPLOADS_DIR
+from config import DATA_DIR, SCREENING_OUTPUT_DIR
 
 # Kept for reference/back-compat with costar_screener's original naming.
 # OUTPUT_DIR now points at the merged project's own data dir rather than

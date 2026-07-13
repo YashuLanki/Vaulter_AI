@@ -40,32 +40,45 @@ def _resolve_costar_source(source_file: str, property_name: str = "", file_conte
 
       (a) file_content_b64 non-empty -- the user pasted/uploaded the file
           directly into the Claude conversation. Base64-decode it and
-          write to data/screening_uploads/<source_file>, returning that path.
+          write to data/watched_folder/<source_file>, returning that path.
+          The ingestion watcher will also pick this up independently and
+          chunk/embed it, moving it into PROCESSED_DIR/unknown (or a
+          matched property folder) once processed.
 
-      (b) else search under PROCESSED_DIR (same folder watcher.py and
-          email_reader.py already write raw ingested files into)
-          recursively for a filename matching source_file (case-
-          insensitive). If property_name is given, narrow to a matching
-          property subfolder first; otherwise search everywhere,
-          including the "general/" folder used for unmatched attachments.
+      (b) else search data/watched_folder/ first (freshly dropped, not
+          yet processed), then PROCESSED_DIR (same folder watcher.py and
+          email_reader.py move files into once ingested) recursively for
+          a filename matching source_file (case-insensitive) — this
+          naturally covers PROCESSED_DIR/unknown, since it's just a
+          subfolder under PROCESSED_DIR. If property_name is given,
+          narrow to a matching property subfolder first; otherwise search
+          everywhere, including "general/" and "unknown/".
 
       (c) else return None.
     """
     import base64
-    from config import PROCESSED_DIR, SCREENING_UPLOADS_DIR
+    from config import PROCESSED_DIR, WATCH_DIR
 
     if file_content_b64:
         try:
-            SCREENING_UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
-            dest = SCREENING_UPLOADS_DIR / source_file
+            WATCH_DIR.mkdir(parents=True, exist_ok=True)
+            dest = WATCH_DIR / source_file
             dest.write_bytes(base64.b64decode(file_content_b64))
             return dest
         except Exception as e:
             log.warning(f"[MCP] Could not decode/write uploaded file content: {e}")
             return None
 
+    target_lower = source_file.lower()
+
+    # Check the drop zone first — a file that hasn't been picked up by
+    # the watcher yet will still be sitting here.
+    if WATCH_DIR.exists():
+        for candidate in WATCH_DIR.rglob("*"):
+            if candidate.is_file() and candidate.name.lower() == target_lower:
+                return candidate
+
     if PROCESSED_DIR.exists():
-        target_lower = source_file.lower()
         search_roots = []
 
         if property_name:
@@ -76,8 +89,6 @@ def _resolve_costar_source(source_file: str, property_name: str = "", file_conte
                     if prop_dir.is_dir() and property_name.lower() in prop_dir.name.lower():
                         search_roots.append(prop_dir)
 
-        # Fall back to searching everywhere (including "general/") if no
-        # property-specific match was found or no property_name was given.
         if not search_roots:
             search_roots = [PROCESSED_DIR]
 

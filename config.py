@@ -50,17 +50,14 @@ REGISTRY_FILE  = REGISTRY_DIR / "ingested_registry.json"
 OUTPUT_DIR            = DATA_DIR / "output"
 PROXIMITY_OUTPUT_DIR  = OUTPUT_DIR / "proximity"
 SCREENING_OUTPUT_DIR  = OUTPUT_DIR / "screening"
-SCREENING_UPLOADS_DIR = DATA_DIR / "screening_uploads"
 
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 PROXIMITY_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 SCREENING_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-SCREENING_UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
 
 CHROMA_DIR.mkdir(parents=True, exist_ok=True)
 LOG_DIR.mkdir(parents=True, exist_ok=True)
 SCREENING_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-SCREENING_UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
 
 # ─── Chunking Settings ────────────────────────────────────────────
 
