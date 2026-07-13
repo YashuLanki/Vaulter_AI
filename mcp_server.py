@@ -556,6 +556,201 @@ tabs, per-listing analyst notes, and a direct Excel download) in a browser."""
     # ── FOUR-PHASE LISTING SCREENER ───────────────────────────────
 
     @mcp.tool()
+    def get_screening_rules(source_file: str = "CostarExport.xlsx") -> str:
+        """
+        Run Stage 0 calibration only — returns the hard rules and scoring
+        dimensions Claude generated for the CoStar export, without running
+        the full screener. Use this to inspect and validate the rulebook
+        before committing to a full screening run.
+
+        Use when asked to:
+        - Show me what rules were generated
+        - What hard rules is the screener using
+        - Check or preview the screening criteria
+        - Are the rules good / do the rules make sense
+        """
+        try:
+            from analysis.screener import calibrate_pipeline, GOOGLE_PLACES_API_KEY
+            from config import DATA_DIR, ANTHROPIC_API_KEY
+            import pandas as pd
+
+            search_paths = [
+                DATA_DIR / "processed" / "general" / source_file,
+                DATA_DIR / "general" / source_file,
+                DATA_DIR / source_file,
+                DATA_DIR / "processed" / source_file,
+                DATA_DIR / "watched_folder" / "unknown" / source_file,
+            ]
+            file_path = next((p for p in search_paths if p.exists()), None)
+            if not file_path:
+                general_dir = DATA_DIR / "general"
+                found = list(general_dir.iterdir()) if general_dir.exists() else []
+                return (
+                    f"File not found: {source_file}\n"
+                    f"Searched: {[str(p) for p in search_paths]}\n"
+                    f"Files in data/general/: {[f.name for f in found]}"
+                )
+
+            df = pd.read_excel(str(file_path))
+            headers = list(df.columns)
+            rows = []
+            for _, row in df.iterrows():
+                parts = [str(v) if pd.notna(v) else '' for v in row.values]
+                rows.append(' | '.join(parts))
+
+            portfolio = []
+            try:
+                from pipeline.property_scraper import load_properties
+                portfolio, _ = load_properties()
+            except Exception as e:
+                log.warning(f"[MCP] Could not load portfolio: {e}")
+
+            log.info(f"[MCP] get_screening_rules: {len(rows)} rows, {len(headers)} headers, {len(portfolio)} portfolio props, Places key {'SET' if GOOGLE_PLACES_API_KEY else 'NOT SET'}")
+
+            calibration = calibrate_pipeline(
+                rows, api_key=ANTHROPIC_API_KEY, headers=headers,
+                portfolio=portfolio, google_api_key=GOOGLE_PLACES_API_KEY,
+            )
+
+            hard_rules = calibration.get("hard_rules", [])
+            score_dims = calibration.get("scoring_dimensions", [])
+            fields     = calibration.get("data_fields_observed", [])
+            max_score  = sum(d.get("max_points", 2) for d in score_dims)
+
+            lines = [
+                f"Stage 0 Calibration — {source_file}",
+                f"{len(rows)} listings | {len(hard_rules)} hard rules | {len(score_dims)} scoring dimensions | max score {max_score}",
+                f"Fields observed: {', '.join(fields) if fields else 'not specified'}",
+                "",
+                "═" * 55,
+                "  PORTFOLIO SITE PROFILE (Google Places)",
+                "═" * 55,
+                calibration.get("site_profile", "(not available)"),
+                "",
+                "═" * 55,
+                f"  HARD RULES ({len(hard_rules)}) — 2+ hits = eliminated",
+                "═" * 55,
+            ]
+            for i, r in enumerate(hard_rules, 1):
+                lines.append(f"\n{i}. [{r.get('id','')}] {r.get('description','')}")
+                lines.append(f"   Match type : {r.get('match_type','')}")
+                lines.append(f"   Keywords   : {', '.join(r.get('keywords', []))}")
+                if r.get('conflict_keywords'):
+                    lines.append(f"   Conflict   : {', '.join(r['conflict_keywords'])}")
+
+            lines += ["", "═" * 55, f"  SCORING DIMENSIONS ({len(score_dims)}) — max {max_score} pts", "═" * 55]
+            for i, d in enumerate(score_dims, 1):
+                lines.append(f"\n{i}. [{d.get('id','')}] {d.get('description','')} (max {d.get('max_points',2)} pts)")
+                lines.append(f"   High score : {', '.join(d.get('high_score_keywords', []))}")
+                lines.append(f"   Low score  : {', '.join(d.get('low_score_keywords', []))}")
+
+            lines += ["", "Paste back to Claude to review. If anything looks wrong, describe it and Claude will adjust before running the full screener."]
+            return "\n".join(lines)
+
+        except Exception as e:
+            log.error(f"[MCP] get_screening_rules error: {e}", exc_info=True)
+            return f"Error running Stage 0: {e}"
+
+    @mcp.tool()
+    def test_screener(source_file: str = "CostarExport.xlsx", num_listings: int = 10) -> str:
+        """
+        Test the hard rules on a small sample of listings — shows exactly which
+        rules each listing hits and whether it passes or gets eliminated. Use this
+        to validate the rulebook before running the full screener on all listings.
+
+        Use when asked to:
+        - Test the rules on a few listings
+        - Show me why listings pass or fail
+        - Check if the hard rules are working correctly
+        - Test the screener on 10 listings
+
+        Args:
+            source_file:  CoStar export filename (default: CostarExport.xlsx)
+            num_listings: How many listings to test (default: 10)
+        """
+        try:
+            from analysis.screener import (
+                calibrate_pipeline, stage1_hard_rules,
+                _get_address, _get_price_acres, GOOGLE_PLACES_API_KEY
+            )
+            from config import DATA_DIR, ANTHROPIC_API_KEY
+            import pandas as pd
+
+            search_paths = [
+                DATA_DIR / "processed" / "general" / source_file,
+                DATA_DIR / "general" / source_file,
+                DATA_DIR / source_file,
+                DATA_DIR / "processed" / source_file,
+                DATA_DIR / "watched_folder" / "unknown" / source_file,
+            ]
+            file_path = next((p for p in search_paths if p.exists()), None)
+            if not file_path:
+                return f"File not found: {source_file}"
+
+            df = pd.read_excel(str(file_path))
+            headers = list(df.columns)
+            all_rows = []
+            for _, row in df.iterrows():
+                parts = [str(v) if pd.notna(v) else '' for v in row.values]
+                all_rows.append(' | '.join(parts))
+
+            # Load portfolio and run Stage 0
+            portfolio = []
+            try:
+                from pipeline.property_scraper import load_properties
+                portfolio, _ = load_properties()
+            except Exception:
+                pass
+
+            log.info(f"[MCP] test_screener: running Stage 0 to get rules...")
+            calibration = calibrate_pipeline(
+                all_rows, api_key=ANTHROPIC_API_KEY, headers=headers,
+                portfolio=portfolio, google_api_key=GOOGLE_PLACES_API_KEY,
+            )
+            hard_rules = calibration.get("hard_rules", [])
+
+            # Test on the first num_listings rows
+            sample = all_rows[:num_listings]
+            lines = [
+                f"Hard Rule Test — {source_file}",
+                f"Testing first {len(sample)} listings against {len(hard_rules)} hard rules",
+                f"(2+ rule hits = eliminated)",
+                "",
+            ]
+
+            for i, row in enumerate(sample, 1):
+                address = _get_address(row)
+                price, acres, ppa = _get_price_acres(row)
+                eliminated, flags = stage1_hard_rules(row, hard_rules)
+
+                status = "❌ ELIMINATED" if eliminated else "✅ PASSES"
+                lines.append(f"{'─' * 50}")
+                lines.append(f"#{i} {address}")
+                if price:
+                    lines.append(f"   Price: ${price:,.0f}" + (f" | {acres} AC | ${ppa:,.0f}/AC" if acres and ppa else ""))
+                lines.append(f"   Result: {status} ({len(flags)} rule hit{'s' if len(flags) != 1 else ''})")
+
+                if flags:
+                    lines.append(f"   Rules hit:")
+                    for flag in flags:
+                        lines.append(f"     • {flag}")
+                else:
+                    lines.append(f"   No rules triggered — moves to scoring")
+
+            lines += [
+                "",
+                f"Summary: {sum(1 for r in sample if stage1_hard_rules(r, hard_rules)[0])} eliminated, "
+                f"{sum(1 for r in sample if not stage1_hard_rules(r, hard_rules)[0])} pass to scoring",
+                "",
+                "Paste back to Claude to review. If any listing was wrongly eliminated or wrongly passed, describe it.",
+            ]
+            return "\n".join(lines)
+
+        except Exception as e:
+            log.error(f"[MCP] test_screener error: {e}", exc_info=True)
+            return f"Error: {e}"
+
+    @mcp.tool()
     def screen_listings(
         source_file: str = "CostarExport.xlsx",
         property_name: str = "",
