@@ -593,7 +593,7 @@ tabs, per-listing analyst notes, and a direct Excel download) in a browser."""
 
             df = pd.read_excel(str(file_path))
             headers = list(df.columns)
-            rows = []
+            rows = []cal
             for _, row in df.iterrows():
                 parts = [str(v) if pd.notna(v) else '' for v in row.values]
                 rows.append(' | '.join(parts))

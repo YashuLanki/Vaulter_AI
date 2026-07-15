@@ -4,8 +4,8 @@
     "last_scraped": "2026-06-25T23:03:40.879590"
   },
   "GlobeSt Homepage": {
-    "last_hash": "1498ef71a3d12d05",
-    "last_scraped": "2026-07-13T15:49:41.487249"
+    "last_hash": "41693b17c444b2d5",
+    "last_scraped": "2026-07-15T09:42:24.324261"
   },
   "CBRE Capital Markets 2026": {
     "last_hash": "581a6bda9e2b7309",
@@ -14,5 +14,9 @@
   "CBRE US Market Outlook 2026": {
     "last_hash": "db65ff2ac81e961e",
     "last_scraped": "2026-07-13T16:12:13.343316"
+  }
+}  "GlobeSt CRE News": {
+    "last_hash": "66d7672d887ec9cc",
+    "last_scraped": "2026-07-15T09:42:24.324053"
   }
 }
