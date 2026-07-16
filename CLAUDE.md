@@ -1,0 +1,76 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+## What This Is
+
+Vaulter AI Property Intelligence System — a Python system for a real estate investment company that ingests PDFs/emails/web data into a vector database, exposes it to the team entirely through an MCP server connected to claude.ai (no separate UI), and runs a 4-phase CoStar listing screening pipeline. `main.py` is the single CLI entry point for every stage; `mcp_server.py` is what actually runs in production (it starts the PDF watcher and scheduler as background threads, then serves MCP tools on the main thread).
+
+## Commands
+
+```bash
+# Setup
+python -m venv .venv && .venv\Scripts\activate      # Windows
+pip install -r requirements.txt
+
+# Stage 1 — PDF ingestion
+python main.py ingest                    # start the folder watcher
+python main.py stats                     # database stats across all stages
+python main.py query "flood zone Magic Ranch"
+
+# Stage 2 — web & email pipeline
+python main.py scrape ["Source Name"]    # web scrape (all, or one named source)
+python main.py email [--days 30]         # pull Outlook emails
+python main.py property-scrape ["Name"]  # scrape news/market data per property
+python main.py properties                # list portfolio from Project Master
+python main.py auth                      # one-time Outlook OAuth
+python main.py schedule                  # run the background scheduler standalone
+
+# Stage 3 — MCP server (what production actually runs)
+python main.py mcp [port]                # default port 8765, stdio transport
+
+# CoStar screening pipeline — standalone smoke test, no MCP round-trip needed
+python test_screening.py                 # edit COSTAR_FILE at top of the file first
+```
+
+There is no lint/test framework configured (no pytest, no linter config). `test_screening.py` is a manual smoke-test script, not a pytest suite — run it directly.
+
+## Architecture
+
+### Cross-cutting: `config.py`
+Every path, credential, and tunable constant lives here — this is the only file that needs to change to port the project to a new machine. It cross-platform-detects Windows vs Mac, loads `confidentials/.env` via `python-dotenv`, and creates all `data/` subfolders on import. Nothing else in the codebase should hardcode a path or read `os.environ` directly for these values.
+
+`SECRETS_DIR` resolves to a **hardcoded** `C:\Users\<USERNAME>\Vaulter AI\confidentials` on Windows (not `BASE_DIR`-relative) — if the project ever moves off that exact path on a Windows machine, update this line in `config.py`.
+
+### Data flow: everything lands in ChromaDB, tagged by `type`
+All four stages write into one shared ChromaDB collection (`ingestion/embedder.py`, collection name in `config.CHROMA_COLLECTION_NAME`). Chunks are distinguished purely by metadata `type`: `pdf` (default), `web_scrape`, `property_intelligence`, `email` / `email_attachment_<kind>`. `analysis/rag_engine.py` is the only retrieval layer — it offers four modes (`get_property_context`, cross-property, type-filtered, `free_search`) and is what both the MCP tools and `analysis/analyzer.py` call into. Never query ChromaDB directly from a new tool; go through `rag_engine`.
+
+### Stage 1 — PDF ingestion (`ingestion/`)
+`watcher.py` monitors `data/watched_folder/<State>/<Property>/file.*` (state and property are read from the folder path, not fuzzy-matched from the filename, and validated against the Project Master). `extractor.py` pulls text (OCR fallback via Tesseract/Poppler for scanned PDFs), `chunker.py` splits it using tiered chunk sizes keyed by page count (`config.CHUNK_TIERS` — note the `9999`-page sentinel tier exists specifically to keep CoStar/Excel rows intact instead of hard-splitting pipe-separated data), `embedder.py` stores it, `registry.py` dedupes via file hash. After processing, files move to `data/processed/<state>/` (or `processed/sold/<state>/`, `processed/unknown/`).
+
+### Stage 2 — web & email pipeline (`pipeline/`)
+`web_scraper.py` scrapes fixed sources from `config.WEB_SOURCES`. `property_scraper.py` scrapes per-property news/market data for all properties loaded from the Project Master. `property_matcher.py` matches scraped/email content back to a specific property. `email_reader.py` pulls Outlook via Microsoft Graph (auth in `outlook_auth.py`, MSAL) and handles every attachment type (PDF, Word via mammoth, Excel via openpyxl, PowerPoint via python-pptx, images via OCR). `scheduler.py` (APScheduler) automates all of the above — when running under the MCP server this scheduler is started in a background thread by `mcp_server.py`, not via `main.py schedule`.
+
+### Stage 3 — RAG + MCP server
+`analysis/analyzer.py` makes the actual Claude API calls (summaries, risk flags, Q&A); `analysis/prompts.py` centralizes every prompt used against Claude anywhere in the codebase — add new prompts there, don't inline them.
+
+`mcp_server.py` is the production entry point (`create_mcp_server()` registers all `@mcp.tool()`-decorated functions; `run_mcp_server()` starts the watcher + scheduler threads then calls `mcp.run(transport="stdio")`). Tools exposed: `search_database`, `get_property_info`, `get_portfolio_list`, `get_properties_by_stage`, `check_inbox_now`, `get_email_highlights`, `get_risk_scan`, `get_market_intelligence`, `get_database_stats`, `open_property_files`, `open_general_files`, `open_proximity_files`, `get_screening_rules`, `test_screener`, `screen_listings`, `open_screening_dashboard`, `run_google_places_export`. `MCP_API_KEY` gates access when set (warns but doesn't hard-fail if unset).
+
+### CoStar Listing Screener (`analysis/screening/`)
+A 4-phase pipeline, orchestrated end-to-end by `pipeline.py::run_full_screening()` (the single entry point — called directly from the `screen_listings` MCP tool, no subprocesses, no re-running upstream phases):
+
+1. **`phase1_rules.py`** — deterministic hard-rule elimination (acreage, flood risk, land-use category, existing structures, stale listings).
+2. **`phase2_ranking.py`** — composite score across 5 weighted dimensions for every Phase 1 survivor.
+3. **`phase3_deep_analysis.py`** — sends top-ranked listings to Claude for qualitative writeups (strengths/risks/entitlement risk/MOIC fit) and a pursue/conditional/pass call.
+4. **`phase4_verification.py`** — Google Maps ground-truth checks (elevation, places, roads, imagery, distance) on Phase 3's finalists, plus a final multimodal Claude verdict. Silently skips the Google enrichment step (not the whole phase) if `GOOGLE_MAPS_API_KEY` is unset — Phases 1-3 and finalist selection always run.
+
+`workbook_builder.py` merges all 4 phases into one combined `.xlsx` (written to `data/output/screening/`, tracked in a `manifest.json` in the same folder). `dashboard_server.py` serves `dashboard/vaulter_dashboard.html`, a local Pursue/Scrutinize/Pass viewer opened via the `open_screening_dashboard` MCP tool. `config.py` (hard rules + output columns) and `scoring_config.py` (approved scoring maps) inside this subpackage are screening-specific and separate from the root `config.py`.
+
+A CoStar file reaches `screen_listings` one of three ways (see `mcp_server.py::_resolve_costar_source`): already ingested/dropped into `data/watched_folder/` or `data/processed/` (searched by filename, optionally narrowed by `property_name`), pasted directly into the Claude conversation as `file_content_b64`, or neither — in which case the tool explains how to supply one.
+
+## Conventions to preserve
+
+- **Secrets never touch `config.py` or git.** All credentials go through `confidentials/.env` (gitignored) and are read once in `config.py` via `os.getenv`; every other module imports the resulting constant from `config`.
+- **`main.py` (non-MCP mode) logs to both file and stdout; MCP mode logs to file only** — stdout is reserved for the MCP stdio transport, and any stray print/log to stdout there will break the connection to claude.ai.
+- **Missing optional API keys degrade gracefully, they don't crash.** `GOOGLE_MAPS_API_KEY` unset → skip Phase 4 enrichment only; `MCP_API_KEY` unset → server runs unauthenticated with a warning. Follow this pattern for any new optional integration.
+- **The scheduler thread inside `mcp_server.py` must never die or exit** — its keepalive loop wraps everything in try/except specifically so a job failure can't take down the MCP server process. Preserve that isolation if you touch `_start_scheduler`.
