@@ -61,6 +61,9 @@ ENV/
 # ── VS Code ───────────────────────────────────────────────────────
 .vscode/
 
+# ── Claude Code (personal per-machine config stays local) ─────────
+.claude/settings.local.json
+
 # ── Windows ───────────────────────────────────────────────────────
 Thumbs.db
 desktop.ini
