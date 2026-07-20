@@ -222,12 +222,17 @@ def ingest_file(path: Path):
         log.warning(f"  [SKIP] Unsupported file type: {path.suffix} — {path.name}")
         return
 
-    doc_hash = get_file_hash(path)
-    if is_already_ingested(doc_hash):
-        log.info(f"  [SKIP] Already ingested: {path.name}")
-        return
-
     try:
+        # Step 0: Hash + dedup check. Deliberately inside this try — a file
+        # can vanish between the watchdog event firing and this running
+        # (e.g. a duplicate event for a file another event already moved
+        # to processed/), which raises FileNotFoundError here. Letting that
+        # escape would kill the watchdog dispatch thread silently.
+        doc_hash = get_file_hash(path)
+        if is_already_ingested(doc_hash):
+            log.info(f"  [SKIP] Already ingested: {path.name}")
+            return
+
         # Step 1: Resolve property from folder path
         match = _resolve_from_path(path)
 
@@ -302,22 +307,36 @@ def ingest_file(path: Path):
 # ─── Watchdog Event Handler ───────────────────────────────────────────────────
 
 class FileHandler(FileSystemEventHandler):
+    """
+    Every handler method is wrapped in try/except — these run synchronously
+    inside watchdog's own internal dispatch thread, which nothing else here
+    supervises. Any exception that escapes a handler silently kills that
+    thread: the process keeps running and looks healthy, but no further
+    file events are ever delivered until a full restart.
+    """
+
     def on_created(self, event):
-        if event.is_directory:
-            return
-        path = Path(event.src_path)
-        # Must be inside State/Property subfolder — skip files in state folder root
-        if is_supported(path) and len(path.relative_to(WATCH_DIR).parts) >= 3:
-            time.sleep(1)
-            ingest_file(path)
+        try:
+            if event.is_directory:
+                return
+            path = Path(event.src_path)
+            # Must be inside State/Property subfolder — skip files in state folder root
+            if is_supported(path) and len(path.relative_to(WATCH_DIR).parts) >= 3:
+                time.sleep(1)
+                ingest_file(path)
+        except Exception as e:
+            log.error(f"  [ERROR] on_created handler failed for {event.src_path}: {e}", exc_info=True)
 
     def on_moved(self, event):
-        if event.is_directory:
-            return
-        path = Path(event.dest_path)
-        if is_supported(path) and len(path.relative_to(WATCH_DIR).parts) >= 3:
-            time.sleep(1)
-            ingest_file(path)
+        try:
+            if event.is_directory:
+                return
+            path = Path(event.dest_path)
+            if is_supported(path) and len(path.relative_to(WATCH_DIR).parts) >= 3:
+                time.sleep(1)
+                ingest_file(path)
+        except Exception as e:
+            log.error(f"  [ERROR] on_moved handler failed for {event.dest_path}: {e}", exc_info=True)
 
 
 # ─── Startup Processing ───────────────────────────────────────────────────────
@@ -361,23 +380,54 @@ def _start_observer() -> Observer:
 def start_watcher():
     """
     Blocking mode — used by 'python main.py ingest'.
-    Runs until Ctrl+C.
+    Runs until Ctrl+C. Checks the observer's own internal thread is still
+    alive every 30s and restarts it if it died silently (e.g. an
+    unhandled exception in watchdog's dispatch thread) — without this, a
+    dead observer looks identical to a healthy one from the outside.
     """
     observer = _start_observer()
+    checks_since_restart = 0
     try:
         while True:
             time.sleep(2)
+            checks_since_restart += 1
+            if checks_since_restart >= 15:  # ~30s
+                checks_since_restart = 0
+                if not observer.is_alive():
+                    log.error("[WATCHER] Observer thread died — restarting it now.")
+                    observer = _start_observer()
     except KeyboardInterrupt:
         log.info("Shutting down watcher...")
         observer.stop()
     observer.join()
 
 
-def start_watcher_background():
+def start_watcher_background(supervise: bool = False):
     """
-    Non-blocking mode — used by the dashboard to run the watcher as a
-    background thread alongside Flask. Returns immediately; the observer
-    runs as a daemon and stops when the process exits.
+    Non-blocking mode. Returns the running Observer immediately.
+
+    If supervise=True, also starts a lightweight daemon thread that checks
+    every 30s whether the observer's internal thread is still alive and
+    restarts it if not. Callers that don't hold onto and monitor the
+    returned Observer themselves (e.g. mcp_server.py) should pass
+    supervise=True — otherwise a silently-dead observer is never noticed.
     """
     observer = _start_observer()
+
+    if supervise:
+        import threading
+
+        def _supervise():
+            nonlocal observer
+            while True:
+                time.sleep(30)
+                try:
+                    if not observer.is_alive():
+                        log.error("[WATCHER] Observer thread died — restarting it now.")
+                        observer = _start_observer()
+                except Exception as e:
+                    log.warning(f"[WATCHER] Supervisor check failed (continuing): {e}")
+
+        threading.Thread(target=_supervise, daemon=True).start()
+
     return observer

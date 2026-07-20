@@ -30,6 +30,7 @@ cached_analysis_is_stale / load_cached_analyses) has been dropped; there
 is no caching for v1.
 """
 
+import logging
 import time
 import base64
 
@@ -38,6 +39,8 @@ import pandas as pd
 import anthropic
 
 from . import phase3_deep_analysis
+
+log = logging.getLogger("vaulter.screening")
 
 FINAL_N_DEFAULT = 5
 
@@ -61,7 +64,7 @@ def probe_available_apis(api_key: str) -> dict:
     records which ones are actually enabled for this key. Called once at
     the start of a run -- individual listing enrichment then only calls
     whatever this probe found available, instead of assuming a fixed set."""
-    print("\nProbing which Google APIs are enabled for this key...")
+    log.info("Probing which Google APIs are enabled for this key...")
     results = {}
 
     try:
@@ -129,7 +132,7 @@ def probe_available_apis(api_key: str) -> dict:
 
     for api_name, available in results.items():
         status = "available" if available else "not enabled / unavailable"
-        print(f"  {api_name}: {status}")
+        log.info(f"  {api_name}: {status}")
 
     return results
 
@@ -158,9 +161,36 @@ def get_market_reference_point(market_name: str, api_key: str) -> dict:
     return result
 
 
+_VERDICT_TIER = {"pursue": 1, "conditional": 2, "pass": 3}
+
+
+def extract_verdict(recommendation_text: str) -> str | None:
+    """Looks for the controlled 'VERDICT: Pursue/Conditional/Pass' line the
+    Phase 3/4 prompts require. Returns 'pursue'/'conditional'/'pass', or
+    None if the model didn't produce a compliant line."""
+    for line in (recommendation_text or "").splitlines():
+        line = line.strip()
+        if line.upper().startswith("VERDICT:"):
+            token = line.split(":", 1)[1].strip().lower()
+            for word in _VERDICT_TIER:
+                if token.startswith(word):
+                    return word
+    return None
+
+
 def classify_tier(recommendation_text: str) -> int:
-    """Groups Phase 3's free-text recommendation into 3 tiers."""
-    text = recommendation_text.lower().strip()
+    """Groups a Phase 3/4 recommendation into 3 tiers. Prefers the explicit
+    VERDICT: line the prompt requires; only falls back to guessing from
+    free text if the model didn't produce one (e.g. an older cached
+    analysis, or non-compliant output)."""
+    verdict = extract_verdict(recommendation_text)
+    if verdict:
+        return _VERDICT_TIER[verdict]
+
+    log.warning("[classify_tier] no 'VERDICT:' line found -- falling back "
+                "to free-text guessing. This means the model didn't follow the "
+                "required format; the tier below may be unreliable.")
+    text = (recommendation_text or "").lower().strip()
     first_bullet = text.split("\n")[0] if text else ""
 
     if first_bullet.startswith("pass") or first_bullet.startswith("- pass"):
@@ -182,11 +212,11 @@ def select_finalists(top_listings: pd.DataFrame, analyses: dict, final_n: int = 
         scored.append((addr, tier, composite))
 
     if all(t == 3 for _, t, _ in scored):
-        print("\n" + "=" * 70)
-        print("WARNING: ALL listings in this batch were recommended 'Pass'")
-        print("by Phase 3. This entire batch may not be worth pursuing further.")
-        print("Review before spending Phase 4 API calls on these candidates.")
-        print("=" * 70 + "\n")
+        log.warning(
+            "ALL listings in this batch were recommended 'Pass' by Phase 3. "
+            "This entire batch may not be worth pursuing further. Review "
+            "before spending Phase 4 API calls on these candidates."
+        )
 
     scored.sort(key=lambda x: (x[1], -x[2]))
     return scored[:final_n]
@@ -394,49 +424,49 @@ def enrich_listing(row: pd.Series, api_key: str, available: dict) -> dict:
     result = {}
 
     if available.get("geocoding"):
-        print(f"    Geocoding market ({market_name})...")
+        log.info(f"    Geocoding market ({market_name})...")
         result["reference"] = get_market_reference_point(market_name, api_key)
         time.sleep(0.2)
     else:
         result["reference"] = {"status": "API_NOT_AVAILABLE", "lat": None, "lng": None, "label": None}
 
     if available.get("elevation"):
-        print(f"    Elevation...")
+        log.info(f"    Elevation...")
         result["elevation"] = google_elevation(lat, lng, api_key)
         time.sleep(0.2)
     else:
         result["elevation"] = {"status": "API_NOT_AVAILABLE", "max_diff_m": None}
 
     if available.get("places"):
-        print(f"    Places...")
+        log.info(f"    Places...")
         result["places"] = google_places_nearby(lat, lng, api_key)
         time.sleep(0.2)
     else:
         result["places"] = {"status": "API_NOT_AVAILABLE", "count": None, "top_places": []}
 
     if available.get("roads"):
-        print(f"    Roads...")
+        log.info(f"    Roads...")
         result["roads"] = google_roads_snap(lat, lng, api_key)
         time.sleep(0.2)
     else:
         result["roads"] = {"status": "API_NOT_AVAILABLE"}
 
     if available.get("static_maps"):
-        print(f"    Satellite image...")
+        log.info(f"    Satellite image...")
         result["satellite"] = google_static_satellite_image(lat, lng, api_key)
         time.sleep(0.2)
     else:
         result["satellite"] = {"status": "API_NOT_AVAILABLE", "image_bytes": None}
 
     if available.get("streetview"):
-        print(f"    Street View...")
+        log.info(f"    Street View...")
         result["streetview"] = google_streetview_check(lat, lng, api_key)
         time.sleep(0.2)
     else:
         result["streetview"] = {"status": "API_NOT_AVAILABLE", "image_bytes": None}
 
     if available.get("solar"):
-        print(f"    Solar potential...")
+        log.info(f"    Solar potential...")
         result["solar"] = google_solar_potential(lat, lng, api_key)
         time.sleep(0.2)
     else:
@@ -444,14 +474,14 @@ def enrich_listing(row: pd.Series, api_key: str, available: dict) -> dict:
 
     if available.get("distance_matrix") and result["reference"]["status"] == "OK":
         ref = result["reference"]
-        print(f"    Distance to {ref['label']}...")
+        log.info(f"    Distance to {ref['label']}...")
         result["distance_to_reference"] = google_distance_to_reference(lat, lng, ref["lat"], ref["lng"], api_key)
     else:
         result["distance_to_reference"] = {"status": "API_NOT_AVAILABLE", "distance_mi": None, "duration_min": None}
     result["reference_label"] = result["reference"].get("label") or "core market"
 
     if available.get("air_quality"):
-        print(f"    Air quality...")
+        log.info(f"    Air quality...")
         result["air_quality"] = google_air_quality(lat, lng, api_key)
         time.sleep(0.2)
     else:
@@ -459,7 +489,7 @@ def enrich_listing(row: pd.Series, api_key: str, available: dict) -> dict:
 
     if available.get("address_validation"):
         addr = row.get("Property Address", "")
-        print(f"    Address validation...")
+        log.info(f"    Address validation...")
         result["address_validation"] = google_address_validation(addr, api_key)
         time.sleep(0.2)
     else:
@@ -607,7 +637,12 @@ RISK_ASSESSMENT:
 - <another potential deal-killer, if one exists>
 
 FINAL_RECOMMENDATION:
-- <bullet>
+VERDICT: <Pursue, Conditional, or Pass -- exactly one of these three
+  words on its own line, nothing else. This is parsed by code, so it
+  must match one of "VERDICT: Pursue", "VERDICT: Conditional", or
+  "VERDICT: Pass" verbatim>
+- <bullet explaining the verdict, updated in light of the ground-truth
+  data above if it changes anything>
 
 REMAINING_DILIGENCE_ITEMS:
 - <specific action to take before an LOI>

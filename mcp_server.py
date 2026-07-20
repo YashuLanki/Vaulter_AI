@@ -5,16 +5,44 @@ Vaulter AI — MCP Server
 
 Single entry point that runs everything:
   - PDF watcher      (background thread)
-  - Scheduler        (background thread — emails every 6h, web scrapes, property intel daily)
-  - MCP server       (main thread — serves claude.ai requests)
+  - Scheduler        (background thread — email every 30min, web scrapes per
+                       source, property intel daily)
+  - MCP server       (main thread — serves Claude Desktop requests)
+
+Deployment model: each staff member runs their OWN full local instance of
+this project on their own computer (own ChromaDB, own Outlook auth, own
+copy of this server). Transport is stdio, launched directly by that
+person's own Claude Desktop app — nothing is exposed over the network,
+and nothing is shared between instances except whatever documents live in
+the shared OneDrive folder each person's ingestion pipeline also watches.
+This is a deliberate privacy boundary: a staff member's own email is only
+ever ingested into their own local database, never anyone else's.
+
+Because of this, there is no server-side auth to configure (no
+MCP_API_KEY, no ngrok) — the real access boundary is simply "is this your
+own computer, logged in as you, with Claude Desktop configured to launch
+your own copy of this process." claude.ai (the web app) CANNOT be used
+with this server — it runs in the cloud and can only reach a network
+address, never a process on your own machine. Claude Desktop or Claude
+Code (this can launch local subprocesses directly) are required.
 
 Start with:
   python main.py mcp
 
-Connect in claude.ai:
-  Settings → Connectors → Add custom connector
-  Name : Vaulter AI Property Intelligence
-  URL  : http://YOUR_NGROK_URL (from ngrok http 8765)
+Connect in Claude Desktop:
+  Settings → Developer → Edit Config → add an entry like:
+
+    {
+      "mcpServers": {
+        "vaulter-ai": {
+          "command": "python",
+          "args": ["/absolute/path/to/main.py", "mcp"]
+        }
+      }
+    }
+
+  Restart Claude Desktop after saving. See Claude Desktop's own docs for
+  the exact config file location on your OS (it differs Mac vs Windows).
 """
 
 import logging
@@ -105,11 +133,14 @@ def _resolve_costar_source(source_file: str, property_name: str = "", file_conte
 # ══════════════════════════════════════════════════════════════════
 
 def _start_watcher():
-    """Start the PDF watcher in a background thread."""
+    """Start the PDF watcher in a background thread. supervise=True because
+    nothing else here holds onto the returned Observer to monitor it — the
+    watcher.py-internal supervisor thread is what notices and restarts it
+    if watchdog's dispatch thread ever dies silently."""
     try:
         from ingestion.watcher import start_watcher_background
         log.info("[WATCHER] Starting PDF watcher...")
-        start_watcher_background()
+        start_watcher_background(supervise=True)
         log.info("[WATCHER] Running — watching data/watched_folder/")
     except Exception as e:
         log.warning(f"[WATCHER] Could not start: {e}")
@@ -556,107 +587,91 @@ tabs, per-listing analyst notes, and a direct Excel download) in a browser."""
     # ── FOUR-PHASE LISTING SCREENER ───────────────────────────────
 
     @mcp.tool()
-    def get_screening_rules(source_file: str = "CostarExport.xlsx") -> str:
+    def get_screening_rules(source_file: str = "CostarExport.xlsx", property_name: str = "") -> str:
         """
-        Run Stage 0 calibration only — returns the hard rules and scoring
-        dimensions Claude generated for the CoStar export, without running
-        the full screener. Use this to inspect and validate the rulebook
+        Preview the hard rules and scoring dimensions the screener will apply
+        to a CoStar export, without running the full 4-phase screening pipeline.
+        Use this to check the rulebook and confirm the file's columns line up
         before committing to a full screening run.
 
         Use when asked to:
-        - Show me what rules were generated
-        - What hard rules is the screener using
-        - Check or preview the screening criteria
-        - Are the rules good / do the rules make sense
+        - Show me what rules the screener uses
+        - What hard rules apply / check the screening criteria
+        - Are the rules good / do the rules make sense for this file
         """
         try:
-            from analysis.screener import calibrate_pipeline, GOOGLE_PLACES_API_KEY
-            from config import DATA_DIR, ANTHROPIC_API_KEY
+            from analysis.screening import config as screening_config
             import pandas as pd
 
-            search_paths = [
-                DATA_DIR / "processed" / "general" / source_file,
-                DATA_DIR / "general" / source_file,
-                DATA_DIR / source_file,
-                DATA_DIR / "processed" / source_file,
-                DATA_DIR / "watched_folder" / "unknown" / source_file,
-            ]
-            file_path = next((p for p in search_paths if p.exists()), None)
+            file_path = _resolve_costar_source(source_file, property_name=property_name)
             if not file_path:
-                general_dir = DATA_DIR / "general"
-                found = list(general_dir.iterdir()) if general_dir.exists() else []
                 return (
                     f"File not found: {source_file}\n"
-                    f"Searched: {[str(p) for p in search_paths]}\n"
-                    f"Files in data/general/: {[f.name for f in found]}"
+                    f"Searched data/watched_folder/ and data/processed/ "
+                    f"(recursively{f', filtered to a property matching \"{property_name}\"' if property_name else ''}).\n"
+                    f"Drop the CoStar export into the watched folder, or attach it to this "
+                    f"conversation and I can screen it directly."
                 )
 
             df = pd.read_excel(str(file_path))
             headers = list(df.columns)
-            rows = []
-            for _, row in df.iterrows():
-                parts = [str(v) if pd.notna(v) else '' for v in row.values]
-                rows.append(' | '.join(parts))
+            missing_cols = sorted({
+                r["column"] for r in screening_config.RULES
+                if r["column"] not in headers
+            })
 
-            portfolio = []
-            try:
-                from pipeline.property_scraper import load_properties
-                portfolio, _ = load_properties()
-            except Exception as e:
-                log.warning(f"[MCP] Could not load portfolio: {e}")
-
-            log.info(f"[MCP] get_screening_rules: {len(rows)} rows, {len(headers)} headers, {len(portfolio)} portfolio props, Places key {'SET' if GOOGLE_PLACES_API_KEY else 'NOT SET'}")
-
-            calibration = calibrate_pipeline(
-                rows, api_key=ANTHROPIC_API_KEY, headers=headers,
-                portfolio=portfolio, google_api_key=GOOGLE_PLACES_API_KEY,
-            )
-
-            hard_rules = calibration.get("hard_rules", [])
-            score_dims = calibration.get("scoring_dimensions", [])
-            fields     = calibration.get("data_fields_observed", [])
-            max_score  = sum(d.get("max_points", 2) for d in score_dims)
+            hard_rules = screening_config.RULES
+            compound_rules = screening_config.COMPOUND_RULES
 
             lines = [
-                f"Stage 0 Calibration — {source_file}",
-                f"{len(rows)} listings | {len(hard_rules)} hard rules | {len(score_dims)} scoring dimensions | max score {max_score}",
-                f"Fields observed: {', '.join(fields) if fields else 'not specified'}",
+                f"Screening Rulebook — {source_file}",
+                f"{len(df)} listings | {len(hard_rules)} hard rules | {len(compound_rules)} compound rule(s)",
                 "",
-                "═" * 55,
-                "  PORTFOLIO SITE PROFILE (Google Places)",
-                "═" * 55,
-                calibration.get("site_profile", "(not available)"),
-                "",
-                "═" * 55,
-                f"  HARD RULES ({len(hard_rules)}) — 2+ hits = eliminated",
-                "═" * 55,
             ]
+            if missing_cols:
+                lines += [
+                    f"⚠️  This file is missing {len(missing_cols)} column(s) the rules depend on: "
+                    f"{', '.join(missing_cols)}. Those rules will error when the full screener runs — "
+                    f"check the export's column headers match CoStar's standard names.",
+                    "",
+                ]
+
+            lines += ["═" * 55, f"  HARD RULES ({len(hard_rules)})", "═" * 55]
             for i, r in enumerate(hard_rules, 1):
-                lines.append(f"\n{i}. [{r.get('id','')}] {r.get('description','')}")
-                lines.append(f"   Match type : {r.get('match_type','')}")
-                lines.append(f"   Keywords   : {', '.join(r.get('keywords', []))}")
-                if r.get('conflict_keywords'):
-                    lines.append(f"   Conflict   : {', '.join(r['conflict_keywords'])}")
+                lines.append(f"\n{i}. [{r['id']}] {r['reason']}")
+                lines.append(f"   Column: {r['column']}  |  Type: {r['type']}  |  Action: {r['action']}")
 
-            lines += ["", "═" * 55, f"  SCORING DIMENSIONS ({len(score_dims)}) — max {max_score} pts", "═" * 55]
-            for i, d in enumerate(score_dims, 1):
-                lines.append(f"\n{i}. [{d.get('id','')}] {d.get('description','')} (max {d.get('max_points',2)} pts)")
-                lines.append(f"   High score : {', '.join(d.get('high_score_keywords', []))}")
-                lines.append(f"   Low score  : {', '.join(d.get('low_score_keywords', []))}")
+            lines += ["", "═" * 55, f"  COMPOUND RULES ({len(compound_rules)})", "═" * 55]
+            for i, r in enumerate(compound_rules, 1):
+                lines.append(f"\n{i}. [{r['id']}] {r['reason']} (triggers at {r['min_flags']}+ flags, action: {r['action']})")
 
-            lines += ["", "Paste back to Claude to review. If anything looks wrong, describe it and Claude will adjust before running the full screener."]
+            lines += [
+                "",
+                "═" * 55,
+                "  SCORING DIMENSIONS (Phase 2, applied to Phase 1 survivors)",
+                "═" * 55,
+                "\n1. Days On Market — percentile rank, fewer days scores higher",
+                "2. For Sale Price — percentile rank, lower price scores higher",
+                "3. Land use category fit (Secondary Type) — see analysis/screening/scoring_config.py",
+                "4. Developed-environment penalty — see analysis/screening/scoring_config.py",
+                "5. Flood risk severity — see analysis/screening/scoring_config.py",
+                "\nWeights are calculated dynamically per run, based on how complete each dimension's data is for this file.",
+                "",
+                "Use test_screener to see exactly which listings these rules eliminate or flag before running the full screen.",
+            ]
             return "\n".join(lines)
 
         except Exception as e:
             log.error(f"[MCP] get_screening_rules error: {e}", exc_info=True)
-            return f"Error running Stage 0: {e}"
+            return f"Couldn't preview the screening rules: {e}"
 
     @mcp.tool()
-    def test_screener(source_file: str = "CostarExport.xlsx", num_listings: int = 10) -> str:
+    def test_screener(source_file: str = "CostarExport.xlsx", property_name: str = "", num_listings: int = 10) -> str:
         """
-        Test the hard rules on a small sample of listings — shows exactly which
-        rules each listing hits and whether it passes or gets eliminated. Use this
-        to validate the rulebook before running the full screener on all listings.
+        Run the real Phase 1 hard-rule engine on a CoStar export and show the
+        first few listings' results — exactly which rules each one hit and
+        whether it passes, gets flagged, or gets eliminated. Use this to sanity
+        check the rulebook against real data before running the full screener.
 
         Use when asked to:
         - Test the rules on a few listings
@@ -666,89 +681,64 @@ tabs, per-listing analyst notes, and a direct Excel download) in a browser."""
 
         Args:
             source_file:  CoStar export filename (default: CostarExport.xlsx)
-            num_listings: How many listings to test (default: 10)
+            num_listings: How many listings to show (default: 10)
         """
         try:
-            from analysis.screener import (
-                calibrate_pipeline, stage1_hard_rules,
-                _get_address, _get_price_acres, GOOGLE_PLACES_API_KEY
-            )
-            from config import DATA_DIR, ANTHROPIC_API_KEY
+            from analysis.screening import phase1_rules
             import pandas as pd
 
-            search_paths = [
-                DATA_DIR / "processed" / "general" / source_file,
-                DATA_DIR / "general" / source_file,
-                DATA_DIR / source_file,
-                DATA_DIR / "processed" / source_file,
-                DATA_DIR / "watched_folder" / "unknown" / source_file,
-            ]
-            file_path = next((p for p in search_paths if p.exists()), None)
+            file_path = _resolve_costar_source(source_file, property_name=property_name)
             if not file_path:
                 return f"File not found: {source_file}"
 
             df = pd.read_excel(str(file_path))
-            headers = list(df.columns)
-            all_rows = []
-            for _, row in df.iterrows():
-                parts = [str(v) if pd.notna(v) else '' for v in row.values]
-                all_rows.append(' | '.join(parts))
+            missing_cols = sorted({
+                r["column"] for r in phase1_rules.config.RULES
+                if r["column"] not in df.columns
+            })
+            if missing_cols:
+                return (
+                    f"Can't test the rules — this file is missing required column(s): "
+                    f"{', '.join(missing_cols)}. Check the export's column headers."
+                )
 
-            # Load portfolio and run Stage 0
-            portfolio = []
-            try:
-                from pipeline.property_scraper import load_properties
-                portfolio, _ = load_properties()
-            except Exception:
-                pass
+            scored = phase1_rules.run_screener(df)
+            sample = scored.head(num_listings)
 
-            log.info(f"[MCP] test_screener: running Stage 0 to get rules...")
-            calibration = calibrate_pipeline(
-                all_rows, api_key=ANTHROPIC_API_KEY, headers=headers,
-                portfolio=portfolio, google_api_key=GOOGLE_PLACES_API_KEY,
-            )
-            hard_rules = calibration.get("hard_rules", [])
-
-            # Test on the first num_listings rows
-            sample = all_rows[:num_listings]
             lines = [
                 f"Hard Rule Test — {source_file}",
-                f"Testing first {len(sample)} listings against {len(hard_rules)} hard rules",
-                f"(2+ rule hits = eliminated)",
+                f"Showing first {len(sample)} of {len(scored)} listings",
                 "",
             ]
 
-            for i, row in enumerate(sample, 1):
-                address = _get_address(row)
-                price, acres, ppa = _get_price_acres(row)
-                eliminated, flags = stage1_hard_rules(row, hard_rules)
+            for i, row_d in enumerate(sample.to_dict("records"), 1):
+                address = row_d.get("Property Address") or f"Listing {i}"
+                price = row_d.get("For Sale Price")
+                acres = row_d.get("Land Area (AC)")
+                status = row_d["Screening_Status"]
+                icon = {"ELIMINATED": "❌", "FLAGGED": "🚩", "PASS": "✅"}.get(status, "•")
 
-                status = "❌ ELIMINATED" if eliminated else "✅ PASSES"
                 lines.append(f"{'─' * 50}")
                 lines.append(f"#{i} {address}")
-                if price:
-                    lines.append(f"   Price: ${price:,.0f}" + (f" | {acres} AC | ${ppa:,.0f}/AC" if acres and ppa else ""))
-                lines.append(f"   Result: {status} ({len(flags)} rule hit{'s' if len(flags) != 1 else ''})")
+                if pd.notna(price):
+                    lines.append(f"   Price: ${price:,.0f}" + (f" | {acres} AC" if pd.notna(acres) else ""))
+                lines.append(f"   Result: {icon} {status} ({row_d['Flag_Count']} flag{'s' if row_d['Flag_Count'] != 1 else ''})")
+                if row_d["Screening_Reasons"]:
+                    lines.append(f"   Reasons: {row_d['Screening_Reasons']}")
 
-                if flags:
-                    lines.append(f"   Rules hit:")
-                    for flag in flags:
-                        lines.append(f"     • {flag}")
-                else:
-                    lines.append(f"   No rules triggered — moves to scoring")
-
+            counts = scored["Screening_Status"].value_counts()
             lines += [
                 "",
-                f"Summary: {sum(1 for r in sample if stage1_hard_rules(r, hard_rules)[0])} eliminated, "
-                f"{sum(1 for r in sample if not stage1_hard_rules(r, hard_rules)[0])} pass to scoring",
+                f"Full file summary: {counts.get('ELIMINATED', 0)} eliminated, "
+                f"{counts.get('FLAGGED', 0)} flagged, {counts.get('PASS', 0)} pass clean.",
                 "",
-                "Paste back to Claude to review. If any listing was wrongly eliminated or wrongly passed, describe it.",
+                "If any listing was wrongly eliminated or wrongly passed, describe it and I can adjust the rules in analysis/screening/config.py.",
             ]
             return "\n".join(lines)
 
         except Exception as e:
             log.error(f"[MCP] test_screener error: {e}", exc_info=True)
-            return f"Error: {e}"
+            return f"Couldn't test the screener: {e}"
 
     @mcp.tool()
     def screen_listings(
@@ -915,7 +905,7 @@ tabs, per-listing analyst notes, and a direct Excel download) in a browser."""
 
         api_key = GOOGLE_PLACES_API_KEY.strip()
         if not api_key:
-            return "GOOGLE_PLACES_API_KEY not set. Add it to confidentials/..env and restart."
+            return "GOOGLE_PLACES_API_KEY not set. Add it to confidentials/.env and restart."
 
         return run_proximity_search(
             property_name=property_name,

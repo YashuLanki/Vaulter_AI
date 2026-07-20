@@ -28,15 +28,27 @@ import msal
 SCOPES = ["https://graph.microsoft.com/Mail.Read"]
 
 
-def get_access_token() -> str:
+def get_access_token(interactive: bool = False) -> str:
     """
-    Return a valid Microsoft Graph access token using device code flow.
-    Caches the token in outlook_token.json for future runs.
+    Return a valid Microsoft Graph access token, refreshing silently from
+    the cache in outlook_token.json when possible.
+
+    interactive=False (the default -- used by every automated caller: the
+    scheduler thread, the MCP server, `python main.py email`) -- if there's
+    no valid cached token, raises a clear RuntimeError instead of launching
+    the device code flow. That flow prints a sign-in code to stdout and
+    blocks indefinitely waiting for a human to complete browser sign-in --
+    in a background thread with nobody watching, this hangs forever, and
+    printing to stdout risks corrupting the MCP stdio transport to claude.ai.
+
+    interactive=True (used only by `python main.py auth`, a human running
+    a terminal command on purpose) -- launches the device code flow as
+    before.
     """
     if not OUTLOOK_CLIENT_ID:
         raise ValueError(
             "OUTLOOK_CLIENT_ID not set.\n"
-            "Add it to your ..env file:\n"
+            "Add it to your .env file:\n"
             "  OUTLOOK_CLIENT_ID=your-application-id\n"
         )
 
@@ -60,7 +72,16 @@ def get_access_token() -> str:
             _save_cache(cache)
             return result["access_token"]
 
-    # Launch device code flow
+    if not interactive:
+        raise RuntimeError(
+            "Outlook needs re-authorization — the cached token is missing, "
+            "expired, or revoked, and this is an automated (non-interactive) "
+            "call so it can't launch a sign-in prompt. Run `python main.py auth` "
+            "to re-authorize; email ingestion will resume automatically after that."
+        )
+
+    # Launch device code flow — only reached when interactive=True (a human
+    # running `python main.py auth` at a terminal on purpose).
     flow = app.initiate_device_flow(scopes=SCOPES)
     if "user_code" not in flow:
         raise RuntimeError(f"Device flow failed: {flow.get('error_description')}")
@@ -86,11 +107,11 @@ def get_access_token() -> str:
 
 def run_auth_flow() -> str:
     """
-    Public entry point called by main.py auth command.
-    Alias for get_access_token() — initiates device code flow,
-    blocks until the user signs in, and saves the token to disk.
+    Public entry point called by main.py auth command — the one place
+    this is run by a human at a terminal, so it's the only caller that
+    opts into the interactive device code flow.
     """
-    return get_access_token()
+    return get_access_token(interactive=True)
 
 
 def _save_cache(cache: msal.SerializableTokenCache):

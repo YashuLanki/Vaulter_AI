@@ -7,7 +7,7 @@ All paths, settings, and constants live here.
 Cross-platform: automatically detects Windows or Mac and sets the correct paths.
 To adapt this project to a new machine, only this file needs to be updated.
 
-Secrets (..env and outlook_token.json) are stored in:
+Secrets (.env and outlook_token.json) are stored in:
   Windows : C:/Users/<YourName>/Vaulter AI/confidentials/
   Mac     : <project_root>/confidentials/
 
@@ -142,7 +142,7 @@ WEB_SOURCES = [
 SCHEDULER_TIMEZONE = "America/Phoenix"
 
 # ─── Outlook / Microsoft Graph ────────────────────────────────────
-# Add to confidentials/..env:
+# Add to confidentials/.env:
 #   OUTLOOK_CLIENT_ID=your-application-id
 #   OUTLOOK_TENANT_ID=your-directory-id
 #   OUTLOOK_CLIENT_SECRET=your-client-secret
@@ -156,19 +156,19 @@ OUTLOOK_SENDER_WHITELIST = []
 OUTLOOK_LOOKBACK_DAYS = 30
 
 # ─── Anthropic / Claude API ───────────────────────────────────────
-# Add to confidentials/..env:
+# Add to confidentials/.env:
 #   ANTHROPIC_API_KEY=sk-ant-...
 
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
 
 # ─── Google Places API ────────────────────────────────────────────
-# Add to confidentials/..env:
+# Add to confidentials/.env:
 #   GOOGLE_PLACES_API_KEY=AIzaSy...
 
 GOOGLE_PLACES_API_KEY = os.getenv("GOOGLE_PLACES_API_KEY", "")
 
 # ─── Google Maps Platform (CoStar Screener — Phase 4 verification) ────
-# Add to confidentials/..env:
+# Add to confidentials/.env:
 #   GOOGLE_MAPS_API_KEY=AIzaSy...
 # Needs Elevation, Places, Roads, Geocoding, Distance Matrix, Static Maps,
 # Street View Static, Solar, Address Validation, and Air Quality enabled
@@ -182,14 +182,13 @@ GOOGLE_MAPS_API_KEY = os.getenv("GOOGLE_MAPS_API_KEY", "")
 # Stage 3 — MCP Server
 # ══════════════════════════════════════════════════════════════════
 
-# Secret key that Claude.ai must send with every MCP request.
-# Set this in confidentials/..env:
-#   MCP_API_KEY=vaulter_mcp_your_random_string_here
-#
-# Generate one with: python -c "import secrets; print(secrets.token_hex(24))"
+# No API key here on purpose: each staff member runs their own fully-local
+# instance of this server, launched directly by their own Claude Desktop
+# via stdio (see mcp_server.py's header). Nothing is exposed over a
+# network, so there's no request to gate with a shared secret — the real
+# access boundary is simply "is this your own computer, logged in as you."
 
-MCP_API_KEY = os.getenv("MCP_API_KEY", "")
-MCP_PORT    = int(os.getenv("MCP_PORT", "8765"))
+MCP_PORT = int(os.getenv("MCP_PORT", "8765"))
 
 # ─── Proximity Search ────────────────────────────────────────────
 # Categories and settings for the proximity_search MCP tool.

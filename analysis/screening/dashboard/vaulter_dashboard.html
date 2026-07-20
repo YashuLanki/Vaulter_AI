@@ -437,7 +437,29 @@ async function onMarketChange() {
   statusEl.textContent = '';
 }
 
+const VERDICT_TIER = { pursue: 1, conditional: 2, pass: 3 };
+
+function extractVerdict(text) {
+  const lines = String(text || '').split('\n');
+  for (const raw of lines) {
+    const line = raw.trim();
+    if (line.toUpperCase().startsWith('VERDICT:')) {
+      const token = line.slice(line.indexOf(':') + 1).trim().toLowerCase();
+      for (const word of Object.keys(VERDICT_TIER)) {
+        if (token.startsWith(word)) return word;
+      }
+    }
+  }
+  return null;
+}
+
+// Prefers the controlled "VERDICT: Pursue/Conditional/Pass" line the
+// Phase 3/4 prompts require. Falls back to guessing from free text only
+// for older workbooks generated before that format was required.
 function tierFromText(text) {
+  const verdict = extractVerdict(text);
+  if (verdict) return VERDICT_TIER[verdict];
+
   const t = (text || '').toLowerCase().trim();
   const firstLine = (t.split('\n')[0] || '').trim();
   if (firstLine.startsWith('pass') || firstLine.startsWith('- pass')) return 3;

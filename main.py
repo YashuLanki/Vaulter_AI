@@ -9,6 +9,9 @@ Usage:
   python main.py ingest                             — start the PDF watcher (Stage 1)
   python main.py stats                              — show database statistics
   python main.py query <text>                       — search the document database
+  python main.py reindex                            — re-embed all existing documents
+                                                       with the current embedding model
+                                                       (run once after upgrading embeddings)
 
   python main.py scrape                             — scrape all web sources (Stage 2)
   python main.py scrape "CBRE Market Reports"       — scrape one source by name
@@ -187,6 +190,28 @@ def cmd_query(question: str):
         print("-" * 50)
 
 
+def cmd_reindex():
+    """
+    Re-embeds every chunk already in the database with the current
+    embedding function. Run this once after upgrading to real semantic
+    embeddings (all-MiniLM-L6-v2) -- otherwise documents ingested before
+    the upgrade keep their old, non-semantic embeddings and won't benefit
+    from better search until this runs. Safe to run more than once, and
+    safe to run while the watcher/scheduler are active.
+    """
+    from ingestion.embedder import reindex_all, get_stats
+
+    total = get_stats()["total_chunks"]
+    if total == 0:
+        print("Database is empty — nothing to reindex.")
+        return
+
+    print(f"Reindexing {total} chunks with the current embedding function...")
+    print("(This may take a few minutes the first time, while the model loads.)")
+    result = reindex_all()
+    print(f"Done — reindexed {result['reembedded']}/{result['total']} chunks.")
+
+
 # ══════════════════════════════════════════════════════════════════
 # Stage 2 — Web & Email Pipeline
 # ══════════════════════════════════════════════════════════════════
@@ -251,22 +276,17 @@ def cmd_schedule():
 # ══════════════════════════════════════════════════════════════════
 
 def cmd_mcp(port: int = None):
-    from config import MCP_PORT, MCP_API_KEY
+    from config import MCP_PORT
     run_port = port or MCP_PORT
-
-    if not MCP_API_KEY:
-        log.warning("=" * 60)
-        log.warning("  WARNING: MCP_API_KEY is not set in your ..env file.")
-        log.warning("  Your MCP server has no authentication.")
-        log.warning("  Generate a key: python -c \"import secrets; print(secrets.token_hex(24))\"")
-        log.warning("  Then add MCP_API_KEY=<key> to confidentials/..env")
-        log.warning("=" * 60)
 
     log.info("=" * 60)
     log.info("  Vaulter AI — MCP Server")
-    log.info(f"  Transport  : stdio (Claude Desktop launches this process directly)")
-    log.info(f"  Auth       : {'MCP_API_KEY set' if MCP_API_KEY else 'DISABLED — set MCP_API_KEY in ..env'}")
-    log.info("  Connect via claude.ai → Settings → Connectors")
+    log.info(f"  Transport  : stdio (this machine's own Claude Desktop launches this process directly)")
+    log.info(f"  Access     : local only — whoever is logged into this computer with")
+    log.info(f"               Claude Desktop configured to run it. Nothing is exposed")
+    log.info(f"               over the network, so there is no separate key/password.")
+    log.info("  Connect via Claude Desktop → Settings → Developer → Edit Config")
+    log.info("  (add this server's command/args — see mcp_server.py header for the exact entry)")
     log.info("  Press Ctrl+C to stop.")
     log.info("=" * 60)
 
@@ -296,6 +316,9 @@ if __name__ == "__main__":
             print("Usage: python main.py query <your question here>")
         else:
             cmd_query(" ".join(args[1:]))
+
+    elif args[0] == "reindex":
+        cmd_reindex()
 
     elif args[0] == "scrape":
         target = args[1] if len(args) > 1 else None

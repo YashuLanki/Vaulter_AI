@@ -20,9 +20,13 @@ Dimension weights are also dynamic: calculated from how complete
 (non-null) each dimension's underlying data actually is for this export.
 """
 
+import logging
+
 import pandas as pd
 
 from . import scoring_config
+
+log = logging.getLogger("vaulter.screening")
 
 
 def percentile_score(series: pd.Series, higher_is_better: bool = False) -> pd.Series:
@@ -45,7 +49,7 @@ def score_land_use_category(df: pd.DataFrame) -> pd.Series:
         elif val in mapping:
             scores.append(mapping[val])
         else:
-            print(f"  WARNING: '{val}' not in scoring_config secondary_type_scores, using default {default}")
+            log.warning(f"  '{val}' not in scoring_config secondary_type_scores, using default {default}")
             scores.append(default)
     return pd.Series(scores, index=df.index)
 
@@ -67,7 +71,7 @@ def score_developed_environment(df: pd.DataFrame) -> pd.Series:
             if tag in mapping:
                 penalties.append(mapping[tag])
             else:
-                print(f"  WARNING: tag '{tag}' not in scoring_config land_use_penalty_tags, using default {default_penalty}")
+                log.warning(f"  tag '{tag}' not in scoring_config land_use_penalty_tags, using default {default_penalty}")
                 penalties.append(default_penalty)
         avg_penalty = sum(penalties) / len(penalties)
         scores.append(100 - avg_penalty)
@@ -84,7 +88,7 @@ def score_flood_risk(df: pd.DataFrame) -> pd.Series:
         elif val in mapping:
             scores.append(mapping[val])
         else:
-            print(f"  WARNING: '{val}' not in scoring_config flood_risk_scores, using default {default}")
+            log.warning(f"  '{val}' not in scoring_config flood_risk_scores, using default {default}")
             scores.append(default)
     return pd.Series(scores, index=df.index)
 

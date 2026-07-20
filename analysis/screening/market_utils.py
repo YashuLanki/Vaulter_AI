@@ -8,9 +8,12 @@ detect_market() always reads the CoStar export's own "Market Name" column
 export without manual editing.
 """
 
+import logging
 import re
 
 import pandas as pd
+
+log = logging.getLogger("vaulter.screening")
 
 
 def detect_market(df: pd.DataFrame) -> str:
@@ -22,8 +25,8 @@ def detect_market(df: pd.DataFrame) -> str:
     if len(values) == 0:
         return "Unknown Market"
     if len(values) > 1:
-        print(f"WARNING: CoStar export contains multiple Market Name values: {list(values)}. "
-              f"Using the first one for tagging: {values[0]}")
+        log.warning(f"CoStar export contains multiple Market Name values: {list(values)}. "
+                    f"Using the first one for tagging: {values[0]}")
     return str(values[0])
 
 

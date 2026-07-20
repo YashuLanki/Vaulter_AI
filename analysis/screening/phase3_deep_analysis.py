@@ -107,6 +107,15 @@ bullet should carry real information -- specific numbers, zoning codes,
 dollar amounts, timeframes -- not vague filler. Do not add any other
 headers or preamble.
 
+Under RECOMMENDATION specifically, the FIRST line must be exactly one of
+the following three lines, with no other text on that line:
+VERDICT: Pursue
+VERDICT: Conditional
+VERDICT: Pass
+Choose exactly one. This line is parsed by code to sort listings, so it
+must match one of those three lines verbatim -- do not paraphrase it or
+add extra words. Follow it with your bullets explaining the verdict.
+
 STRENGTHS_AND_RISKS:
 - <bullet>
 - <bullet>
@@ -116,7 +125,8 @@ ENTITLEMENT_RISK:
 - <bullet>
 
 RECOMMENDATION:
-- <bullet>
+VERDICT: <Pursue, Conditional, or Pass>
+- <bullet explaining the verdict>
 - <bullet>
 
 MOIC_FIT:

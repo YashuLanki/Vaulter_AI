@@ -8,9 +8,13 @@ and Phase 2's ranking module can call it. Contains NO hardcoded column names
 or thresholds -- every rule is read generically from analysis/screening/config.py.
 """
 
+import logging
+
 import pandas as pd
 
 from . import config
+
+log = logging.getLogger("vaulter.screening")
 
 
 def compute_dynamic_threshold(series: pd.Series) -> float:
@@ -55,7 +59,7 @@ def evaluate_rule(df: pd.DataFrame, rule: dict) -> pd.Series:
 
     elif rtype == "dynamic_iqr_upper":
         threshold = compute_dynamic_threshold(col.dropna())
-        print(f"  [{rule['id']}] dynamic threshold = {threshold:.1f}")
+        log.info(f"  [{rule['id']}] dynamic threshold = {threshold:.1f}")
         return col > threshold
 
     else:
@@ -67,11 +71,11 @@ def run_screener(df: pd.DataFrame) -> pd.DataFrame:
     eliminate_reasons = [[] for _ in range(len(df))]
     flag_reasons = [[] for _ in range(len(df))]
 
-    print("Applying rules:")
+    log.info("Applying rules:")
     for rule in config.RULES:
         triggered = evaluate_rule(df, rule)
         count = int(triggered.sum())
-        print(f"  [{rule['id']}] triggered on {count} listings -> {rule['action']}")
+        log.info(f"  [{rule['id']}] triggered on {count} listings -> {rule['action']}")
 
         for idx in df.index[triggered]:
             pos = df.index.get_loc(idx)

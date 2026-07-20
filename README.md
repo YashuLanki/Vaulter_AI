@@ -109,10 +109,13 @@ vaulter-ai/
 │
 ├── analysis/                  # Stage 3 — RAG Engine
 │   ├── __init__.py
-│   ├── rag_engine.py          # ChromaDB retrieval and context assembly
-│   ├── analyzer.py            # Claude API calls — summaries, risk flags, Q&A
-│   ├── prompts.py             # All Claude prompts in one place
-│   └── screening/             # CoStar Listing Screener (4-phase pipeline)
+│   ├── rag_engine.py          # ChromaDB retrieval and context assembly — no Claude
+│   │                          # calls here; most MCP tools return this raw context
+│   │                          # directly and let the requesting Claude Desktop session
+│   │                          # do the reasoning (covered by its own Pro/Team plan)
+│   └── screening/             # CoStar Listing Screener (4-phase pipeline) — the ONLY
+│       │                      # part of this project that makes its own direct Claude
+│       │                      # API calls, so the only part needing Console credits
 │       ├── config.py                  # Hard rules + output columns
 │       ├── scoring_config.py          # Approved scoring map (land use / flood / etc.)
 │       ├── phase1_rules.py            # Phase 1 — hard rule engine
@@ -126,7 +129,7 @@ vaulter-ai/
 │       └── dashboard/
 │           └── vaulter_dashboard.html # Interactive Pursue/Scrutinize/Pass dashboard
 │
-├── mcp_server.py              # Stage 3 — MCP server (connects everything to claude.ai)
+├── mcp_server.py              # Stage 3 — MCP server (each user's own local Claude Desktop)
 │
 ├── speech/                    # Stage 4 — Speech-to-Knowledge (planned)
 │   └── __init__.py
@@ -201,13 +204,10 @@ OUTLOOK_CLIENT_ID=your-application-id
 OUTLOOK_TENANT_ID=your-directory-id
 OUTLOOK_CLIENT_SECRET=your-client-secret
 ANTHROPIC_API_KEY=sk-ant-your-key-here
-MCP_API_KEY=your-random-secret-key-here
 ```
 
-Generate a secure MCP key:
-```bash
-python -c "import secrets; print(secrets.token_hex(24))"
-```
+Each staff member sets up their OWN `confidentials/.env` with their OWN Outlook
+credentials — this is what keeps each person's email private to their own instance.
 
 To get Outlook credentials:
 1. Go to portal.azure.com → App registrations → New registration
@@ -226,12 +226,25 @@ python main.py auth
 Export the Vaulter Project Master from Smartsheet (PDF, CSV, or Excel) and drop it
 into `data/project_master/`.
 
-### 9. Connect to claude.ai
-1. Start the MCP server: `python main.py mcp`
-2. Expose it via ngrok: `ngrok http 8765`
-3. In claude.ai → Settings → Connectors → Add custom connector
-4. Enter the ngrok URL and your MCP_API_KEY
-5. Name it: **Vaulter AI Property Intelligence**
+### 9. Connect to Claude Desktop
+Each staff member connects their own Claude Desktop app to their own local server —
+this only works with Claude Desktop (or Claude Code), not the claude.ai website,
+since a web app can't launch a process on your own computer.
+
+1. Open Claude Desktop → Settings → Developer → Edit Config
+2. Add an entry to `mcpServers`:
+   ```json
+   {
+     "mcpServers": {
+       "vaulter-ai": {
+         "command": "python",
+         "args": ["/absolute/path/to/main.py", "mcp"]
+       }
+     }
+   }
+   ```
+3. Restart Claude Desktop. No ngrok, no API key, no network exposure needed —
+   each instance is local-only by design.
 
 ---
 
@@ -267,8 +280,12 @@ python main.py mcp 9000                            # start on custom port
 
 ## Security Notes
 
-- The MCP server requires `MCP_API_KEY` to be set — Claude.ai sends this key with every request
-- Use ngrok to expose the server; never open the port directly on your router
+- Each instance runs locally only — stdio transport, launched directly by that
+  person's own Claude Desktop app. Nothing is exposed over the network, so
+  there's no port to open, no ngrok, and no shared API key to manage
+- Each staff member authenticates their OWN Outlook account into their OWN
+  local database — this is what keeps one person's email private from
+  everyone else's Claude session, not an access-control check
 - The `confidentials/` folder is gitignored — never commit it
 - Anthropic's Team plan does not train on your content by default
 

@@ -6,6 +6,7 @@ pdfplumber          # PDF text and table extraction
 pytesseract         # Python wrapper for Tesseract OCR
 pdf2image           # Convert PDF pages to images for OCR
 chromadb>=0.5.20        # Vector database — 0.5.20+ fixes RustBindingsAPI concurrent access bug
+sentence-transformers   # Real semantic embeddings (all-MiniLM-L6-v2) for RAG search quality
 numpy               # Numerical computing (used for embeddings)
 watchdog            # File system monitoring for watched_folder
 openpyxl            # Excel .xlsx file reading (Stage 1 + email attachments)
@@ -20,7 +21,7 @@ msal                # Microsoft Authentication Library (Outlook OAuth)
 apscheduler         # Background scheduler for automated jobs
 mammoth             # Extract text from Word (.docx) email attachments
 python-pptx         # Extract text from PowerPoint (.pptx) email attachments
-python-dotenv       # Load credentials from ..env file
+python-dotenv       # Load credentials from .env file
 Pillow              # Image handling for OCR on image email attachments
 
 # ── Stage 3: Claude Analysis + MCP Server ─────────────────────────
