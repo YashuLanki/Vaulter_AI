@@ -165,7 +165,7 @@ def _start_scheduler():
         from apscheduler.schedulers.background import BackgroundScheduler
         from apscheduler.triggers.cron import CronTrigger
         from apscheduler.triggers.interval import IntervalTrigger
-        from config import WEB_SOURCES, SCHEDULER_TIMEZONE
+        from config import SCHEDULER_TIMEZONE, RUN_SCHEDULED_SCRAPING
 
         scheduler = BackgroundScheduler(
             timezone=SCHEDULER_TIMEZONE,
@@ -177,20 +177,36 @@ def _start_scheduler():
         )
 
         # ── Web scraping — each source on its own frequency ───────
-        for source in WEB_SOURCES:
-            def _scrape(name=source["name"]):
-                try:
-                    from pipeline.web_scraper import scrape_all
-                    scrape_all(target_name=name)
-                except Exception as ex:
-                    log.warning(f"[SCHEDULER] Scrape failed ({name}): {ex}")
-            scheduler.add_job(
-                _scrape,
-                trigger=IntervalTrigger(hours=source["frequency_hours"]),
-                id=f"scrape_{source['name'].replace(' ', '_')}",
-                next_run_time=_datetime.datetime.now() + FIRST_RUN_DELAY,
-                replace_existing=True,
-            )
+        # Gated behind RUN_SCHEDULED_SCRAPING: web/property scraping hits
+        # the same public pages regardless of who runs it, so only one
+        # designated machine on the team needs this on (see config.py).
+        # Email is NOT gated -- it's correctly per-person, never duplicated.
+        if RUN_SCHEDULED_SCRAPING:
+            # Sources are loaded fresh from pipeline.web_scraper.load_web_sources()
+            # (not the raw config.WEB_SOURCES constant) so a CSV override in
+            # data/web_sources/ is scheduled correctly -- previously the
+            # scheduler always used config.WEB_SOURCES while scrape_all()
+            # itself preferred a CSV if present, so any CSV-only source was
+            # never scheduled, and any config-only source (when a CSV
+            # existed) silently no-op'd every single time it fired.
+            from pipeline.web_scraper import load_web_sources
+            sources, source_label = load_web_sources()
+            log.info(f"[SCHEDULER] Web sources: {source_label} ({len(sources)} sources)")
+
+            for source in sources:
+                def _scrape(name=source["name"]):
+                    try:
+                        from pipeline.web_scraper import scrape_all
+                        scrape_all(target_name=name)
+                    except Exception as ex:
+                        log.warning(f"[SCHEDULER] Scrape failed ({name}): {ex}")
+                scheduler.add_job(
+                    _scrape,
+                    trigger=IntervalTrigger(hours=source["frequency_hours"]),
+                    id=f"scrape_{source['name'].replace(' ', '_')}",
+                    next_run_time=_datetime.datetime.now() + FIRST_RUN_DELAY,
+                    replace_existing=True,
+                )
 
         # ── Email — every 30 minutes ───────────────────────────────
         def _email():
@@ -209,22 +225,27 @@ def _start_scheduler():
         )
 
         # ── Property intelligence — daily at 6 AM ─────────────────
-        def _property_scrape():
-            try:
-                from pipeline.property_scraper import scrape_all_properties
-                scrape_all_properties()
-            except Exception as ex:
-                log.warning(f"[SCHEDULER] Property scrape failed: {ex}")
+        if RUN_SCHEDULED_SCRAPING:
+            def _property_scrape():
+                try:
+                    from pipeline.property_scraper import scrape_all_properties
+                    scrape_all_properties()
+                except Exception as ex:
+                    log.warning(f"[SCHEDULER] Property scrape failed: {ex}")
 
-        scheduler.add_job(
-            _property_scrape,
-            trigger=CronTrigger(hour=6, minute=0),
-            id="property_scrape",
-            replace_existing=True,
-        )
+            scheduler.add_job(
+                _property_scrape,
+                trigger=CronTrigger(hour=6, minute=0),
+                id="property_scrape",
+                replace_existing=True,
+            )
 
         scheduler.start()
-        log.info("[SCHEDULER] Running — emails every 30min, web scrapes per source, property intel daily 6am")
+        if RUN_SCHEDULED_SCRAPING:
+            log.info("[SCHEDULER] Running — emails every 30min, web scrapes per source, property intel daily 6am")
+        else:
+            log.info("[SCHEDULER] Running — emails every 30min. Web/property scraping is OFF on this "
+                      "machine (RUN_SCHEDULED_SCRAPING=false) -- another team machine handles that.")
 
     except Exception as e:
         log.warning(f"[SCHEDULER] Could not start scheduler: {e}")
@@ -605,10 +626,11 @@ tabs, per-listing analyst notes, and a direct Excel download) in a browser."""
 
             file_path = _resolve_costar_source(source_file, property_name=property_name)
             if not file_path:
+                property_clause = f', filtered to a property matching "{property_name}"' if property_name else ""
                 return (
                     f"File not found: {source_file}\n"
                     f"Searched data/watched_folder/ and data/processed/ "
-                    f"(recursively{f', filtered to a property matching \"{property_name}\"' if property_name else ''}).\n"
+                    f"(recursively{property_clause}).\n"
                     f"Drop the CoStar export into the watched folder, or attach it to this "
                     f"conversation and I can screen it directly."
                 )
@@ -745,7 +767,8 @@ tabs, per-listing analyst notes, and a direct Excel download) in a browser."""
         source_file: str = "CostarExport.xlsx",
         property_name: str = "",
         file_content_b64: str = "",
-        top_n: int = 10,
+        top_n: int = 15,
+        include_low_value_apis: bool = False,
     ) -> str:
         """
         Run the four-phase CoStar listing screening pipeline on a CoStar
@@ -766,6 +789,9 @@ tabs, per-listing analyst notes, and a direct Excel download) in a browser."""
           key is configured) runs real-world ground-truth verification
           (elevation, places, roads, satellite/street view imagery, distance
           to market, etc.) and a final multimodal Claude verdict per finalist.
+          Air Quality and Solar checks are skipped by default (both are low
+          value for raw vacant land) — pass include_low_value_apis=true to
+          include them anyway.
 
         There are three ways to supply the CoStar file:
           1. It's already in the system (ingested via email or the folder
@@ -792,7 +818,10 @@ tabs, per-listing analyst notes, and a direct Excel download) in a browser."""
                                already-ingested file (e.g. "Mesa Del Sol")
             file_content_b64: Optional base64-encoded file content, if the user
                                pasted/attached the file directly into the conversation
-            top_n:             Number of top-ranked listings to carry into Phase 3/4 (default: 10)
+            top_n:             Number of top-ranked listings to carry into Phase 3 (default: 15);
+                               Phase 4 then selects its 10 strongest finalists from those
+            include_low_value_apis: Set true to also run Air Quality and Solar checks in
+                               Phase 4 (default: false — both add little value for vacant land)
         """
         try:
             from analysis.screening.pipeline import run_full_screening
@@ -823,10 +852,16 @@ tabs, per-listing analyst notes, and a direct Excel download) in a browser."""
                 anthropic_api_key=ANTHROPIC_API_KEY,
                 google_api_key=GOOGLE_MAPS_API_KEY or None,
                 top_n=top_n,
+                include_low_value_apis=include_low_value_apis,
             )
 
+            if result.get("cached"):
+                header = f"SCREENING COMPLETE — {result['market']} (reused a previous team screening result from {result.get('cached_from_timestamp', 'earlier')} — no new API calls made)"
+            else:
+                header = f"SCREENING COMPLETE — {result['market']}"
+
             lines = [
-                f"SCREENING COMPLETE — {result['market']}",
+                header,
                 "=" * 60,
                 f"Total listings screened : {result['total_screened']}",
                 f"Phase 1 survivors        : {result['phase1_survivors']}",
@@ -869,9 +904,10 @@ tabs, per-listing analyst notes, and a direct Excel download) in a browser."""
         import webbrowser
         try:
             from analysis.screening.dashboard_server import start_dashboard_server
+            from config import SCREENING_OUTPUT_DIR
 
             project_root = Path(__file__).parent
-            url = start_dashboard_server(project_root)
+            url = start_dashboard_server(project_root, SCREENING_OUTPUT_DIR)
             webbrowser.open(url)
             return f"Opened the screening dashboard at {url}"
         except Exception as e:

@@ -133,12 +133,20 @@ subprocesses, no re-running upstream phases):
    verdict. Silently skips the Google enrichment step (not the whole phase) if
    `GOOGLE_MAPS_API_KEY` is unset — Phases 1-3 and finalist selection always run.
 
-`workbook_builder.py` merges all 4 phases into one combined `.xlsx` (written to
-`data/output/screening/`, tracked in a `manifest.json` in the same folder).
-`dashboard_server.py` serves `dashboard/vaulter_dashboard.html`, a local
-Pursue/Scrutinize/Pass viewer opened via the `open_screening_dashboard` MCP tool.
-`config.py` (hard rules + output columns) and `scoring_config.py` (approved scoring maps)
-inside this subpackage are screening-specific and separate from the root `config.py`.
+`workbook_builder.py` merges all 4 phases into one combined `.xlsx`, tracked in a
+`manifest.json` in the same folder. Unlike everything else in this project,
+`SCREENING_OUTPUT_DIR` (root `config.py`) is deliberately **shared** — it lives under
+`SHARED_DIR`, auto-detected as the team's `OneDrive - Vaulter LLC` folder — so one
+person's screening run is visible to the whole team instead of sitting only on their
+own machine. `pipeline.py::run_full_screening()` hashes the input file's content and
+checks the shared manifest before running Phase 3/4 — if this exact file was already
+screened at the same `top_n`, it returns that cached result instead of re-paying for
+Claude/Google Maps calls. `dashboard_server.py` serves `dashboard/vaulter_dashboard.html`
+(a local Pursue/Scrutinize/Pass viewer opened via `open_screening_dashboard`) with a
+custom `translate_path` so it can read the shared output even though it lives outside
+the project root. `config.py` (hard rules + output columns) and `scoring_config.py`
+(approved scoring maps) inside this subpackage are screening-specific and separate
+from the root `config.py`.
 
 A CoStar file reaches `screen_listings` one of three ways (see
 `mcp_server.py::_resolve_costar_source`): already ingested/dropped into

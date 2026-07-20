@@ -32,6 +32,48 @@ SECRETS_DIR.mkdir(parents=True, exist_ok=True)
 
 load_dotenv(SECRETS_DIR / ".env", override=True)
 
+# ─── Shared Folder (OneDrive) ─────────────────────────────────────
+# Each staff member runs their own fully-local Vaulter instance (see
+# mcp_server.py header), but a few things are meant to be genuinely shared
+# across the whole team via the company OneDrive -- e.g. CoStar screening
+# results, so one person's screening run benefits everyone instead of each
+# person re-paying for it. This does NOT include the private stuff
+# (Outlook auth, someone's own email) -- those stay local on purpose.
+#
+# Auto-detects "OneDrive - Vaulter LLC" (the standard OneDrive-for-Business
+# naming -- same folder name for everyone, different C:\Users\<name>\ per
+# person). Override with VAULTER_SHARED_DIR in confidentials/.env if your
+# OneDrive folder is named or located differently.
+
+def _detect_shared_dir() -> Path:
+    override = os.getenv("VAULTER_SHARED_DIR", "").strip()
+    if override:
+        return Path(override)
+
+    onedrive_folder_name = "OneDrive - Vaulter LLC"
+    candidates = []
+    if sys.platform == "win32":
+        username = os.environ.get("USERNAME", "YourName")
+        candidates.append(Path(r"C:\Users") / username / onedrive_folder_name)
+    else:
+        home = Path.home()
+        # Modern OneDrive for Mac syncs under ~/Library/CloudStorage/;
+        # older versions/some configs use ~/<OneDrive folder name> directly.
+        candidates.append(home / "Library" / "CloudStorage" / f"OneDrive-{onedrive_folder_name.replace('OneDrive - ', '').replace(' ', '')}")
+        candidates.append(home / onedrive_folder_name)
+
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate / "Vaulter AI Shared"
+
+    # OneDrive not found on this machine -- fall back to a local folder so
+    # nothing crashes, but this means screening results won't actually be
+    # shared with the team until VAULTER_SHARED_DIR is set correctly.
+    return (BASE_DIR / "data" / "shared_fallback_not_synced").resolve()
+
+SHARED_DIR = _detect_shared_dir()
+SHARED_DIR.mkdir(parents=True, exist_ok=True)
+
 # ─── Data Folders ─────────────────────────────────────────────────
 
 DATA_DIR       = (BASE_DIR / "data").resolve()
@@ -44,12 +86,14 @@ REGISTRY_DIR.mkdir(parents=True, exist_ok=True)
 REGISTRY_FILE  = REGISTRY_DIR / "ingested_registry.json"
 
 # CoStar listing screener (analysis/screening/) — uploaded/pasted source
-# files land in SCREENING_UPLOADS_DIR; combined workbooks + manifest.json
-# land in SCREENING_OUTPUT_DIR. Both live under the same DATA_DIR as every
-# other stage in this project.
+# files land in SCREENING_UPLOADS_DIR (local, since an upload is specific to
+# whoever pasted it into their own conversation). Combined workbooks +
+# manifest.json land in SCREENING_OUTPUT_DIR, which is SHARED (under
+# SHARED_DIR) on purpose -- so one person's screening run is visible to the
+# whole team instead of sitting only on their own machine.
 OUTPUT_DIR            = DATA_DIR / "output"
 PROXIMITY_OUTPUT_DIR  = OUTPUT_DIR / "proximity"
-SCREENING_OUTPUT_DIR  = OUTPUT_DIR / "screening"
+SCREENING_OUTPUT_DIR  = SHARED_DIR / "screening_output"
 
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 PROXIMITY_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
@@ -57,7 +101,6 @@ SCREENING_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
 CHROMA_DIR.mkdir(parents=True, exist_ok=True)
 LOG_DIR.mkdir(parents=True, exist_ok=True)
-SCREENING_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
 # ─── Chunking Settings ────────────────────────────────────────────
 
@@ -140,6 +183,16 @@ WEB_SOURCES = [
 ]
 
 SCHEDULER_TIMEZONE = "America/Phoenix"
+
+# Web/property-intelligence scraping hits the same small set of public
+# pages regardless of which staff member's instance runs it -- since
+# everyone runs their own full local instance (see mcp_server.py header),
+# leaving this on everywhere means the same handful of pages get scraped
+# once per PERSON, every cycle, for no benefit (the content is identical).
+# Set to false in confidentials/.env on every machine except the one
+# designated to do this team's scraping; email stays per-person always
+# (it's correctly scoped to each person's own mailbox, never duplicated).
+RUN_SCHEDULED_SCRAPING = os.getenv("RUN_SCHEDULED_SCRAPING", "true").strip().lower() != "false"
 
 # ─── Outlook / Microsoft Graph ────────────────────────────────────
 # Add to confidentials/.env:

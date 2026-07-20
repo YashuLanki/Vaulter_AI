@@ -13,10 +13,22 @@ Cost: ~10 Claude API calls total, negligible (~$0.15-0.25 for the full
 batch at current Sonnet pricing).
 """
 
+import hashlib
+import json
+import logging
+from pathlib import Path
+
 import pandas as pd
 import anthropic
 
-TOP_N_DEFAULT = 10
+log = logging.getLogger("vaulter.screening")
+
+TOP_N_DEFAULT = 15
+
+# Bump this if build_prompt's format changes meaningfully -- it's folded
+# into the cache key so old cached analyses (in a different format) don't
+# get served against a changed prompt/parser.
+PROMPT_VERSION = "v1"
 
 # Columns excluded from what Claude sees -- contact/personal info that
 # adds no analytical value and shouldn't be piped into an AI prompt.
@@ -79,26 +91,25 @@ def build_full_record_text(row: pd.Series) -> str:
     return "\n".join(lines)
 
 
-def build_prompt(row: pd.Series, scoreboard: str, rank: int, top_n: int = TOP_N_DEFAULT) -> str:
-    full_record = build_full_record_text(row)
-    reasons = row.get("Screening_Reasons", "") or "(none -- passed clean)"
-
-    return f"""You are a land acquisition analyst at Vaulter, reviewing a
+def build_prompt(row: pd.Series, scoreboard: str, rank: int, top_n: int = TOP_N_DEFAULT) -> list[dict]:
+    """
+    Returns Anthropic content blocks (not a single string) split into:
+      - a STATIC block (instructions, investment thesis, scoreboard, output
+        format) that is IDENTICAL across every listing in this batch --
+        marked cache_control so Anthropic caches it server-side after the
+        first call, billing the ~top_n-1 remaining calls in this batch far
+        less for that shared portion (see run_deep_analysis).
+      - a DYNAMIC block (this listing's own rank/raw data/flags) that
+        genuinely differs per call and is never cached.
+    """
+    static_block = f"""You are a land acquisition analyst at Vaulter, reviewing a
 top-ranked candidate for potential pursuit.
 
 INVESTMENT THESIS:
 {INVESTMENT_THESIS}
 
-THIS LISTING'S RANK: #{rank} of {top_n} in this batch.
-
 SCOREBOARD -- all {top_n} listings in this batch, for relative context:
 {scoreboard}
-
-FULL RAW DATA FOR THIS LISTING:
-{full_record}
-
-PHASE 1 SCREENING NOTES (any flags this listing picked up before ranking):
-{reasons}
 
 Write your analysis in EXACTLY this format, with these 5 section headers
 verbatim (all caps, followed by a colon). Under each header, write 3-5
@@ -138,6 +149,23 @@ RED_FLAGS:
 - <bullet>
 """
 
+    full_record = build_full_record_text(row)
+    reasons = row.get("Screening_Reasons", "") or "(none -- passed clean)"
+    dynamic_block = f"""THIS LISTING'S RANK: #{rank} of {top_n} in this batch.
+
+FULL RAW DATA FOR THIS LISTING:
+{full_record}
+
+PHASE 1 SCREENING NOTES (any flags this listing picked up before ranking):
+{reasons}
+
+Now write your analysis for the listing above, in the exact format specified."""
+
+    return [
+        {"type": "text", "text": static_block, "cache_control": {"type": "ephemeral"}},
+        {"type": "text", "text": dynamic_block},
+    ]
+
 
 def parse_response(text: str) -> dict:
     sections = {
@@ -164,31 +192,78 @@ def parse_response(text: str) -> dict:
     return {k: "\n".join(v) for k, v in sections.items()}
 
 
-def run_deep_analysis(ranked_df: pd.DataFrame, api_key: str, top_n: int = TOP_N_DEFAULT) -> dict:
+def _cache_key(full_record_text: str) -> str:
+    return hashlib.sha256((PROMPT_VERSION + full_record_text).encode()).hexdigest()
+
+
+def _load_cache(cache_path: Path) -> dict:
+    if cache_path.exists():
+        try:
+            return json.loads(cache_path.read_text())
+        except Exception:
+            return {}
+    return {}
+
+
+def _save_cache(cache_path: Path, cache: dict) -> None:
+    cache_path.write_text(json.dumps(cache, indent=2))
+
+
+def run_deep_analysis(ranked_df: pd.DataFrame, api_key: str, top_n: int = TOP_N_DEFAULT,
+                       cache_dir: Path | None = None) -> dict:
     """
     Runs Claude once per top-N listing, exactly as costar's original
     deep_analysis.py did (same prompt construction, same max_tokens=1500).
     Returns {address: {section_name: text, "Composite_Score": float}}.
     Does NOT write any xlsx file -- that happens later in
     workbook_builder.build_combined_workbook.
+
+    If cache_dir is given (the pipeline passes SCREENING_OUTPUT_DIR, which
+    is shared across the whole team), each listing's analysis is cached by
+    a hash of its own full raw record -- so if the SAME listing reappears
+    in a later CoStar export (a re-list, or a file with a few new/changed
+    rows), it's reused instead of re-paying for that listing's Claude call.
+    Note: the cache key deliberately ignores the scoreboard/rank context
+    (which can shift slightly between runs as the batch composition
+    changes) -- an acceptable tradeoff since the listing's own record is
+    what actually drives the analysis content.
     """
     top_listings = get_top_listings(ranked_df, top_n)
     scoreboard = build_scoreboard(top_listings)
     client = anthropic.Anthropic(api_key=api_key)
 
+    cache_path = (cache_dir / "phase3_listing_cache.json") if cache_dir else None
+    cache = _load_cache(cache_path) if cache_path else {}
+    cache_hits = 0
+
     results = {}
     for i, (_, row) in enumerate(top_listings.iterrows(), 1):
         addr = row.get("Property Address", f"Listing_{i}")
-        prompt = build_prompt(row, scoreboard, i, top_n=len(top_listings))
-        response = client.messages.create(
-            model="claude-sonnet-4-6",
-            max_tokens=1500,
-            messages=[{"role": "user", "content": prompt}],
-        )
-        text = response.content[0].text
-        parsed = parse_response(text)
+        full_record = build_full_record_text(row)
+        key = _cache_key(full_record)
+
+        if key in cache:
+            parsed = dict(cache[key])
+            cache_hits += 1
+        else:
+            content_blocks = build_prompt(row, scoreboard, i, top_n=len(top_listings))
+            response = client.messages.create(
+                model="claude-sonnet-4-6",
+                max_tokens=1500,
+                messages=[{"role": "user", "content": content_blocks}],
+            )
+            text = response.content[0].text
+            parsed = parse_response(text)
+            if cache_path:
+                cache[key] = dict(parsed)
+                _save_cache(cache_path, cache)
+
         parsed["Composite_Score"] = row["Composite_Score"]
         results[addr] = parsed
+
+    if cache_path and cache_hits:
+        log.info(f"Phase 3: reused {cache_hits}/{len(top_listings)} cached listing "
+                  f"analyses -- no new Claude calls for those.")
 
     return results
 

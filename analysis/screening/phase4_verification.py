@@ -24,15 +24,21 @@ IMPORTANT: the "distance to core market" calculation geocodes each
 listing's own CoStar 'Market Name' field (e.g. 'Phoenix, AZ', 'Dallas, TX')
 dynamically via Google Geocoding -- no hardcoded state or city.
 
-NOTE: this merged version always uses the in-memory Phase 3 results passed
-to it -- the original disk-caching logic (find_latest_deep_analysis /
-cached_analysis_is_stale / load_cached_analyses) has been dropped; there
-is no caching for v1.
+NOTE: this always uses the in-memory Phase 3 results passed to it -- the
+original costar disk-caching logic (find_latest_deep_analysis /
+cached_analysis_is_stale / load_cached_analyses) was dropped and replaced
+with a different, content-hash-based cache (see _cache_key/run_verification's
+cache_dir param) that reuses a finalist's verdict -- and skips its Google
+Maps enrichment call too -- if its raw record + Phase 3 analysis are
+unchanged from a prior run.
 """
 
+import hashlib
+import json
 import logging
 import time
 import base64
+from pathlib import Path
 
 import requests
 import pandas as pd
@@ -42,7 +48,7 @@ from . import phase3_deep_analysis
 
 log = logging.getLogger("vaulter.screening")
 
-FINAL_N_DEFAULT = 5
+FINAL_N_DEFAULT = 10
 
 PLACES_SEARCH_RADIUS_METERS = 8047  # ~5 miles
 
@@ -50,20 +56,35 @@ PLACES_SEARCH_RADIUS_METERS = 8047  # ~5 miles
 # not tied to any real listing. (Downtown Phoenix, arbitrary valid US point.)
 _PROBE_LAT, _PROBE_LNG = 33.4484, -112.0740
 
-# Cache so each unique market only gets geocoded once per run, even if
-# multiple finalists share the same Market Name.
+# In-memory cache so each unique market only gets geocoded once per run,
+# even if multiple finalists share the same Market Name. get_market_reference_point
+# can also persist this to disk (shared across the team) when given a
+# cache_dir -- a market's geocode essentially never changes, so once ANYONE
+# has geocoded "Phoenix, AZ" it should never be looked up again by anyone,
+# instead of resetting every time this process restarts.
 _MARKET_GEOCODE_CACHE = {}
+_MARKET_GEOCODE_CACHE_LOADED_FROM: Path | None = None
 
 
 def _api_denied(status: str) -> bool:
     return status in ("REQUEST_DENIED", "PERMISSION_DENIED", "ERROR")
 
 
-def probe_available_apis(api_key: str) -> dict:
+def probe_available_apis(api_key: str, include_low_value_apis: bool = False,
+                          cache_dir: Path | None = None) -> dict:
     """Tests every candidate Google API once against a fixed location and
     records which ones are actually enabled for this key. Called once at
     the start of a run -- individual listing enrichment then only calls
-    whatever this probe found available, instead of assuming a fixed set."""
+    whatever this probe found available, instead of assuming a fixed set.
+
+    include_low_value_apis=False (the default) skips probing -- and
+    therefore skips ever calling -- Solar and Air Quality. Both are
+    already noted in their own functions below as low/dubious value for
+    raw vacant land: Solar isn't designed for vacant land at all (its
+    "not found" result is actually the expected positive signal), and Air
+    Quality is informational-only with minor relevance to a land
+    investment decision. Skipping them by default saves those Google API
+    calls on every finalist. Pass True to include them anyway."""
     log.info("Probing which Google APIs are enabled for this key...")
     results = {}
 
@@ -86,7 +107,7 @@ def probe_available_apis(api_key: str) -> dict:
         results["roads"] = False
 
     try:
-        r = get_market_reference_point("Phoenix, AZ", api_key)
+        r = get_market_reference_point("Phoenix, AZ", api_key, cache_dir=cache_dir)
         results["geocoding"] = r["status"] == "OK"
     except Exception:
         results["geocoding"] = False
@@ -112,10 +133,13 @@ def probe_available_apis(api_key: str) -> dict:
     except Exception:
         results["streetview"] = False
 
-    try:
-        r = google_solar_potential(_PROBE_LAT, _PROBE_LNG, api_key)
-        results["solar"] = r["status"] in ("OK", "NO_BUILDING_FOUND")  # NO_BUILDING_FOUND means API works
-    except Exception:
+    if include_low_value_apis:
+        try:
+            r = google_solar_potential(_PROBE_LAT, _PROBE_LNG, api_key)
+            results["solar"] = r["status"] in ("OK", "NO_BUILDING_FOUND")  # NO_BUILDING_FOUND means API works
+        except Exception:
+            results["solar"] = False
+    else:
         results["solar"] = False
 
     try:
@@ -124,10 +148,13 @@ def probe_available_apis(api_key: str) -> dict:
     except Exception:
         results["address_validation"] = False
 
-    try:
-        r = google_air_quality(_PROBE_LAT, _PROBE_LNG, api_key)
-        results["air_quality"] = r["status"] == "OK"
-    except Exception:
+    if include_low_value_apis:
+        try:
+            r = google_air_quality(_PROBE_LAT, _PROBE_LNG, api_key)
+            results["air_quality"] = r["status"] == "OK"
+        except Exception:
+            results["air_quality"] = False
+    else:
         results["air_quality"] = False
 
     for api_name, available in results.items():
@@ -137,10 +164,24 @@ def probe_available_apis(api_key: str) -> dict:
     return results
 
 
-def get_market_reference_point(market_name: str, api_key: str) -> dict:
+def get_market_reference_point(market_name: str, api_key: str, cache_dir: Path | None = None) -> dict:
     """Geocodes the listing's own CoStar 'Market Name' (e.g. 'Phoenix, AZ')
     to get a dynamic core-market reference point -- works for any market
-    the CoStar export covers, no hardcoded state/city."""
+    the CoStar export covers, no hardcoded state/city.
+
+    If cache_dir is given (the pipeline passes SCREENING_OUTPUT_DIR, shared
+    across the team), this is persisted to disk on top of the in-memory
+    cache -- so it survives process restarts and is shared team-wide,
+    instead of re-geocoding the same handful of markets on every run."""
+    global _MARKET_GEOCODE_CACHE, _MARKET_GEOCODE_CACHE_LOADED_FROM
+
+    cache_path = (cache_dir / "market_geocode_cache.json") if cache_dir else None
+    if cache_path and _MARKET_GEOCODE_CACHE_LOADED_FROM != cache_dir:
+        # First use in this process with this cache_dir -- merge in whatever
+        # is already on disk (from this or another team member's prior runs).
+        _MARKET_GEOCODE_CACHE = {**_load_cache(cache_path), **_MARKET_GEOCODE_CACHE}
+        _MARKET_GEOCODE_CACHE_LOADED_FROM = cache_dir
+
     if not market_name or pd.isna(market_name):
         return {"status": "NO_MARKET_NAME", "lat": None, "lng": None, "label": None}
 
@@ -158,6 +199,8 @@ def get_market_reference_point(market_name: str, api_key: str) -> dict:
         result = {"status": "OK", "lat": loc["lat"], "lng": loc["lng"], "label": market_name}
 
     _MARKET_GEOCODE_CACHE[market_name] = result
+    if cache_path:
+        _save_cache(cache_path, _MARKET_GEOCODE_CACHE)
     return result
 
 
@@ -415,7 +458,7 @@ def google_solar_potential(lat: float, lng: float, api_key: str) -> dict:
         return {"status": "NO_BUILDING_FOUND", "data": None}
 
 
-def enrich_listing(row: pd.Series, api_key: str, available: dict) -> dict:
+def enrich_listing(row: pd.Series, api_key: str, available: dict, cache_dir: Path | None = None) -> dict:
     lat, lng = row.get("Latitude"), row.get("Longitude")
     if pd.isna(lat) or pd.isna(lng):
         return {"error": "No coordinates available for this listing"}
@@ -425,7 +468,7 @@ def enrich_listing(row: pd.Series, api_key: str, available: dict) -> dict:
 
     if available.get("geocoding"):
         log.info(f"    Geocoding market ({market_name})...")
-        result["reference"] = get_market_reference_point(market_name, api_key)
+        result["reference"] = get_market_reference_point(market_name, api_key, cache_dir=cache_dir)
         time.sleep(0.2)
     else:
         result["reference"] = {"status": "API_NOT_AVAILABLE", "lat": None, "lng": None, "label": None}
@@ -675,13 +718,40 @@ def parse_final_response(text: str) -> dict:
     return {k: "\n".join(v) for k, v in sections.items()}
 
 
+_FINAL_PROMPT_VERSION = "v1"  # bump if build_final_prompt's format changes meaningfully
+
+
+def _final_cache_key(row: pd.Series, phase3_analysis: dict) -> str:
+    full_record = phase3_deep_analysis.build_full_record_text(row)
+    phase3_repr = json.dumps(
+        {k: v for k, v in phase3_analysis.items() if k != "Composite_Score"},
+        sort_keys=True,
+    )
+    return hashlib.sha256((_FINAL_PROMPT_VERSION + full_record + phase3_repr).encode()).hexdigest()
+
+
+def _load_cache(cache_path: Path) -> dict:
+    if cache_path.exists():
+        try:
+            return json.loads(cache_path.read_text())
+        except Exception:
+            return {}
+    return {}
+
+
+def _save_cache(cache_path: Path, cache: dict) -> None:
+    cache_path.write_text(json.dumps(cache, indent=2))
+
+
 def run_verification(
     ranked_df: pd.DataFrame,
     deep_analyses: dict,
     anthropic_api_key: str,
     google_api_key: str | None,
-    top_n: int = 10,
+    top_n: int = phase3_deep_analysis.TOP_N_DEFAULT,
     final_n: int = FINAL_N_DEFAULT,
+    cache_dir: Path | None = None,
+    include_low_value_apis: bool = False,
 ) -> dict:
     """
     Gets the top listings via phase3_deep_analysis.get_top_listings, calls
@@ -695,6 +765,21 @@ def run_verification(
       builds the final multimodal Claude prompt per finalist exactly as
       the original did, and returns {"skipped": False, "finalists": [...],
       "analyses": {address: {section_name: text}}}.
+
+    If cache_dir is given (the pipeline passes SCREENING_OUTPUT_DIR, shared
+    across the team), a finalist's verdict is cached by a hash of its raw
+    record + Phase 3 analysis -- if unchanged from a prior run, BOTH the
+    Google Maps enrichment call AND the Claude call are skipped for that
+    finalist (probe_available_apis itself is also deferred until the first
+    genuine cache miss, so an all-cache-hit run makes zero Google calls).
+    Note: this assumes the real-world ground-truth data (imagery, nearby
+    places, etc.) hasn't meaningfully changed since the cached run -- a
+    reasonable tradeoff for cost savings, not appropriate if you need to
+    force a fresh ground-truth check on a listing you already have cached.
+
+    include_low_value_apis=False (the default) skips Solar and Air Quality
+    -- see probe_available_apis for why those two specifically are safe to
+    skip by default.
     """
     top_listings = phase3_deep_analysis.get_top_listings(ranked_df, top_n)
     finalist_tuples = select_finalists(top_listings, deep_analyses, final_n=final_n)
@@ -707,46 +792,69 @@ def run_verification(
             "finalists": finalist_addresses,
         }
 
+    cache_path = (cache_dir / "phase4_verdict_cache.json") if cache_dir else None
+    cache = _load_cache(cache_path) if cache_path else {}
+    cache_hits = 0
+
     client = anthropic.Anthropic(api_key=anthropic_api_key)
-    available_apis = probe_available_apis(google_api_key)
+    available_apis = None  # probed lazily -- only once a cache miss actually needs it
 
     final_results = {}
     for addr, tier, score in finalist_tuples:
         row = top_listings[top_listings["Property Address"] == addr].iloc[0]
-        enrichment = enrich_listing(row, google_api_key, available_apis)
-        enrichment_text = format_enrichment_for_prompt(enrichment)
+        key = _final_cache_key(row, deep_analyses[addr])
 
-        satellite = enrichment.get("satellite", {"status": "ERROR", "image_bytes": None})
-        streetview = enrichment.get("streetview", {"status": "ERROR", "image_bytes": None})
-        has_satellite = satellite["status"] == "OK" and satellite["image_bytes"] is not None
-        has_streetview = streetview["status"] == "OK" and streetview["image_bytes"] is not None
+        if key in cache:
+            parsed_final = dict(cache[key])
+            cache_hits += 1
+        else:
+            if available_apis is None:
+                available_apis = probe_available_apis(
+                    google_api_key, include_low_value_apis=include_low_value_apis, cache_dir=cache_dir,
+                )
 
-        prompt = build_final_prompt(row, deep_analyses[addr], enrichment_text, has_satellite, has_streetview)
+            enrichment = enrich_listing(row, google_api_key, available_apis, cache_dir=cache_dir)
+            enrichment_text = format_enrichment_for_prompt(enrichment)
 
-        content = []
-        if has_satellite:
-            image_b64 = base64.standard_b64encode(satellite["image_bytes"]).decode("utf-8")
-            content.append({
-                "type": "image",
-                "source": {"type": "base64", "media_type": "image/png", "data": image_b64},
-            })
-        if has_streetview:
-            sv_b64 = base64.standard_b64encode(streetview["image_bytes"]).decode("utf-8")
-            content.append({
-                "type": "image",
-                "source": {"type": "base64", "media_type": "image/jpeg", "data": sv_b64},
-            })
-        content.append({"type": "text", "text": prompt})
+            satellite = enrichment.get("satellite", {"status": "ERROR", "image_bytes": None})
+            streetview = enrichment.get("streetview", {"status": "ERROR", "image_bytes": None})
+            has_satellite = satellite["status"] == "OK" and satellite["image_bytes"] is not None
+            has_streetview = streetview["status"] == "OK" and streetview["image_bytes"] is not None
 
-        response = client.messages.create(
-            model="claude-sonnet-4-6",
-            max_tokens=1400,
-            messages=[{"role": "user", "content": content}],
-        )
-        parsed_final = parse_final_response(response.content[0].text)
+            prompt = build_final_prompt(row, deep_analyses[addr], enrichment_text, has_satellite, has_streetview)
+
+            content = []
+            if has_satellite:
+                image_b64 = base64.standard_b64encode(satellite["image_bytes"]).decode("utf-8")
+                content.append({
+                    "type": "image",
+                    "source": {"type": "base64", "media_type": "image/png", "data": image_b64},
+                })
+            if has_streetview:
+                sv_b64 = base64.standard_b64encode(streetview["image_bytes"]).decode("utf-8")
+                content.append({
+                    "type": "image",
+                    "source": {"type": "base64", "media_type": "image/jpeg", "data": sv_b64},
+                })
+            content.append({"type": "text", "text": prompt})
+
+            response = client.messages.create(
+                model="claude-sonnet-4-6",
+                max_tokens=1400,
+                messages=[{"role": "user", "content": content}],
+            )
+            parsed_final = parse_final_response(response.content[0].text)
+            if cache_path:
+                cache[key] = dict(parsed_final)
+                _save_cache(cache_path, cache)
+
         parsed_final["Composite_Score"] = deep_analyses[addr]["Composite_Score"]
         parsed_final["Phase3_Recommendation"] = deep_analyses[addr]["RECOMMENDATION"]
         final_results[addr] = parsed_final
+
+    if cache_path and cache_hits:
+        log.info(f"Phase 4: reused {cache_hits}/{len(finalist_tuples)} cached finalist "
+                  f"verdicts -- no new Claude/Google Maps calls for those.")
 
     return {
         "skipped": False,

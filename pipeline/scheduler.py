@@ -13,11 +13,11 @@ Called by:  python main.py schedule
 
 import logging
 import sys
-from datetime import datetime as _dt
+from datetime import datetime as _dt, timedelta as _timedelta
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
-from config import LOG_DIR, WEB_SOURCES, SCHEDULER_TIMEZONE, LOG_LEVEL
+from config import LOG_DIR, SCHEDULER_TIMEZONE, LOG_LEVEL, RUN_SCHEDULED_SCRAPING
 
 from apscheduler.schedulers.blocking import BlockingScheduler
 from apscheduler.triggers.cron import CronTrigger
@@ -82,17 +82,35 @@ def start_scheduler():
     scheduler = BlockingScheduler(timezone=SCHEDULER_TIMEZONE)
 
     # ── Web sources — each at its own configured frequency ────────
-    for source in WEB_SOURCES:
-        scheduler.add_job(
-            job_scrape,
-            trigger=IntervalTrigger(hours=source["frequency_hours"]),
-            args=[source["name"]],
-            id=f"scrape_{source['name'].replace(' ', '_')}",
-            name=f"Scrape: {source['name']}",
-            next_run_time=_dt.now() + __import__('datetime').timedelta(seconds=30),   # run immediately on startup
-            replace_existing=True,
-        )
-        log.info(f"Scheduled '{source['name']}' — every {source['frequency_hours']}h")
+    # Gated behind RUN_SCHEDULED_SCRAPING: only one designated team machine
+    # needs this on (see config.py) -- web/property scraping hits the same
+    # public pages regardless of who runs it. Email is NOT gated -- it's
+    # correctly per-person, never duplicated.
+    if RUN_SCHEDULED_SCRAPING:
+        # Loaded via load_web_sources() (not the raw config.WEB_SOURCES
+        # constant) so a CSV override in data/web_sources/ is scheduled
+        # correctly -- previously this always used config.WEB_SOURCES while
+        # scrape_all() itself preferred a CSV if present, so a CSV-only
+        # source was never scheduled, and a config-only source (when a CSV
+        # existed) silently no-op'd every time it fired.
+        from pipeline.web_scraper import load_web_sources
+        sources, source_label = load_web_sources()
+        log.info(f"Web sources: {source_label} ({len(sources)} sources)")
+
+        for source in sources:
+            scheduler.add_job(
+                job_scrape,
+                trigger=IntervalTrigger(hours=source["frequency_hours"]),
+                args=[source["name"]],
+                id=f"scrape_{source['name'].replace(' ', '_')}",
+                name=f"Scrape: {source['name']}",
+                next_run_time=_dt.now() + _timedelta(seconds=30),   # run immediately on startup
+                replace_existing=True,
+            )
+            log.info(f"Scheduled '{source['name']}' — every {source['frequency_hours']}h")
+    else:
+        log.info("Web/property scraping is OFF on this machine (RUN_SCHEDULED_SCRAPING=false) "
+                  "-- another team machine handles that.")
 
     # ── Outlook email — every 30 minutes ─────────────────────────
     scheduler.add_job(
@@ -100,20 +118,21 @@ def start_scheduler():
         trigger=IntervalTrigger(minutes=30),
         id="check_email",
         name="Email: Outlook Pull",
-        next_run_time=_dt.now() + __import__('datetime').timedelta(seconds=30),
+        next_run_time=_dt.now() + _timedelta(seconds=30),
         replace_existing=True,
     )
     log.info("Scheduled Outlook email — every 30 min")
 
     # ── Property intelligence — daily at 6:00 AM ─────────────────
-    scheduler.add_job(
-        job_property_scrape,
-        trigger=CronTrigger(hour=6, minute=0),
-        id="property_scrape",
-        name="Property Intelligence Scrape",
-        replace_existing=True,
-    )
-    log.info("Scheduled property intelligence scrape — daily at 6:00 AM")
+    if RUN_SCHEDULED_SCRAPING:
+        scheduler.add_job(
+            job_property_scrape,
+            trigger=CronTrigger(hour=6, minute=0),
+            id="property_scrape",
+            name="Property Intelligence Scrape",
+            replace_existing=True,
+        )
+        log.info("Scheduled property intelligence scrape — daily at 6:00 AM")
 
     log.info("=" * 60)
     log.info("  Vaulter AI Stage 2 Scheduler STARTED")

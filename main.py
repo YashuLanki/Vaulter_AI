@@ -72,9 +72,9 @@ def cmd_ingest():
 
 def cmd_stats():
     import json
-    from ingestion.embedder import get_stats
+    from ingestion.embedder import get_stats, get_collection
     from ingestion.registry import load_registry
-    from config import DATA_DIR, CHROMA_DIR, CHROMA_COLLECTION_NAME, REGISTRY_DIR
+    from config import REGISTRY_DIR
 
     stats    = get_stats()
     registry = load_registry()
@@ -96,9 +96,13 @@ def cmd_stats():
     results     = {"metadatas": []}
 
     try:
-        import chromadb
-        client     = chromadb.PersistentClient(path=str(CHROMA_DIR))
-        collection = client.get_or_create_collection(CHROMA_COLLECTION_NAME)
+        # Reuse the shared singleton client (see ingestion/embedder.py) --
+        # a second independent PersistentClient() for the same path with
+        # different Settings raises inside chromadb, which this bare
+        # except previously swallowed, silently zeroing out every
+        # per-source count below even though total_chunks (from get_stats)
+        # was correct.
+        collection = get_collection()
         if collection.count() > 0:
             results = collection.get(
                 limit=min(collection.count(), 9999),

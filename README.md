@@ -202,20 +202,26 @@ Create `confidentials/.env`:
 ```
 OUTLOOK_CLIENT_ID=your-application-id
 OUTLOOK_TENANT_ID=your-directory-id
-OUTLOOK_CLIENT_SECRET=your-client-secret
 ANTHROPIC_API_KEY=sk-ant-your-key-here
+GOOGLE_PLACES_API_KEY=your-google-places-key
+GOOGLE_MAPS_API_KEY=your-google-maps-key
 ```
 
 Each staff member sets up their OWN `confidentials/.env` with their OWN Outlook
-credentials — this is what keeps each person's email private to their own instance.
+sign-in — this is what keeps each person's email private to their own instance.
+`OUTLOOK_CLIENT_ID`/`OUTLOOK_TENANT_ID` can be the **same one shared Azure app
+registration for the whole team** — it just identifies "this is the Vaulter AI
+Email Pipeline app," not any individual person. Each person still authenticates
+with their own Microsoft account via `python main.py auth`.
 
-To get Outlook credentials:
+To set up the shared Outlook app registration (do this once, for the whole team):
 1. Go to portal.azure.com → App registrations → New registration
 2. Name it "Vaulter Email Pipeline" → Single tenant → Register
 3. API Permissions → Microsoft Graph → Delegated → Mail.Read
 4. Authentication → Mobile/desktop → tick http://localhost → Allow public client flows: Yes
-5. Certificates & secrets → New client secret → copy the Value
-6. Copy Application ID and Directory ID from Overview
+5. Copy Application ID and Directory ID from Overview into everyone's `.env`
+   (no client secret needed — this uses the device-code flow, which
+   authenticates each person individually rather than the app itself)
 
 ### 7. Authorize Outlook (run once)
 ```bash
@@ -286,6 +292,11 @@ python main.py mcp 9000                            # start on custom port
 - Each staff member authenticates their OWN Outlook account into their OWN
   local database — this is what keeps one person's email private from
   everyone else's Claude session, not an access-control check
+- The **one** exception to "everything is local" is CoStar screening results
+  (workbooks + `manifest.json`), which save to the shared team OneDrive
+  (`OneDrive - Vaulter LLC`, auto-detected — override with `VAULTER_SHARED_DIR`
+  in `.env` if needed) on purpose, so one person's screening run benefits
+  everyone instead of each person re-paying for the same file
 - The `confidentials/` folder is gitignored — never commit it
 - Anthropic's Team plan does not train on your content by default
 
