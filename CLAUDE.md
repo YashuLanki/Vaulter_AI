@@ -5,11 +5,14 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## What this is
 
 Vaulter AI Property Intelligence System — a Python system for a real estate investment
-company that ingests PDFs/emails/web data into a vector database, exposes it to the team
-entirely through an MCP server connected to claude.ai (no separate UI), and runs a
-4-phase CoStar listing screening pipeline. `main.py` is the single CLI entry point for
-every stage; `mcp_server.py` is what actually runs in production (it starts the PDF
-watcher and scheduler as background threads, then serves MCP tools on the main thread).
+company that ingests PDFs/emails/web data into a vector database and exposes it to each
+team member entirely through their own local MCP server connected to their own Claude
+Desktop (no separate UI), and runs a 4-phase CoStar listing screening pipeline. Each
+staff member runs their own fully-local instance (own ChromaDB, own Outlook auth) so
+each person's email stays private to them — see mcp_server.py's header for details.
+`main.py` is the single CLI entry point for every stage; `mcp_server.py` is what actually
+runs in production (it starts the PDF watcher and scheduler as background threads, then
+serves MCP tools on the main thread).
 
 ## Commands
 
@@ -60,8 +63,8 @@ collection name in `config.CHROMA_COLLECTION_NAME`). Chunks are distinguished pu
 metadata `type`: `pdf` (default), `web_scrape`, `property_intelligence`,
 `email` / `email_attachment_<kind>`. `analysis/rag_engine.py` is the only retrieval layer
 — it offers four modes (`get_property_context`, cross-property, type-filtered,
-`free_search`) and is what both the MCP tools and `analysis/analyzer.py` call into.
-Never query ChromaDB directly from a new tool; go through `rag_engine`.
+`free_search`) and is what the MCP tools call into directly. Never query ChromaDB
+directly from a new tool; go through `rag_engine`.
 
 ### Stage 1 — PDF ingestion (`ingestion/`)
 `watcher.py` monitors `data/watched_folder/<State>/<Property>/file.*` (state and property
@@ -84,21 +87,35 @@ when running under the MCP server this scheduler is started in a background thre
 `mcp_server.py`, not via `main.py schedule`.
 
 ### Stage 3 — RAG + MCP server
-`analysis/analyzer.py` makes the actual Claude API calls (summaries, risk flags, Q&A);
-`analysis/prompts.py` centralizes every prompt used against Claude anywhere in the
-codebase — add new prompts there, don't inline them.
+Most MCP tools (`search_database`, `get_property_info`, `get_risk_scan`,
+`get_market_intelligence`, `get_email_highlights`, etc.) call `analysis/rag_engine.py`
+directly and return raw retrieved context — no Claude API call happens in the code
+itself; the requesting Claude Desktop session does the reasoning over that context as
+part of its own (already-covered) conversation. The **only** tool that makes its own
+direct Claude API call (and therefore needs real Anthropic Console credits, separate
+from a Pro/Team chat subscription) is `screen_listings`, via the CoStar screening
+pipeline's Phase 3/4 — see `analysis/screening/`.
 
 `mcp_server.py` is the production entry point (`create_mcp_server()` registers all
 `@mcp.tool()`-decorated functions; `run_mcp_server()` starts the watcher + scheduler
-threads then calls `mcp.run(transport="stdio")`). Despite the README describing an
-ngrok-exposed HTTP connector, the code currently runs stdio transport — Claude Desktop/CLI
-launches the process directly rather than connecting over the network. Tools exposed:
+threads then calls `mcp.run(transport="stdio")`). This is deliberate, not a stopgap:
+each staff member runs their own fully-local instance of this project (own ChromaDB,
+own Outlook auth, own copy of this server), launched directly by their own Claude
+Desktop app via stdio — never over a network. This is a privacy boundary as much as
+an architecture choice: a staff member's own email is only ever ingested into their
+own local database, never visible to a colleague's Claude session. claude.ai (the
+web app) cannot be used with this server for the same reason ngrok would otherwise
+be needed — it runs in the cloud and can only reach a network address, never a
+process on someone's own machine; Claude Desktop or Claude Code are required.
+There is no `MCP_API_KEY` / shared secret — the real access boundary is simply "is
+this your own computer, logged in as you." (The README's ngrok/HTTP-connector
+section describes a different, no-longer-intended shared-server design; treat it
+as stale if you encounter it.) Tools exposed:
 `search_database`, `get_property_info`, `get_portfolio_list`, `get_properties_by_stage`,
 `check_inbox_now`, `get_email_highlights`, `get_risk_scan`, `get_market_intelligence`,
 `get_database_stats`, `open_property_files`, `open_general_files`,
 `open_proximity_files`, `get_screening_rules`, `test_screener`, `screen_listings`,
-`open_screening_dashboard`, `run_google_places_export`. `MCP_API_KEY` gates access when
-set (warns but doesn't hard-fail if unset).
+`open_screening_dashboard`, `run_google_places_export`.
 
 ### CoStar Listing Screener (`analysis/screening/`)
 A 4-phase pipeline, orchestrated end-to-end by `pipeline.py::run_full_screening()` (the
@@ -136,10 +153,9 @@ neither — in which case the tool explains how to supply one.
   every other module imports the resulting constant from `config`.
 - **`main.py` (non-MCP mode) logs to both file and stdout; MCP mode logs to file only** —
   stdout is reserved for the MCP stdio transport, and any stray print/log to stdout there
-  will break the connection to claude.ai.
+  will break the connection to that instance's own Claude Desktop.
 - **Missing optional API keys degrade gracefully, they don't crash.** `GOOGLE_MAPS_API_KEY`
-  unset → skip Phase 4 enrichment only; `MCP_API_KEY` unset → server runs unauthenticated
-  with a warning. Follow this pattern for any new optional integration.
+  unset → skip Phase 4 enrichment only. Follow this pattern for any new optional integration.
 - **The scheduler thread inside `mcp_server.py` must never die or exit** — its keepalive
   loop wraps everything in try/except specifically so a job failure can't take down the
   MCP server process. Preserve that isolation if you touch `_start_scheduler`.

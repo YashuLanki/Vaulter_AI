@@ -17,8 +17,18 @@ Examples:
 
 import hashlib
 import logging
+import os
 import threading
 import time
+
+# Must be set before chromadb/sentence-transformers/transformers are
+# imported below -- these libraries print download progress bars and
+# telemetry banners straight to stdout on first use, which would corrupt
+# the MCP stdio connection to Claude Desktop (see mcp_server.py header).
+os.environ.setdefault("ANONYMIZED_TELEMETRY", "False")
+os.environ.setdefault("HF_HUB_DISABLE_PROGRESS_BARS", "1")
+os.environ.setdefault("TRANSFORMERS_VERBOSITY", "error")
+os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
 
 import numpy as np
 import chromadb
@@ -29,16 +39,15 @@ from config import CHROMA_DIR, CHROMA_COLLECTION_NAME, EMBEDDING_DIM
 log = logging.getLogger("vaulter.embedder")
 
 
-# ─── Embedding Function ───────────────────────────────────────────────────────
+# ─── Embedding Functions ──────────────────────────────────────────────────────
 
 class LocalHashEmbedding(EmbeddingFunction):
     """
-    Deterministic pseudo-embedding based on word position hashing.
-    No model downloads required — safe for offline environments.
-
-    Production upgrade path:
-        from chromadb.utils.embedding_functions import SentenceTransformerEmbeddingFunction
-        ef = SentenceTransformerEmbeddingFunction(model_name="all-MiniLM-L6-v2")
+    Deterministic pseudo-embedding based on word position hashing. This is
+    NOT semantic search -- cosine similarity here reduces to weighted
+    literal word overlap, so synonyms/paraphrases ("inundation area" vs
+    "flood zone") won't match. Kept only as an offline fallback for when
+    the real model (below) can't be loaded -- no model download required.
     """
 
     def __init__(self):
@@ -58,6 +67,51 @@ class LocalHashEmbedding(EmbeddingFunction):
                 vec = vec / norm
             result.append(vec.tolist())
         return result
+
+
+_EMBEDDING_FUNCTION = None
+_EMBEDDING_INIT_LOCK = threading.Lock()
+
+
+def get_embedding_function():
+    """
+    Returns the real semantic embedding function (all-MiniLM-L6-v2, 384
+    dimensions -- matches EMBEDDING_DIM) if it can be loaded, falling back
+    to LocalHashEmbedding if sentence-transformers isn't installed or the
+    model can't be downloaded (e.g. no internet on first run). Loaded once
+    and cached -- loading the model is slow, calling it per-chunk is not.
+    """
+    global _EMBEDDING_FUNCTION
+    if _EMBEDDING_FUNCTION is not None:
+        return _EMBEDDING_FUNCTION
+
+    with _EMBEDDING_INIT_LOCK:
+        if _EMBEDDING_FUNCTION is not None:
+            return _EMBEDDING_FUNCTION
+
+        try:
+            from chromadb.utils.embedding_functions import SentenceTransformerEmbeddingFunction
+            _EMBEDDING_FUNCTION = SentenceTransformerEmbeddingFunction(model_name="all-MiniLM-L6-v2")
+            log.info("Using semantic embeddings (all-MiniLM-L6-v2)")
+        except Exception as e:
+            log.warning(
+                f"Could not load sentence-transformers model, falling back to "
+                f"non-semantic hash embeddings (search quality will be degraded "
+                f"until this is resolved): {e}"
+            )
+            _EMBEDDING_FUNCTION = LocalHashEmbedding()
+
+        return _EMBEDDING_FUNCTION
+
+
+def embed_texts(texts: list[str]) -> list[list[float]]:
+    """Shared embedding entry point for anything that needs to precompute
+    embeddings itself (email/web/property-intel pipelines currently pass
+    embeddings explicitly at upsert time instead of letting the collection
+    auto-embed) -- keeps every ingestion path using the same function."""
+    ef = get_embedding_function()
+    result = ef(texts)
+    return [r.tolist() if hasattr(r, "tolist") else list(r) for r in result]
 
 
 # ─── ChromaDB Singleton ───────────────────────────────────────────────────────
@@ -97,10 +151,13 @@ def get_collection():
         last_error: Exception | None = None
         for attempt in range(3):
             try:
-                _CLIENT = chromadb.PersistentClient(path=str(CHROMA_DIR))
+                _CLIENT = chromadb.PersistentClient(
+                    path=str(CHROMA_DIR),
+                    settings=chromadb.config.Settings(anonymized_telemetry=False),
+                )
                 _COLLECTION = _CLIENT.get_or_create_collection(
                     name=CHROMA_COLLECTION_NAME,
-                    embedding_function=LocalHashEmbedding(),
+                    embedding_function=get_embedding_function(),
                     metadata={"hnsw:space": "cosine"},
                 )
                 log.debug("ChromaDB collection initialized")
@@ -172,6 +229,47 @@ def store_chunks(chunks: list[str], metadata: dict, doc_hash: str):
             log.error(f"  ChromaDB write failed: {e} — resetting client for next attempt")
             _reset_collection()
             raise
+
+
+def reindex_all(batch_size: int = 200) -> dict:
+    """
+    Re-embeds every chunk already in the collection using whatever
+    embedding function is active right now.
+
+    Needed after switching embedding functions (e.g. the old hash-based
+    embedding -> real semantic embeddings): ChromaDB does NOT retroactively
+    re-embed existing data just because the collection's configured
+    embedding_function changed -- old chunks keep their old vectors
+    forever unless something re-upserts them. Without running this, only
+    newly-ingested documents would benefit from better search; everything
+    ingested before the switch would still return poor/irrelevant results.
+
+    Safe to run more than once (unconditionally re-embeds everything each
+    time) and safe to run while the watcher/scheduler are active -- writes
+    go through the same _WRITE_LOCK as normal ingestion.
+    """
+    collection = get_collection()
+    total = collection.count()
+    if total == 0:
+        return {"total": 0, "reembedded": 0}
+
+    reembedded = 0
+    offset = 0
+    while offset < total:
+        batch = collection.get(limit=batch_size, offset=offset, include=["documents", "metadatas"])
+        ids, docs, metas = batch["ids"], batch["documents"], batch["metadatas"]
+        if not ids:
+            break
+
+        embeddings = embed_texts(docs)
+        with _WRITE_LOCK:
+            collection.upsert(ids=ids, documents=docs, metadatas=metas, embeddings=embeddings)
+
+        reembedded += len(ids)
+        offset += batch_size
+        log.info(f"Reindexed {reembedded}/{total} chunks...")
+
+    return {"total": total, "reembedded": reembedded}
 
 
 # ─── Retrieval ────────────────────────────────────────────────────────────────

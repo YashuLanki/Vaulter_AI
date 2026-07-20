@@ -94,8 +94,13 @@ def get_folder_id(token: str, folder_name: str) -> str | None:
     return None
 
 def list_messages(token: str, folder_id: str, lookback_days: int) -> list[dict]:
+    """Only lists messages received within the last lookback_days — without
+    this $filter, Graph returns the entire folder every call, ignoring the
+    parameter entirely and re-paging the whole mailbox on every scheduled run."""
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=lookback_days)).strftime("%Y-%m-%dT%H:%M:%SZ")
     params = {
         "$select": "id,subject,from,receivedDateTime",
+        "$filter": f"receivedDateTime ge {cutoff}",
         "$top": 50,
         "$orderby": "receivedDateTime desc",
     }
@@ -109,10 +114,16 @@ def list_messages(token: str, folder_id: str, lookback_days: int) -> list[dict]:
         params = None
     return messages
 
-def get_body(token: str, msg_id: str) -> str:
+def get_body(token: str, msg_id: str) -> str | None:
+    """Returns the cleaned body text, or None if the Graph fetch itself
+    failed (expired token, network error, etc.) — distinct from a
+    genuinely short/empty body, which is a legitimate "" result. Callers
+    must NOT treat a None return the same as a real empty body, or a
+    transient fetch failure gets mistaken for "nothing to store" and the
+    email is lost forever once marked seen."""
     data = graph_get(token, f"/me/messages/{msg_id}", {"$select": "body"})
-    if not data:
-        return ""
+    if data is None:
+        return None
     body    = data.get("body", {})
     content = body.get("content", "")
     if body.get("contentType", "").lower() == "html":
@@ -216,9 +227,8 @@ def get_collection():
     return _get_collection()
 
 def simple_embed(text: str) -> list[float]:
-    from ingestion.embedder import LocalHashEmbedding
-    result = LocalHashEmbedding()([text])[0]
-    return result.tolist() if hasattr(result, 'tolist') else list(result)
+    from ingestion.embedder import embed_texts
+    return embed_texts([text])[0]
 
 def chunk_text(text: str, page_count: int = 1) -> list[str]:
     from ingestion.chunker import chunk_text as _chunk_text
@@ -364,6 +374,11 @@ def route_attachment(token, msg_id, att, subject, collection):
     mime_type = att["mime_type"].lower()
     data      = get_attachment_bytes(token, msg_id, att["id"])
     if not data:
+        # Download failure is indistinguishable from a genuinely empty
+        # attachment here (get_attachment_bytes returns b"" for both). This
+        # attachment silently won't be stored -- log it so a run of failed
+        # downloads is at least visible, rather than a silent no-op.
+        log.warning(f"  Attachment download failed or empty, skipping: {name}")
         return
 
     RAW_EMAIL_DIR.mkdir(parents=True, exist_ok=True)
@@ -595,6 +610,13 @@ def process_all_emails(lookback_days: int | None = None):
             log.info(f"Processing: '{subject[:70]}' from {sender}")
             try:
                 body = get_body(token, msg_id)
+                if body is None:
+                    # Fetch failed (expired token, network error, etc.) --
+                    # do NOT mark seen, so this message is retried next run
+                    # instead of being permanently lost with no content stored.
+                    log.error(f"  Could not fetch body for '{subject[:50]}' — will retry next run")
+                    errors += 1
+                    continue
 
                 # Audit trail
                 (RAW_EMAIL_DIR / f"{msg_id[:20]}.json").write_text(

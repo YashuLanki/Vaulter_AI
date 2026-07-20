@@ -139,9 +139,8 @@ def chunk_text(text: str) -> list[str]:
     return _chunk_text(text)
 
 def simple_embed(text: str) -> list[float]:
-    from ingestion.embedder import LocalHashEmbedding
-    result = LocalHashEmbedding()([text])[0]
-    return result.tolist() if hasattr(result, 'tolist') else list(result)
+    from ingestion.embedder import embed_texts
+    return embed_texts([text])[0]
 
 
 # ─── Fetch & Extract ──────────────────────────────────────────────
