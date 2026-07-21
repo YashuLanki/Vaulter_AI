@@ -137,6 +137,18 @@ orphans that can never be matched again, so those files get re-screened and re-p
 present but currently unreadable," and in the unreadable case **refuse to overwrite** rather
 than replacing good data with a fresh single-entry file. Small, safe, localized change.
 
+**This is not limited to manifest.json.** The exact same mechanism — `locked_json_update()`
+re-reading the file fresh inside the lock via `load_json()`, which silently treats a torn/
+mid-sync read as "the file is empty" — is also how `phase3_deep_analysis.py` writes
+`phase3_listing_cache.json` and how `phase4_verification.py` writes
+`phase4_verdict_cache.json` and `market_geocode_cache.json`. All three live in the same
+shared `SCREENING_OUTPUT_DIR` and are just as exposed: a mid-sync read during any of their
+updates can wipe the whole team's previously cached (already-paid-for) Phase 3/4 analyses
+and geocode lookups down to just the one entry being added. The fix belongs in `safe_io.py`
+itself (as already scoped above) specifically because that's what makes it cover all four
+files at once — a fix scoped only to `pipeline.py`'s manifest functions would leave the
+other three just as exposed to the same silent wipe.
+
 ### C2. Two people finishing at the same time — one entry lost
 Two people finishing screening runs at nearly the same moment can each save their result, and
 OneDrive keeps one as the official file and quietly renames the other to a "conflict copy" that
@@ -165,13 +177,20 @@ present and valid, not just that a placeholder exists.
   elsewhere in the code).
 - Two people screening *different* files for the same market within the same second can produce
   the identical filename. Fix: add a short unique suffix to result filenames.
-- The dashboard can show a blank/broken view if it reads a file mid-sync. Fix: retry, and skip
-  a single unavailable entry rather than blanking the whole view.
+- The dashboard can show a blank/broken view if it reads a file mid-sync — and for the
+  per-market workbook fetch specifically, it's worse than a blank view: `fetchAndParseWorkbook()`
+  in `vaulter_dashboard.html` has no error handling at all, so a mid-sync/incomplete workbook
+  leaves the UI stuck on "Loading..." indefinitely with a silent, unhandled JS error, not even
+  a visible failure state. Fix: retry, and skip a single unavailable entry (or show a clear
+  per-market error) rather than blanking or hanging the whole view.
 
 *For implementers: `safe_io.py` (`load_json`/`locked_json_update`), `analysis/screening/
-pipeline.py` (`_update_manifest`, `_find_cached_result`, `run_full_screening`), `analysis/
-screening/workbook_builder.py` (non-atomic save), `analysis/screening/dashboard_server.py` and
-the dashboard HTML.*
+pipeline.py` (`_update_manifest`, `_find_cached_result`, `run_full_screening`),
+`analysis/screening/phase3_deep_analysis.py` and `analysis/screening/phase4_verification.py`
+(their own `locked_json_update` cache read/write call sites -- same root cause as C1),
+`analysis/screening/workbook_builder.py` (non-atomic save), `analysis/screening/
+dashboard_server.py` and `dashboard/vaulter_dashboard.html`'s `fetchAndParseWorkbook`/
+`onMarketChange`.*
 
 ---
 
