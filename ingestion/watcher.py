@@ -139,6 +139,15 @@ def _resolve_from_path(path: Path) -> dict:
     folder_state    = remaining[0]   # e.g. "Arizona"
     folder_property = remaining[1]   # e.g. "Magic Ranch 10"
 
+    # Refresh the property/state caches against the Project Master's mtime
+    # BEFORE validating the state folder. _get_valid_states() only recomputes
+    # when _load_properties() invalidates it as a side effect (see
+    # _VALID_STATES_CACHE reset above) -- calling _get_valid_states() first
+    # would check a brand-new state (e.g. a freshly-added "Nevada") against a
+    # still-stale cache and misfile it as unknown, since that refresh would
+    # never get the chance to happen.
+    active_props, sold_props = _load_properties()
+
     # Validate state
     if folder_state.lower() not in _get_valid_states():
         log.warning(f"  [WARN] Unrecognised state folder '{folder_state}' — expected one of: {', '.join(sorted(_get_valid_states()))}")
@@ -146,9 +155,6 @@ def _resolve_from_path(path: Path) -> dict:
 
     # Normalise state to lowercase_underscore for storage (matches existing convention)
     state_key = folder_state.lower().replace(" ", "_")
-
-    # Look up property in project master to get category and status
-    active_props, sold_props = _load_properties()
 
     # Case-insensitive match on property name
     def find_prop(prop_list, name):

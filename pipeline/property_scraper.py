@@ -761,6 +761,9 @@ def get_collection():
     return _get_collection()
 
 def store_chunks(label, url, chunks, name, category, state, source_type, collection):
+    from ingestion.embedder import get_embedding_model_name
+    embedding_model = get_embedding_model_name()
+
     ts = datetime.now().isoformat()
     ids, docs, metas, embeds = [], [], [], []
     for i, chunk in enumerate(chunks):
@@ -776,6 +779,7 @@ def store_chunks(label, url, chunks, name, category, state, source_type, collect
             "chunk":       i,
             "type":        "property_intelligence",
             "scraped_at":  ts,
+            "embedding_model": embedding_model,
         })
         embeds.append(simple_embed(chunk))
     collection.upsert(ids=ids, documents=docs, metadatas=metas, embeddings=embeds)
