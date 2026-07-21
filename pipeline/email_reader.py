@@ -373,7 +373,10 @@ def _save_to_processed(raw_path: Path, name: str, prop_tags: dict, ts: str,
             log.info(f"  Saved to processed/general/ (no strong property match): {name}")
 
         dest_dir.mkdir(parents=True, exist_ok=True)
-        dest = dest_dir / name
+        # shutil.copy silently overwrites a same-named file already sitting
+        # here (e.g. two different emails both attaching "invoice.pdf" for
+        # the same property) -- dedupe_path avoids destroying the earlier one.
+        dest = safe_io.dedupe_path(dest_dir, name)
         shutil.copy(str(raw_path), str(dest))
 
     except Exception as e:
@@ -454,7 +457,18 @@ def route_attachment(token, msg_id, att, subject, collection):
             log.info(f"  PDF attachment routing error — routed to processed/general/")
 
         dest_dir.mkdir(parents=True, exist_ok=True)
-        dest_file = dest_dir / f"email_{ts}_{safe_name}"
+        # Keyed by content hash, not the fetch timestamp -- if this same
+        # email/attachment is ever processed more than once (a registry
+        # reset, an overlapping lookback window, a re-run after a crash),
+        # a timestamp-keyed name would land as a brand-new, uniquely-named
+        # file every time. Stage 1's own hash-based dedup would correctly
+        # skip re-ingesting it, but skipped files are never moved out of
+        # watched_folder -- so the folder would silently accumulate one
+        # never-cleaned-up duplicate copy per reprocessing. A stable,
+        # content-derived name means reprocessing overwrites the exact
+        # same file instead of piling up new ones.
+        content_key = hashlib.sha256(data).hexdigest()[:12]
+        dest_file   = dest_dir / f"email_{content_key}_{safe_name}"
         shutil.copy(raw_path, dest_file)
         log.info(f"  PDF → {dest_dir.relative_to(WATCH_DIR)}/: {safe_name}")
 
@@ -592,6 +606,33 @@ def route_attachment(token, msg_id, att, subject, collection):
 
 # ─── Main ─────────────────────────────────────────────────────────
 
+def _sender_is_whitelisted(sender: str, whitelist: list[str]) -> bool:
+    """
+    Match a sender address against OUTLOOK_SENDER_WHITELIST.
+
+    Deliberately NOT a substring check (`entry in sender`) -- that would
+    let a lookalike/spoofed domain like "broker@trusted-partner.com.evil.net"
+    match a whitelist entry of "trusted-partner.com", since the real
+    domain is just a substring of the fake one. A whitelist entry that
+    contains "@" must match the sender's full address exactly; a bare
+    domain entry must equal the sender's domain exactly (not merely be
+    contained in it).
+    """
+    sender_l = sender.strip().lower()
+    if "@" not in sender_l:
+        return False
+    sender_domain = sender_l.rsplit("@", 1)[1]
+
+    for entry in whitelist:
+        entry_l = entry.strip().lower()
+        if "@" in entry_l:
+            if sender_l == entry_l:
+                return True
+        elif sender_domain == entry_l:
+            return True
+    return False
+
+
 def process_all_emails(lookback_days: int | None = None):
     RAW_EMAIL_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -623,8 +664,18 @@ def process_all_emails(lookback_days: int | None = None):
                 continue
 
             if OUTLOOK_SENDER_WHITELIST:
-                if not any(addr in sender for addr in OUTLOOK_SENDER_WHITELIST):
-                    seen_ids.add(msg_id)
+                if not _sender_is_whitelisted(sender, OUTLOOK_SENDER_WHITELIST):
+                    # Deliberately NOT marked seen -- this message was never
+                    # actually processed, just rejected by the current
+                    # whitelist. If the whitelist is later updated to
+                    # include this sender (e.g. a new broker is onboarded),
+                    # this email needs to still be eligible for processing
+                    # on the next run instead of being permanently lost.
+                    # list_messages() already fetched this message's
+                    # metadata in one bulk call for the whole folder, so
+                    # re-checking it against the whitelist every run costs
+                    # nothing extra -- only actually-processed messages
+                    # need the "don't refetch" guarantee seen_ids provides.
                     skipped += 1
                     continue
 

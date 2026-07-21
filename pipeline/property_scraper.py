@@ -534,6 +534,17 @@ def filter_properties(file_props: list[dict], source_name: str, skipped_names: s
     return active, source_name
 
 
+# Cached against the Project Master file's mtime -- both load_properties()
+# and load_all_properties() are called repeatedly within a single
+# email/scrape run (once per email, once per attachment, once per
+# scraped property), and re-parsing from scratch every time is expensive
+# when the Project Master is a scanned PDF requiring OCR. A cache hit
+# just costs one stat() call; the file's mtime changing (a fresh
+# Smartsheet export dropped in) still invalidates it automatically.
+_properties_cache     = {"mtime": None, "result": None}
+_all_properties_cache = {"mtime": None, "result": None}
+
+
 def load_properties() -> tuple[list[dict], str]:
     """
     Load properties from whatever file is in data/project_master/.
@@ -550,6 +561,10 @@ def load_properties() -> tuple[list[dict], str]:
             "Supported formats: PDF, CSV, Excel (.xlsx)\n"
         )
 
+    mtime = file.stat().st_mtime
+    if _properties_cache["result"] is not None and _properties_cache["mtime"] == mtime:
+        return _properties_cache["result"]
+
     ext = file.suffix.lower()
     log.info(f"Loading properties from: {file.name}")
     try:
@@ -564,7 +579,9 @@ def load_properties() -> tuple[list[dict], str]:
             props = parse_text(file)
 
         if props:
-            return filter_properties(props, file.name, skipped_names)
+            result = filter_properties(props, file.name, skipped_names)
+            _properties_cache["mtime"], _properties_cache["result"] = mtime, result
+            return result
 
         raise ValueError(f"Could not extract any properties from {file.name}")
 
@@ -606,6 +623,10 @@ def load_all_properties() -> tuple[list[dict], list[dict]]:
             f"  {PROJECT_MASTER_DIR}\n"
             "Supported formats: PDF, CSV, Excel (.xlsx)\n"
         )
+
+    mtime = file.stat().st_mtime
+    if _all_properties_cache["result"] is not None and _all_properties_cache["mtime"] == mtime:
+        return _all_properties_cache["result"]
 
     ext           = file.suffix.lower()
     skipped_names = set()
@@ -651,6 +672,7 @@ def load_all_properties() -> tuple[list[dict], list[dict]]:
         f"  {len(active)} active properties, "
         f"{len(sold)} sold/struck-through properties"
     )
+    _all_properties_cache["mtime"], _all_properties_cache["result"] = mtime, (active, sold)
     return active, sold
 
 

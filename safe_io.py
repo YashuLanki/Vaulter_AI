@@ -92,6 +92,26 @@ def save_text_atomic(path: Path, text: str) -> None:
     tmp_path.replace(path)
 
 
+def dedupe_path(dest_dir: Path, filename: str) -> Path:
+    """
+    Return a path inside dest_dir that won't collide with an existing
+    file. shutil.move()/shutil.copy() silently overwrite a same-named
+    destination -- this appends a numeric suffix instead, so two
+    different documents that happen to share a filename (two separate
+    "survey.pdf" drops for the same property, two email attachments both
+    named "invoice.pdf", etc.) don't destroy one another.
+    """
+    candidate = dest_dir / filename
+    if not candidate.exists():
+        return candidate
+
+    stem, suffix = Path(filename).stem, Path(filename).suffix
+    n = 2
+    while (dest_dir / f"{stem}_{n}{suffix}").exists():
+        n += 1
+    return dest_dir / f"{stem}_{n}{suffix}"
+
+
 def locked_json_update(path: Path, update_fn: Callable[[dict], dict], default=None,
                         timeout: float = DEFAULT_LOCK_TIMEOUT_SECONDS) -> dict:
     """

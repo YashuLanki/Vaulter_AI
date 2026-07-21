@@ -129,11 +129,19 @@ def cmd_stats():
     print(f"  Total chunks in ChromaDB : {stats['total_chunks']}")
     print()
 
-    print(f"  Stage 1 — PDF Documents ({len(registry)})")
-    if registry:
-        for _, info in registry.items():
+    # Each hash can map to more than one ingestion record now -- the same
+    # physical file (e.g. a shared plat map) may have been legitimately
+    # ingested for more than one property. Flatten before counting/printing.
+    all_entries = [
+        entry
+        for value in registry.values()
+        for entry in (value if isinstance(value, list) else [value])
+    ]
+    print(f"  Stage 1 — PDF Documents ({len(all_entries)})")
+    if all_entries:
+        for info in all_entries:
             ocr_tag = " [OCR]" if info.get("ocr_used") else ""
-            print(f"    * {info['filename']}{ocr_tag}")
+            print(f"    * {info['filename']} ({info.get('property', 'unknown')}){ocr_tag}")
             print(f"      {info['chunks']} chunks | {info['pages']} pages | ingested {info['ingested_at'][:10]}")
     else:
         print("    (none yet — drop PDFs into data/watched_folder/State/Property/)")

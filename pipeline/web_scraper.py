@@ -203,6 +203,21 @@ def get_collection():
 
 def store_chunks(source_name: str, url: str, chunks: list[str], collection,
                  property_tags: dict | None = None):
+    # Chunk IDs are content-hash-derived, so when a page's text changes
+    # between scrapes, the new chunks get entirely new IDs and upsert()
+    # alone would just add them alongside the old ones -- the previous
+    # version's chunks would never be removed, growing unbounded on every
+    # content change for a source scraped on a recurring schedule. Delete
+    # this source's existing chunks first so each scrape fully replaces
+    # the last one instead of accumulating stale copies.
+    try:
+        collection.delete(where={"$and": [
+            {"type":   {"$eq": "web_scrape"}},
+            {"source": {"$eq": source_name}},
+        ]})
+    except Exception as e:
+        log.warning(f"Could not clear old chunks for '{source_name}' before storing new ones (continuing): {e}")
+
     timestamp = datetime.now().isoformat()
     ids, docs, metas, embeds = [], [], [], []
     base_meta = {

@@ -721,11 +721,12 @@ def parse_final_response(text: str) -> dict:
     current = None
     for line in text.splitlines():
         stripped = line.strip()
+        header_line = phase3_deep_analysis.normalize_header_line(stripped)
         matched = False
         for key in sections:
-            if stripped.startswith(f"{key}:"):
+            if header_line.startswith(f"{key}:"):
                 current = key
-                remainder = stripped[len(key) + 1:].strip()
+                remainder = header_line[len(key) + 1:].strip()
                 if remainder:
                     sections[key].append(remainder)
                 matched = True
@@ -811,51 +812,67 @@ def run_verification(
 
     final_results = {}
     for addr, tier, score in finalist_tuples:
-        row = top_listings[top_listings["Property Address"] == addr].iloc[0]
+        row = top_listings[top_listings["_Screening_Key"] == addr].iloc[0]
         key = _final_cache_key(row, deep_analyses[addr])
 
         if key in cache:
             parsed_final = dict(cache[key])
             cache_hits += 1
         else:
-            if available_apis is None:
-                available_apis = probe_available_apis(
-                    google_api_key, include_low_value_apis=include_low_value_apis, cache_dir=cache_dir,
+            try:
+                if available_apis is None:
+                    available_apis = probe_available_apis(
+                        google_api_key, include_low_value_apis=include_low_value_apis, cache_dir=cache_dir,
+                    )
+
+                enrichment = enrich_listing(row, google_api_key, available_apis, cache_dir=cache_dir)
+                enrichment_text = format_enrichment_for_prompt(enrichment)
+
+                satellite = enrichment.get("satellite", {"status": "ERROR", "image_bytes": None})
+                streetview = enrichment.get("streetview", {"status": "ERROR", "image_bytes": None})
+                has_satellite = satellite["status"] == "OK" and satellite["image_bytes"] is not None
+                has_streetview = streetview["status"] == "OK" and streetview["image_bytes"] is not None
+
+                prompt = build_final_prompt(row, deep_analyses[addr], enrichment_text, has_satellite, has_streetview)
+
+                content = []
+                if has_satellite:
+                    image_b64 = base64.standard_b64encode(satellite["image_bytes"]).decode("utf-8")
+                    content.append({
+                        "type": "image",
+                        "source": {"type": "base64", "media_type": "image/png", "data": image_b64},
+                    })
+                if has_streetview:
+                    sv_b64 = base64.standard_b64encode(streetview["image_bytes"]).decode("utf-8")
+                    content.append({
+                        "type": "image",
+                        "source": {"type": "base64", "media_type": "image/jpeg", "data": sv_b64},
+                    })
+                content.append({"type": "text", "text": prompt})
+
+                response = client.messages.create(
+                    model="claude-sonnet-4-6",
+                    max_tokens=1400,
+                    messages=[{"role": "user", "content": content}],
                 )
-
-            enrichment = enrich_listing(row, google_api_key, available_apis, cache_dir=cache_dir)
-            enrichment_text = format_enrichment_for_prompt(enrichment)
-
-            satellite = enrichment.get("satellite", {"status": "ERROR", "image_bytes": None})
-            streetview = enrichment.get("streetview", {"status": "ERROR", "image_bytes": None})
-            has_satellite = satellite["status"] == "OK" and satellite["image_bytes"] is not None
-            has_streetview = streetview["status"] == "OK" and streetview["image_bytes"] is not None
-
-            prompt = build_final_prompt(row, deep_analyses[addr], enrichment_text, has_satellite, has_streetview)
-
-            content = []
-            if has_satellite:
-                image_b64 = base64.standard_b64encode(satellite["image_bytes"]).decode("utf-8")
-                content.append({
-                    "type": "image",
-                    "source": {"type": "base64", "media_type": "image/png", "data": image_b64},
-                })
-            if has_streetview:
-                sv_b64 = base64.standard_b64encode(streetview["image_bytes"]).decode("utf-8")
-                content.append({
-                    "type": "image",
-                    "source": {"type": "base64", "media_type": "image/jpeg", "data": sv_b64},
-                })
-            content.append({"type": "text", "text": prompt})
-
-            response = client.messages.create(
-                model="claude-sonnet-4-6",
-                max_tokens=1400,
-                messages=[{"role": "user", "content": content}],
-            )
-            parsed_final = parse_final_response(response.content[0].text)
-            if cache_path:
-                safe_io.locked_json_update(cache_path, lambda current, k=key, p=parsed_final: {**current, k: dict(p)})
+                if not response.content:
+                    raise ValueError("Claude returned an empty response (no content blocks)")
+                parsed_final = parse_final_response(response.content[0].text)
+                if cache_path:
+                    safe_io.locked_json_update(cache_path, lambda current, k=key, p=parsed_final: {**current, k: dict(p)})
+            except Exception as e:
+                # A single finalist's Google Maps/Claude call failing (rate
+                # limit, empty response, transient network error) must not
+                # abort the whole Phase 4 batch and lose every OTHER
+                # finalist's verdict. Record a clearly-flagged placeholder
+                # so this one is still visible for manual follow-up instead
+                # of crashing the run or silently disappearing.
+                log.error(f"  Phase 4 verification failed for '{addr}': {e}")
+                parsed_final = {
+                    "VISUAL_INSPECTION": "", "GROUND_TRUTH_FINDINGS": "", "RISK_ASSESSMENT": "",
+                    "FINAL_RECOMMENDATION": f"VERIFICATION FAILED -- needs manual review ({e})",
+                    "REMAINING_DILIGENCE_ITEMS": "",
+                }
 
         parsed_final["Composite_Score"] = deep_analyses[addr]["Composite_Score"]
         parsed_final["Phase3_Recommendation"] = deep_analyses[addr]["RECOMMENDATION"]

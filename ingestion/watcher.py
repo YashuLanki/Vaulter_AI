@@ -33,6 +33,7 @@ from pathlib import Path
 from watchdog.events import FileSystemEventHandler
 from watchdog.observers import Observer
 
+import safe_io
 from config import WATCH_DIR, PROCESSED_DIR, get_chunk_settings
 from ingestion.extractor import extract, is_supported
 from ingestion.chunker import chunk_text
@@ -46,36 +47,36 @@ from ingestion.registry import (
 log = logging.getLogger("vaulter.watcher")
 
 # ─── Property List Cache ──────────────────────────────────────────────────────
-_PROPERTIES:      list[dict] | None = None
-_SOLD_PROPERTIES: list[dict] | None = None
+# Cached against the Project Master file's mtime rather than forever: a team
+# member re-exporting an updated Smartsheet Project Master into
+# data/project_master/ (new/renamed/sold properties) is picked up on the next
+# file event without needing a full watcher/MCP-server restart, while repeat
+# calls between edits still hit the cache instead of re-parsing every time.
+_PROPERTIES:              list[dict] | None = None
+_SOLD_PROPERTIES:         list[dict] | None = None
+_PROPERTIES_SOURCE_MTIME: float | None = "unset"  # sentinel distinct from a real None mtime
 
-# Valid state folder names — derived dynamically from the property list on first use.
-# Falls back to the known set if the Project Master file isn't present yet.
+# Valid state folder names — derived dynamically from the property list.
 _VALID_STATES_CACHE: set | None = None
 
-def _get_valid_states() -> set:
-    """Return the set of valid state folder names from the live property list."""
-    global _VALID_STATES_CACHE
-    if _VALID_STATES_CACHE is not None:
-        return _VALID_STATES_CACHE
+
+def _project_master_mtime():
+    """Current Project Master file's mtime, or None if no file exists yet."""
     try:
-        from pipeline.property_scraper import load_all_properties
-        active, sold = load_all_properties()
-        states = {p["state"].lower() for p in active + sold if p.get("state")}
-        if states:
-            _VALID_STATES_CACHE = states
-            return _VALID_STATES_CACHE
+        from pipeline.property_scraper import find_project_file
+        file = find_project_file()
+        return file.stat().st_mtime if file else None
     except Exception:
-        pass
-    # Fallback if Project Master not yet available
-    _VALID_STATES_CACHE = {"arizona", "california", "new mexico", "colorado", "texas"}
-    return _VALID_STATES_CACHE
+        return None
 
 
 def _load_properties() -> tuple[list[dict], list[dict]]:
-    global _PROPERTIES, _SOLD_PROPERTIES
-    if _PROPERTIES is not None:
+    global _PROPERTIES, _SOLD_PROPERTIES, _PROPERTIES_SOURCE_MTIME, _VALID_STATES_CACHE
+
+    current_mtime = _project_master_mtime()
+    if _PROPERTIES is not None and current_mtime == _PROPERTIES_SOURCE_MTIME:
         return _PROPERTIES, _SOLD_PROPERTIES
+
     try:
         from pipeline.property_scraper import load_all_properties
         _PROPERTIES, _SOLD_PROPERTIES = load_all_properties()
@@ -88,7 +89,22 @@ def _load_properties() -> tuple[list[dict], list[dict]]:
         log.warning(f"Could not load properties: {e}")
         _PROPERTIES      = []
         _SOLD_PROPERTIES = []
+
+    _PROPERTIES_SOURCE_MTIME = current_mtime
+    _VALID_STATES_CACHE      = None  # derived from the property list -- recompute alongside it
     return _PROPERTIES, _SOLD_PROPERTIES
+
+
+def _get_valid_states() -> set:
+    """Return the set of valid state folder names from the live property list."""
+    global _VALID_STATES_CACHE
+    if _VALID_STATES_CACHE is not None:
+        return _VALID_STATES_CACHE
+    active, sold = _load_properties()
+    states = {p["state"].lower() for p in active + sold if p.get("state")}
+    # Fallback if Project Master not yet available
+    _VALID_STATES_CACHE = states or {"arizona", "california", "new mexico", "colorado", "texas"}
+    return _VALID_STATES_CACHE
 
 
 # ─── Folder-Based Property Resolution ────────────────────────────────────────
@@ -223,18 +239,24 @@ def ingest_file(path: Path):
         return
 
     try:
-        # Step 0: Hash + dedup check. Deliberately inside this try — a file
-        # can vanish between the watchdog event firing and this running
-        # (e.g. a duplicate event for a file another event already moved
-        # to processed/), which raises FileNotFoundError here. Letting that
+        # Step 0: Hash file. Deliberately inside this try — a file can
+        # vanish between the watchdog event firing and this running (e.g.
+        # a duplicate event for a file another event already moved to
+        # processed/), which raises FileNotFoundError here. Letting that
         # escape would kill the watchdog dispatch thread silently.
         doc_hash = get_file_hash(path)
-        if is_already_ingested(doc_hash):
-            log.info(f"  [SKIP] Already ingested: {path.name}")
-            return
 
         # Step 1: Resolve property from folder path
         match = _resolve_from_path(path)
+
+        # Step 1b: Dedup check, scoped to THIS property -- the same
+        # physical file (e.g. a shared county plat map) dropped into a
+        # different property's folder is a legitimate new ingestion for
+        # that property, not a duplicate to be silently skipped and left
+        # sitting in watched_folder forever.
+        if is_already_ingested(doc_hash, match["property"], match["state"]):
+            log.info(f"  [SKIP] Already ingested for {match['property']}: {path.name}")
+            return
 
         if match["matched"]:
             log.info(f"  Property : {match['property']}")
@@ -283,13 +305,19 @@ def ingest_file(path: Path):
             folder_label = "processed/unknown/"
 
         dest_dir.mkdir(parents=True, exist_ok=True)
-        shutil.move(str(path), str(dest_dir / path.name))
+        dest_path = safe_io.dedupe_path(dest_dir, path.name)
+        if dest_path.name != path.name:
+            log.warning(
+                f"  [WARN] '{path.name}' already exists in {folder_label} — "
+                f"saving this one as '{dest_path.name}' instead of overwriting it"
+            )
+        shutil.move(str(path), str(dest_path))
         log.info(f"  Moved to {folder_label}")
 
         # Step 7: Record in registry
         record_ingestion(
             file_hash=doc_hash,
-            filename=path.name,
+            filename=dest_path.name,
             chunks=len(chunks),
             pages=page_count,
             ocr_used=metadata.get("ocr_used", False),
@@ -302,6 +330,48 @@ def ingest_file(path: Path):
 
     except Exception as e:
         log.error(f"  [ERROR] Failed to ingest {path.name}: {e}", exc_info=True)
+
+
+# ─── File Settle Detection ────────────────────────────────────────────────────
+
+def _wait_until_settled(path: Path, poll_interval: float = 0.5, stable_checks: int = 3, timeout: float = 120.0) -> bool:
+    """
+    Wait until a file's size stops changing before ingesting it.
+
+    A fixed 1-second sleep works for small PDFs but isn't long enough for a
+    large file still being copied/synced into watched_folder (e.g. a big
+    scanned survey coming in over OneDrive) -- ingestion would then hash
+    and extract a half-written file. Polls the file size instead: once it
+    reads the same size on `stable_checks` consecutive checks, the file is
+    considered done writing. Gives up after `timeout` seconds so a file
+    that's genuinely still growing (or was deleted mid-wait) doesn't hang
+    the watchdog dispatch thread forever.
+
+    Returns False if the file disappeared before settling (e.g. a
+    duplicate event for a file another event already moved to processed/).
+    """
+    deadline = time.monotonic() + timeout
+    last_size = -1
+    stable_count = 0
+
+    while time.monotonic() < deadline:
+        try:
+            size = path.stat().st_size
+        except FileNotFoundError:
+            return False
+
+        if size == last_size:
+            stable_count += 1
+            if stable_count >= stable_checks:
+                return True
+        else:
+            stable_count = 0
+            last_size = size
+
+        time.sleep(poll_interval)
+
+    log.warning(f"  [WARN] {path.name} never stopped growing after {timeout}s — ingesting anyway")
+    return True
 
 
 # ─── Watchdog Event Handler ───────────────────────────────────────────────────
@@ -322,8 +392,8 @@ class FileHandler(FileSystemEventHandler):
             path = Path(event.src_path)
             # Must be inside State/Property subfolder — skip files in state folder root
             if is_supported(path) and len(path.relative_to(WATCH_DIR).parts) >= 3:
-                time.sleep(1)
-                ingest_file(path)
+                if _wait_until_settled(path):
+                    ingest_file(path)
         except Exception as e:
             log.error(f"  [ERROR] on_created handler failed for {event.src_path}: {e}", exc_info=True)
 
@@ -333,8 +403,8 @@ class FileHandler(FileSystemEventHandler):
                 return
             path = Path(event.dest_path)
             if is_supported(path) and len(path.relative_to(WATCH_DIR).parts) >= 3:
-                time.sleep(1)
-                ingest_file(path)
+                if _wait_until_settled(path):
+                    ingest_file(path)
         except Exception as e:
             log.error(f"  [ERROR] on_moved handler failed for {event.dest_path}: {e}", exc_info=True)
 

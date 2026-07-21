@@ -45,6 +45,7 @@ EXCLUDE_FROM_ANALYSIS = {
     "Leasing Company Address", "Leasing Company City State Zip",
     "Property Manager Contact", "Property Manager Phone",
     "Property Manager Address", "Property Manager City State Zip",
+    "_Screening_Key",  # internal dedup key (see _add_unique_keys) -- not real listing data
 }
 
 # Columns computed by THIS pipeline run (Phase 1/2), not part of the raw
@@ -72,17 +73,51 @@ opposite of raw predevelopment upside.
 """
 
 
+def _add_unique_keys(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Add a `_Screening_Key` column: the Property Address, disambiguated
+    with a "(#2)", "(#3)"... suffix for any address that repeats within
+    this dataframe.
+
+    Two different listings sharing the same address (multiple parcels at
+    one street address, or several rows with a blank/generic address) are
+    a real possibility in a CoStar export. Every stage downstream
+    (Phase 3's per-listing results, Phase 4's finalist selection, the
+    combined workbook's matrix-sheet columns) keys a dict by this value --
+    without disambiguating it first, the second listing's analysis would
+    silently overwrite the first's under the identical key, and one whole
+    listing's worth of Claude analysis (which was still paid for) would
+    just vanish from the output. Built once here and reused everywhere so
+    every stage agrees on the same key for the same row.
+    """
+    df = df.copy()
+    addresses = df["Property Address"] if "Property Address" in df.columns else pd.Series([None] * len(df), index=df.index)
+
+    counts = {}
+    keys = []
+    for i, val in enumerate(addresses.tolist(), start=1):
+        base = str(val).strip() if val is not None and str(val).strip() and str(val).strip().lower() != "nan" else f"Listing_{i}"
+        counts[base] = counts.get(base, 0) + 1
+        keys.append(base if counts[base] == 1 else f"{base} (#{counts[base]})")
+
+    df["_Screening_Key"] = keys
+    return df
+
+
 def get_top_listings(ranked_df: pd.DataFrame, top_n: int = TOP_N_DEFAULT) -> pd.DataFrame:
     """ranked_df is already Phase-1 + Phase-2 processed and sorted by
     Composite_Score descending (see phase2_ranking.rank_listings) -- this
-    is just a head(top_n), no re-running of upstream phases."""
-    return ranked_df.head(top_n)
+    is just a head(top_n), no re-running of upstream phases. Adds
+    _Screening_Key (see _add_unique_keys) so every downstream stage has a
+    guaranteed-unique key to use instead of the raw, possibly-duplicated
+    Property Address."""
+    return _add_unique_keys(ranked_df.head(top_n))
 
 
 def build_scoreboard(top_listings: pd.DataFrame) -> str:
     lines = []
     for i, (_, row) in enumerate(top_listings.iterrows(), 1):
-        addr = row.get("Property Address", "Unknown")
+        addr = row.get("_Screening_Key", row.get("Property Address", "Unknown"))
         lines.append(
             f"#{i} {addr} | Composite: {row['Composite_Score']} | "
             f"DaysOnMarket score: {row['Score_DaysOnMarket']:.0f} | "
@@ -195,6 +230,32 @@ Now write your analysis for the listing above, in the exact format specified."""
     ]
 
 
+def normalize_header_line(line: str) -> str:
+    """
+    Strip markdown heading/emphasis wrapping from a line before checking
+    whether it's one of the required section headers.
+
+    The prompt asks Claude for headers verbatim (e.g. "RECOMMENDATION:"),
+    but models sometimes wrap them in markdown anyway -- "**RECOMMENDATION:**",
+    "**RECOMMENDATION**:", "# RECOMMENDATION:", "__RECOMMENDATION:__". A raw
+    `line.startswith(f"{key}:")` check fails on all of these, silently
+    misfiling that whole section's content into whatever the previous
+    section was (or dropping it entirely if it's the very first header,
+    since `current` is still None). This normalized value is used only
+    for the header match itself -- the original line (with any legitimate
+    markdown in bullet content) is still what gets stored.
+    """
+    s = line.strip().lstrip("#").strip()
+    # "**"/"__" are always markdown bold wrapping, never part of a key
+    # name, so stripping them anywhere is safe. A single leading/trailing
+    # "*" or "_" (italic wrapping, or bold split around the colon like
+    # "**KEY**:") is only stripped from the very ends -- key names like
+    # STRENGTHS_AND_RISKS use "_" as an internal separator, so a global
+    # strip would wrongly mangle the key itself.
+    s = s.replace("**", "").replace("__", "")
+    return s.strip("*_").strip()
+
+
 def parse_response(text: str) -> dict:
     sections = {
         "STRENGTHS_AND_RISKS": [],
@@ -206,11 +267,12 @@ def parse_response(text: str) -> dict:
     current = None
     for line in text.splitlines():
         stripped = line.strip()
+        header_line = normalize_header_line(stripped)
         matched = False
         for key in sections:
-            if stripped.startswith(f"{key}:"):
+            if header_line.startswith(f"{key}:"):
                 current = key
-                remainder = stripped[len(key) + 1:].strip()
+                remainder = header_line[len(key) + 1:].strip()
                 if remainder:
                     sections[key].append(remainder)
                 matched = True
@@ -261,23 +323,39 @@ def run_deep_analysis(ranked_df: pd.DataFrame, api_key: str, top_n: int = TOP_N_
 
     results = {}
     for i, (_, row) in enumerate(top_listings.iterrows(), 1):
-        addr = row.get("Property Address", f"Listing_{i}")
+        addr = row.get("_Screening_Key", row.get("Property Address", f"Listing_{i}"))
         key = _cache_key(_cacheable_record_text(row))
 
         if key in cache:
             parsed = dict(cache[key])
             cache_hits += 1
         else:
-            content_blocks = build_prompt(row, scoreboard, i, top_n=len(top_listings))
-            response = client.messages.create(
-                model="claude-sonnet-4-6",
-                max_tokens=1500,
-                messages=[{"role": "user", "content": content_blocks}],
-            )
-            text = response.content[0].text
-            parsed = parse_response(text)
-            if cache_path:
-                safe_io.locked_json_update(cache_path, lambda current, k=key, p=parsed: {**current, k: dict(p)})
+            try:
+                content_blocks = build_prompt(row, scoreboard, i, top_n=len(top_listings))
+                response = client.messages.create(
+                    model="claude-sonnet-4-6",
+                    max_tokens=1500,
+                    messages=[{"role": "user", "content": content_blocks}],
+                )
+                if not response.content:
+                    raise ValueError("Claude returned an empty response (no content blocks)")
+                text = response.content[0].text
+                parsed = parse_response(text)
+                if cache_path:
+                    safe_io.locked_json_update(cache_path, lambda current, k=key, p=parsed: {**current, k: dict(p)})
+            except Exception as e:
+                # One bad/empty Claude response must not abort the whole
+                # batch -- every OTHER listing in this run (including any
+                # after this one) still deserves its analysis. Record a
+                # clearly-flagged placeholder instead so this listing is
+                # still visible in the workbook for manual follow-up,
+                # rather than either crashing the run or silently vanishing.
+                log.error(f"  Phase 3 analysis failed for '{addr}': {e}")
+                parsed = {
+                    "STRENGTHS_AND_RISKS": "", "ENTITLEMENT_RISK": "",
+                    "RECOMMENDATION": f"ANALYSIS FAILED -- needs manual review ({e})",
+                    "MOIC_FIT": "", "RED_FLAGS": "",
+                }
 
         parsed["Composite_Score"] = row["Composite_Score"]
         results[addr] = parsed

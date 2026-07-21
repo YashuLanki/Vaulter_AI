@@ -102,6 +102,17 @@ def compute_dynamic_weights(df: pd.DataFrame) -> dict:
         "flood_risk": df["Flood Risk Area"].notna().mean(),
     }
     total = sum(completeness.values())
+    if not total or pd.isna(total):
+        # Every one of these 5 columns is completely empty across every
+        # surviving row (or there are no surviving rows at all) -- dividing
+        # by zero here would silently turn every weight, and therefore
+        # every listing's Composite_Score, into NaN. That corrupts Phase 2
+        # ranking outright and cascades into Phase 3's top-N selection,
+        # Phase 4 tiering, and the workbook's Composite_Score column, all
+        # of which trust Composite_Score to be a real number. Fall back to
+        # equal weighting across all 5 dimensions instead.
+        n = len(completeness)
+        return {k: 1.0 / n for k in completeness}
     return {k: v / total for k, v in completeness.items()}
 
 

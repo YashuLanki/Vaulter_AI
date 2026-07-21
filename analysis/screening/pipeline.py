@@ -101,7 +101,23 @@ def _update_manifest(output_dir: Path, market: str, market_slug: str, timestamp:
 
     def _apply(manifest: dict) -> dict:
         manifest.setdefault("markets", [])
-        manifest["markets"] = [m for m in manifest["markets"] if m.get("market_slug") != market_slug]
+        # Only drop the entry this new one is an exact duplicate of --
+        # same market AND same source_hash/top_n/include_low_value_apis,
+        # matching _find_cached_result's own lookup key exactly. Evicting
+        # by market_slug alone would silently discard every OTHER
+        # still-valid cached combo for this same market (a different
+        # CoStar export, a different top_n, a different API setting),
+        # each with its own workbook file left on disk with nothing in
+        # the manifest pointing to it anymore -- an orphan that
+        # _find_cached_result can then never serve back to anyone, even
+        # for the exact file/settings that produced it.
+        manifest["markets"] = [
+            m for m in manifest["markets"]
+            if not (m.get("market_slug") == market_slug
+                    and m.get("source_hash") == source_hash
+                    and m.get("top_n") == top_n
+                    and m.get("include_low_value_apis", False) == include_low_value_apis)
+        ]
         manifest["markets"].append(new_entry)
         manifest["markets"].sort(key=lambda m: m["timestamp"], reverse=True)
         return manifest
@@ -170,7 +186,7 @@ def run_full_screening(
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
     top_listings = phase3_deep_analysis.get_top_listings(ranked_df, top_n)
-    top10_addresses = top_listings["Property Address"].tolist() if "Property Address" in top_listings.columns else []
+    top10_addresses = top_listings["_Screening_Key"].tolist() if "_Screening_Key" in top_listings.columns else []
 
     deep_analyses = phase3_deep_analysis.run_deep_analysis(
         ranked_df, anthropic_api_key, top_n=top_n, cache_dir=output_dir,
@@ -196,7 +212,7 @@ def run_full_screening(
 
     top_candidates = []
     for _, row in top_listings.head(5).iterrows():
-        addr = row.get("Property Address", "Unknown")
+        addr = row.get("_Screening_Key", row.get("Property Address", "Unknown"))
         recommendation = deep_analyses.get(addr, {}).get("RECOMMENDATION", "")
         snippet = recommendation.splitlines()[0] if recommendation else ""
         top_candidates.append({

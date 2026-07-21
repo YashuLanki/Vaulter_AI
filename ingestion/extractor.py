@@ -14,6 +14,7 @@ All file types are extracted into plain text, then passed through the
 same chunker and embedder as before.
 """
 
+import itertools
 import logging
 from datetime import datetime
 from pathlib import Path
@@ -75,24 +76,15 @@ def extract(path: Path) -> tuple[str, dict]:
 
 def _extract_pdf(path: Path, metadata: dict) -> tuple[str, dict]:
     """
-    Try pdfplumber first (text-based PDFs).
-    If no text is found, automatically fall back to Tesseract OCR.
+    Extract each page with pdfplumber. Any individual page that yields no
+    text layer (e.g. a scanned image page mixed into an otherwise
+    digital PDF) falls back to Tesseract OCR for that page only, so a
+    mostly-digital PDF with a few scanned pages doesn't silently drop
+    those pages -- only a whole-document OCR fallback would have caught
+    an all-scanned PDF, missing the mixed case.
     """
-    # Strategy 1: pdfplumber
-    text, metadata = _extract_with_pdfplumber(path, metadata)
-
-    # Strategy 2: OCR fallback for scanned/image PDFs
-    if not text.strip():
-        log.info("  No text layer found — running OCR (this may take a moment)...")
-        text = _extract_with_ocr(path, metadata)
-        metadata["ocr_used"] = True
-
-    return text, metadata
-
-
-def _extract_with_pdfplumber(path: Path, metadata: dict) -> tuple[str, dict]:
-    """Extract text and tables from a text-based PDF using pdfplumber."""
     full_text = []
+    ocr_page_images = None  # lazily rendered only if some page needs it
 
     with pdfplumber.open(path) as pdf:
         metadata["page_count"] = len(pdf.pages)
@@ -103,8 +95,23 @@ def _extract_with_pdfplumber(path: Path, metadata: dict) -> tuple[str, dict]:
 
         for page_num, page in enumerate(pdf.pages, start=1):
             text = page.extract_text()
-            if text:
+
+            if text and text.strip():
                 full_text.append(f"[Page {page_num}]\n{text.strip()}")
+            else:
+                log.info(f"  Page {page_num} has no text layer — running OCR...")
+                if ocr_page_images is None:
+                    ocr_page_images = convert_from_path(
+                        str(path), dpi=300, poppler_path=POPPLER_PATH
+                    )
+                    metadata["ocr_used"] = True
+
+                if page_num <= len(ocr_page_images):
+                    ocr_text = pytesseract.image_to_string(
+                        ocr_page_images[page_num - 1], lang="eng"
+                    )
+                    if ocr_text.strip():
+                        full_text.append(f"[Page {page_num} - OCR]\n{ocr_text.strip()}")
 
             tables = page.extract_tables()
             if tables:
@@ -115,24 +122,6 @@ def _extract_with_pdfplumber(path: Path, metadata: dict) -> tuple[str, dict]:
                         full_text.append(table_text)
 
     return "\n\n".join(full_text), metadata
-
-
-def _extract_with_ocr(path: Path, metadata: dict) -> str:
-    """
-    Convert each PDF page to an image and run Tesseract OCR.
-    Used automatically for scanned or image-based PDFs.
-    """
-    pages = convert_from_path(str(path), dpi=300, poppler_path=POPPLER_PATH)
-    metadata["page_count"] = len(pages)
-
-    ocr_text = []
-    for i, page_image in enumerate(pages, start=1):
-        log.info(f"  OCR processing page {i}/{len(pages)}...")
-        text = pytesseract.image_to_string(page_image, lang="eng")
-        if text.strip():
-            ocr_text.append(f"[Page {i} - OCR]\n{text.strip()}")
-
-    return "\n\n".join(ocr_text)
 
 
 def _table_to_text(table: list, page_num: int) -> str:
@@ -159,8 +148,19 @@ def _extract_excel(path: Path, metadata: dict) -> tuple[str, dict]:
     metadata["has_tables"] = True
 
     try:
+        wb_formulas = None
         if path.suffix.lower() == ".xlsx":
             wb = openpyxl.load_workbook(path, data_only=True)
+            # data_only=True returns None for any formula cell that was
+            # never recalculated/saved by Excel (e.g. a workbook generated
+            # programmatically and never opened in Excel) -- a row made up
+            # entirely of such cells looks completely empty and would be
+            # silently skipped below, even though it has real (just
+            # uncached) data. Load a second, formula-preserving copy so we
+            # can tell "genuinely blank row" apart from "all-uncalculated-
+            # formula row" and fall back to showing the formula text
+            # itself rather than losing the row entirely.
+            wb_formulas = openpyxl.load_workbook(path, data_only=False)
         else:
             # .xls — convert via openpyxl after reading with xlrd
             import xlrd
@@ -174,9 +174,16 @@ def _extract_excel(path: Path, metadata: dict) -> tuple[str, dict]:
             ws = wb[sheet_name]
             sheet_lines = [f"[Sheet: {sheet_name}]"]
 
-            for row in ws.iter_rows(values_only=True):
+            formula_rows = wb_formulas[sheet_name].iter_rows(values_only=True) if wb_formulas else iter(())
+            for row, formula_row in itertools.zip_longest(ws.iter_rows(values_only=True), formula_rows, fillvalue=()):
                 # Skip completely empty rows
                 if all(cell is None for cell in row):
+                    if any(isinstance(c, str) and c.startswith("=") for c in formula_row):
+                        # Not actually empty -- every cell is an
+                        # uncalculated formula. Show the formula text
+                        # itself since we can't evaluate it ourselves.
+                        cleaned = [str(c) if c is not None else "" for c in formula_row]
+                        sheet_lines.append(" | ".join(cleaned))
                     continue
                 cleaned = [str(cell).strip() if cell is not None else "" for cell in row]
                 sheet_lines.append(" | ".join(cleaned))

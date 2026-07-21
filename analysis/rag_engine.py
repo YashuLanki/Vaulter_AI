@@ -240,16 +240,28 @@ def _query_matched_properties(collection, property_name: str, query: str, n: int
     """
     Find chunks where property_name appears in the pipe-separated
     matched_properties metadata field (set by property_matcher.py).
-    ChromaDB doesn't support 'contains' on strings, so we fetch a broad
-    set and filter in Python.
+    ChromaDB doesn't support 'contains' on strings, so this still filters
+    in Python -- but ranks by actual semantic relevance to `query` first
+    (via collection.query(), not the unordered collection.get() this used
+    to do) across the FULL match_count>0 set, not an arbitrary fixed-size
+    window taken before the property-name filter even runs. A property
+    whose matching chunks don't happen to land in a truncated window
+    would otherwise be silently missed entirely, and whatever WAS
+    returned had no relevance ordering at all -- just whichever chunks
+    happened to be ingested first.
     """
     try:
-        results = collection.get(
+        count = collection.count()
+        if count == 0:
+            return []
+
+        results = collection.query(
+            query_texts=[query],
+            n_results=count,
             where={"match_count": {"$gt": 0}},
-            limit=min(500, collection.count()),
-            include=["documents", "metadatas"],
+            include=["documents", "metadatas", "distances"],
         )
-        chunks = _format_get_results(results)
+        chunks = _format_query_results(results)
         # Filter to chunks that mention this property
         filtered = [
             c for c in chunks
