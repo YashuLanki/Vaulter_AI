@@ -89,8 +89,18 @@ def _resolve_costar_source(source_file: str, property_name: str = "", file_conte
 
     if file_content_b64:
         try:
-            WATCH_DIR.mkdir(parents=True, exist_ok=True)
-            dest = WATCH_DIR / source_file
+            # Must land at least 3 levels under WATCH_DIR (State/Property/file)
+            # -- the watcher (ingestion/watcher.py) silently ignores anything
+            # shallower than that, so a flat WATCH_DIR/source_file was never
+            # actually picked up despite this docstring's own claim that it
+            # would be. A pasted CoStar export spans many properties, so
+            # there's no single real state/property to file it under -- using
+            # "Unknown/General" lands it somewhere the watcher WILL ingest
+            # (it already has a documented unrecognised-state fallback that
+            # tags and moves it to processed/unknown/, exactly as this
+            # docstring describes).
+            dest = WATCH_DIR / "Unknown" / "General" / source_file
+            dest.parent.mkdir(parents=True, exist_ok=True)
             dest.write_bytes(base64.b64decode(file_content_b64))
             return dest
         except Exception as e:

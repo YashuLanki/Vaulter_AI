@@ -119,7 +119,7 @@ def get_recent_web_intelligence(n: int = 12) -> list[dict]:
         return []
 
     results = collection.get(
-        where={"type": "email"},
+        where={"type": {"$in": ["web_scrape", "property_intelligence"]}},
         include=["documents", "metadatas"],
     )
 

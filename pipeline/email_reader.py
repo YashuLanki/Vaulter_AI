@@ -196,10 +196,16 @@ def clean_email_body(text: str) -> str:
 
     return result
 
-def get_attachments(token: str, msg_id: str) -> list[dict]:
+def get_attachments(token: str, msg_id: str) -> list[dict] | None:
+    """Returns the attachment list, or None if the Graph fetch itself
+    failed (expired token, network error, etc.) — distinct from [], which
+    means the message genuinely has no attachments. Callers must NOT
+    treat a None return the same as a real empty list, or a transient
+    fetch failure gets mistaken for "no attachments" and whatever was
+    actually attached (a survey, a DD report) is never fetched again."""
     data = graph_get(token, f"/me/messages/{msg_id}/attachments")
-    if not data:
-        return []
+    if data is None:
+        return None
     return [
         {"id": a["id"], "name": a.get("name", "attachment"),
          "mime_type": a.get("contentType", ""), "size": a.get("size", 0)}
@@ -333,18 +339,26 @@ def _save_to_processed(raw_path: Path, name: str, prop_tags: dict, ts: str,
     try:
         from config import PROCESSED_DIR
 
-        # Check if we have a strong match
-        strong_match = False
+        # Check if we have a strong match. IMPORTANT: derive state/prop from
+        # THIS SAME strong match, not from prop_tags -- prop_tags comes from
+        # a completely different (subject+body text) match pass, and the two
+        # can disagree (e.g. a filename that clearly names a property, on a
+        # generic-subject broker email that never mentions it in the body).
+        # Using prop_tags here previously meant that disagreement could
+        # produce empty state/prop strings, which silently collapsed the
+        # destination to PROCESSED_DIR's own root -- not the property
+        # folder, and not processed/general/ either.
+        strong_match  = None
         if matches:
             for m in matches:
                 reasons = m.get("match_reasons", [])
                 if "name_match" in reasons or "city_match" in reasons:
-                    strong_match = True
+                    strong_match = m
                     break
 
         if strong_match:
-            state    = prop_tags.get("matched_states", "").split("|")[0].strip().lower().replace(" ", "_")
-            prop     = prop_tags.get("matched_properties", "").split("|")[0].strip()
+            state    = strong_match.get("state", "").strip().lower().replace(" ", "_")
+            prop     = strong_match.get("name", "").strip()
             dest_dir = PROCESSED_DIR / state / prop
             log.info(f"  Saved to processed: {state}/{prop}/{name}")
         else:
@@ -627,7 +641,19 @@ def process_all_emails(lookback_days: int | None = None):
 
                 store_email(msg_id, subject, sender, date_str, body, collection)
 
-                for att in get_attachments(token, msg_id):
+                attachments = get_attachments(token, msg_id)
+                if attachments is None:
+                    # Fetch failed -- do NOT mark seen, so this message is
+                    # retried next run instead of its attachments (which
+                    # could be a survey, DD report, etc.) being silently
+                    # skipped forever. The body above was still stored
+                    # successfully, so store_email's upsert will just
+                    # overwrite the same content again next run -- no harm.
+                    log.error(f"  Could not fetch attachments for '{subject[:50]}' — will retry next run")
+                    errors += 1
+                    continue
+
+                for att in attachments:
                     try:
                         route_attachment(token, msg_id, att, subject, collection)
                     except Exception as e:

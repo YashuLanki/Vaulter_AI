@@ -46,6 +46,19 @@ EXCLUDE_FROM_ANALYSIS = {
     "Property Manager Address", "Property Manager City State Zip",
 }
 
+# Columns computed by THIS pipeline run (Phase 1/2), not part of the raw
+# CoStar record -- excluded from the cache key specifically (but NOT from
+# what Claude sees in the prompt, via build_full_record_text). These are
+# recalculated fresh from percentile rank / dynamic IQR thresholds across
+# the WHOLE batch every run, so the exact same physical listing can get
+# different values here purely because other rows in the file changed --
+# hashing them defeats the cache for a listing whose own data is identical.
+EXCLUDE_FROM_CACHE_KEY = {
+    "Screening_Status", "Screening_Reasons", "Flag_Count",
+    "Score_DaysOnMarket", "Score_Price", "Score_LandUseCategory",
+    "Score_DevelopedEnv", "Score_FloodRisk", "Composite_Score",
+}
+
 INVESTMENT_THESIS = """
 Vaulter is an opportunistic, value-add land investment firm focused on
 predevelopment value-add across AZ, CA, CO, NM, and TX. Vaulter expects to
@@ -84,6 +97,20 @@ def build_full_record_text(row: pd.Series) -> str:
     lines = []
     for col, val in row.items():
         if col in EXCLUDE_FROM_ANALYSIS:
+            continue
+        if pd.isna(val):
+            continue
+        lines.append(f"{col}: {val}")
+    return "\n".join(lines)
+
+
+def _cacheable_record_text(row: pd.Series) -> str:
+    """Like build_full_record_text, but ALSO excludes the batch-dependent
+    Phase 1/2 derived columns (see EXCLUDE_FROM_CACHE_KEY) -- used only for
+    computing the cache key, never for what Claude actually sees."""
+    lines = []
+    for col, val in row.items():
+        if col in EXCLUDE_FROM_ANALYSIS or col in EXCLUDE_FROM_CACHE_KEY:
             continue
         if pd.isna(val):
             continue
@@ -220,13 +247,14 @@ def run_deep_analysis(ranked_df: pd.DataFrame, api_key: str, top_n: int = TOP_N_
 
     If cache_dir is given (the pipeline passes SCREENING_OUTPUT_DIR, which
     is shared across the whole team), each listing's analysis is cached by
-    a hash of its own full raw record -- so if the SAME listing reappears
-    in a later CoStar export (a re-list, or a file with a few new/changed
-    rows), it's reused instead of re-paying for that listing's Claude call.
-    Note: the cache key deliberately ignores the scoreboard/rank context
-    (which can shift slightly between runs as the batch composition
-    changes) -- an acceptable tradeoff since the listing's own record is
-    what actually drives the analysis content.
+    a hash of its own record, EXCLUDING the Phase 1/2 derived columns (see
+    EXCLUDE_FROM_CACHE_KEY) -- so if the SAME listing reappears in a later
+    CoStar export (a re-list, or a file with a few new/changed rows), it's
+    reused instead of re-paying for that listing's Claude call, even
+    though its Score_*/Composite_Score/Screening_Reasons would otherwise
+    differ slightly just from the batch composition changing. An
+    acceptable tradeoff since the listing's own raw record is what
+    actually drives the analysis content.
     """
     top_listings = get_top_listings(ranked_df, top_n)
     scoreboard = build_scoreboard(top_listings)
@@ -239,8 +267,7 @@ def run_deep_analysis(ranked_df: pd.DataFrame, api_key: str, top_n: int = TOP_N_
     results = {}
     for i, (_, row) in enumerate(top_listings.iterrows(), 1):
         addr = row.get("Property Address", f"Listing_{i}")
-        full_record = build_full_record_text(row)
-        key = _cache_key(full_record)
+        key = _cache_key(_cacheable_record_text(row))
 
         if key in cache:
             parsed = dict(cache[key])

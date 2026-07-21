@@ -8,6 +8,7 @@ phases, no CLI orchestration.
 """
 
 import hashlib
+import io
 import json
 import logging
 from datetime import datetime
@@ -133,7 +134,16 @@ def run_full_screening(
       9. Return a summary dict
     """
     output_dir = screening_config.SCREENING_OUTPUT_DIR
-    source_hash = hashlib.sha256(source_path.read_bytes()).hexdigest()
+    # Read the file's bytes ONCE, immediately, and reuse them for both the
+    # hash and the actual Excel parse below (via BytesIO) instead of
+    # re-opening source_path a second time later. A pasted/uploaded CoStar
+    # file lands in the ingestion watcher's own drop zone (see
+    # mcp_server.py::_resolve_costar_source) and the watcher can move it
+    # to processed/ once it notices it -- re-reading the path later would
+    # race that move. Reading everything into memory up front means the
+    # file only needs to still exist for this one read.
+    source_bytes = source_path.read_bytes()
+    source_hash = hashlib.sha256(source_bytes).hexdigest()
 
     cached = _find_cached_result(output_dir, source_hash, top_n, include_low_value_apis)
     if cached:
@@ -142,7 +152,7 @@ def run_full_screening(
                   f"skipping Phase 3/4, no new API calls made.")
         return cached
 
-    df = pd.read_excel(source_path)
+    df = pd.read_excel(io.BytesIO(source_bytes))
     total_screened = len(df)
 
     screened_df = phase1_rules.run_screener(df)

@@ -722,7 +722,13 @@ _FINAL_PROMPT_VERSION = "v1"  # bump if build_final_prompt's format changes mean
 
 
 def _final_cache_key(row: pd.Series, phase3_analysis: dict) -> str:
-    full_record = phase3_deep_analysis.build_full_record_text(row)
+    # Uses _cacheable_record_text (not build_full_record_text) so the key
+    # excludes Phase 1/2's batch-dependent Score_*/Composite_Score/
+    # Screening_* columns -- otherwise the same physical listing hashes
+    # differently between runs purely because other rows in the file
+    # changed, defeating this cache for a listing whose own data (and
+    # whose Phase 3 analysis) is genuinely unchanged.
+    full_record = phase3_deep_analysis._cacheable_record_text(row)
     phase3_repr = json.dumps(
         {k: v for k, v in phase3_analysis.items() if k != "Composite_Score"},
         sort_keys=True,
