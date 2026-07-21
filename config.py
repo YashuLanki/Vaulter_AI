@@ -45,6 +45,9 @@ load_dotenv(SECRETS_DIR / ".env", override=True)
 # person). Override with VAULTER_SHARED_DIR in confidentials/.env if your
 # OneDrive folder is named or located differently.
 
+_LOCAL_FALLBACK_DIR = (BASE_DIR / "data" / "shared_fallback_not_synced").resolve()
+
+
 def _detect_shared_dir() -> Path:
     override = os.getenv("VAULTER_SHARED_DIR", "").strip()
     if override:
@@ -69,10 +72,27 @@ def _detect_shared_dir() -> Path:
     # OneDrive not found on this machine -- fall back to a local folder so
     # nothing crashes, but this means screening results won't actually be
     # shared with the team until VAULTER_SHARED_DIR is set correctly.
-    return (BASE_DIR / "data" / "shared_fallback_not_synced").resolve()
+    return _LOCAL_FALLBACK_DIR
 
 SHARED_DIR = _detect_shared_dir()
-SHARED_DIR.mkdir(parents=True, exist_ok=True)
+try:
+    SHARED_DIR.mkdir(parents=True, exist_ok=True)
+except OSError as e:
+    # This runs at config.py's IMPORT time -- every entry point imports
+    # this module first, so an unguarded failure here (a transient
+    # OneDrive sync/permission hiccup, a network path briefly
+    # unreachable, etc.) would crash the ENTIRE application before it
+    # can even start. Fall back to a local folder instead -- screening
+    # results just won't be shared with the team until this is resolved,
+    # same degraded-but-working behavior as "OneDrive not found at all."
+    # Deliberately sys.stderr, never stdout/logging: this runs before
+    # main.py sets up file-only logging in MCP mode, and any stray stdout
+    # write here would corrupt the MCP stdio connection to Claude Desktop.
+    print(f"WARNING: could not create shared folder at {SHARED_DIR} ({e}) -- "
+          f"falling back to a local-only folder. Screening results will not "
+          f"be shared with the team until this is fixed.", file=sys.stderr)
+    SHARED_DIR = _LOCAL_FALLBACK_DIR
+    SHARED_DIR.mkdir(parents=True, exist_ok=True)
 
 # ─── Data Folders ─────────────────────────────────────────────────
 
@@ -103,23 +123,32 @@ CHROMA_DIR.mkdir(parents=True, exist_ok=True)
 LOG_DIR.mkdir(parents=True, exist_ok=True)
 
 # ─── Chunking Settings ────────────────────────────────────────────
-
-CHUNK_SIZE    = 800
-CHUNK_OVERLAP = 100
+# Only CHUNK_TIERS is actually consulted (via get_chunk_settings) --
+# there used to be flat CHUNK_SIZE/CHUNK_OVERLAP constants here too, but
+# nothing read them; removed rather than leave a footgun for a future
+# maintainer editing them and seeing no effect.
 
 CHUNK_TIERS = [
     (10,   500,   50),
     (50,   800,  100),
     (100, 1200,  150),
     (999, 1500,  200),
-    # Sentinel for Excel/structured data (page_count=9999 set by extractor).
-    # Keeps entire rows intact — CoStar rows average 1,600 chars, max ~3,000.
-    # Without this, the chunker hard-splits rows at 500-1500 char boundaries,
-    # fragmenting pipe-separated data and breaking row extraction.
-    (9999, 8000, 200),
 ]
 
+# extractor.py sets page_count to EXACTLY this value (never a real page
+# count) to mark Excel/structured data, so chunking keeps whole rows
+# intact -- CoStar rows average 1,600 chars, max ~3,000 -- instead of
+# hard-splitting pipe-separated data at a 500-1500 char boundary. This is
+# checked as an exact match, deliberately NOT folded into CHUNK_TIERS as
+# a "<=" upper tier -- a genuinely huge real PDF (1000-9998 actual pages)
+# must fall through to the tiers above instead of incorrectly getting
+# Excel-sized 8000-char chunks meant for something else entirely.
+EXCEL_SENTINEL_PAGE_COUNT = 9999
+EXCEL_CHUNK_SIZE, EXCEL_CHUNK_OVERLAP = 8000, 200
+
 def get_chunk_settings(page_count: int) -> tuple[int, int]:
+    if page_count == EXCEL_SENTINEL_PAGE_COUNT:
+        return EXCEL_CHUNK_SIZE, EXCEL_CHUNK_OVERLAP
     for max_pages, chunk_size, overlap in CHUNK_TIERS:
         if page_count <= max_pages:
             return chunk_size, overlap
