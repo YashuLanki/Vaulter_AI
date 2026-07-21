@@ -69,7 +69,16 @@ def _split_text(text: str, chunk_size: int, overlap: int) -> list[str]:
             if current_chunk:
                 chunks.append(current_chunk.strip())
             overlap_text = current_chunk[-overlap:] if len(current_chunk) > overlap else current_chunk
-            current_chunk = overlap_text + "\n\n" + para
+            candidate = overlap_text + "\n\n" + para
+            if len(candidate) <= chunk_size:
+                current_chunk = candidate
+            else:
+                # para itself fits within chunk_size (the outer if above
+                # only hard-splits paragraphs LARGER than chunk_size), but
+                # prepending the overlap-carry would push this one over
+                # the cap -- drop the overlap just for this boundary
+                # rather than silently violate the configured chunk size.
+                current_chunk = para
 
     # Don't forget the last chunk
     if current_chunk.strip():
