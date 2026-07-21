@@ -9,13 +9,13 @@ phases, no CLI orchestration.
 
 import hashlib
 import io
-import json
 import logging
 from datetime import datetime
 from pathlib import Path
 
 import pandas as pd
 
+import safe_io
 from . import config as screening_config
 from . import phase1_rules
 from . import phase2_ranking
@@ -28,13 +28,7 @@ log = logging.getLogger("vaulter.screening")
 
 
 def _load_manifest(output_dir: Path) -> dict:
-    manifest_path = output_dir / "manifest.json"
-    if manifest_path.exists():
-        try:
-            return json.loads(manifest_path.read_text())
-        except Exception:
-            pass
-    return {"markets": []}
+    return safe_io.load_json(output_dir / "manifest.json", default={"markets": []})
 
 
 def _find_cached_result(output_dir: Path, source_hash: str, top_n: int,
@@ -79,12 +73,17 @@ def _find_cached_result(output_dir: Path, source_hash: str, top_n: int,
 def _update_manifest(output_dir: Path, market: str, market_slug: str, timestamp: str,
                       workbook_filename: str, source_hash: str, top_n: int,
                       include_low_value_apis: bool, summary: dict) -> Path:
+    """
+    Updates the shared manifest.json under an exclusive file lock (see
+    safe_io.locked_json_update) -- this file lives in SHARED_DIR and can
+    be written by any team member's own instance, so without a lock, two
+    people finishing a screening run around the same time could have one
+    process's write silently discard the other's just-added entry (the
+    write here happens AFTER Phase 3/4 complete, so losing it would mean
+    redoing all of that work's caching benefit for nothing).
+    """
     manifest_path = output_dir / "manifest.json"
-    manifest = _load_manifest(output_dir)
-
-    manifest.setdefault("markets", [])
-    manifest["markets"] = [m for m in manifest["markets"] if m.get("market_slug") != market_slug]
-    manifest["markets"].append({
+    new_entry = {
         "market": market,
         "market_slug": market_slug,
         "timestamp": timestamp,
@@ -98,10 +97,16 @@ def _update_manifest(output_dir: Path, market: str, market_slug: str, timestamp:
         "finalist_addresses": summary["finalist_addresses"],
         "finalist_tiers": summary["finalist_tiers"],
         "top_candidates": summary["top_candidates"],
-    })
-    manifest["markets"].sort(key=lambda m: m["timestamp"], reverse=True)
+    }
 
-    manifest_path.write_text(json.dumps(manifest, indent=2))
+    def _apply(manifest: dict) -> dict:
+        manifest.setdefault("markets", [])
+        manifest["markets"] = [m for m in manifest["markets"] if m.get("market_slug") != market_slug]
+        manifest["markets"].append(new_entry)
+        manifest["markets"].sort(key=lambda m: m["timestamp"], reverse=True)
+        return manifest
+
+    safe_io.locked_json_update(manifest_path, _apply, default={"markets": []})
     return manifest_path
 
 

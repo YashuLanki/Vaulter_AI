@@ -32,7 +32,6 @@ Called by:
 
 import csv
 import hashlib
-import json
 import logging
 import sys
 import time
@@ -44,6 +43,7 @@ import requests
 from bs4 import BeautifulSoup
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
+import safe_io
 from config import (
     LOG_DIR, RAW_WEB_DIR, DATA_DIR, REGISTRY_DIR,
     CHROMA_DIR, CHROMA_COLLECTION_NAME,
@@ -655,12 +655,15 @@ def load_all_properties() -> tuple[list[dict], list[dict]]:
 
 
 def load_registry() -> dict:
-    if REGISTRY_FILE.exists():
-        return json.loads(REGISTRY_FILE.read_text())
-    return {}
+    return safe_io.load_json(REGISTRY_FILE)
 
 def save_registry(r: dict):
-    REGISTRY_FILE.write_text(json.dumps(r, indent=2))
+    """Merges r's entries into whatever's currently on disk (under a file
+    lock), rather than overwriting the whole file with this process's own
+    snapshot -- scrape_all_properties() loads the registry once at the
+    start of a run, so a blind overwrite here would silently discard any
+    other property's update made by a concurrently-running scrape."""
+    safe_io.locked_json_update(REGISTRY_FILE, lambda current: {**current, **r})
 
 def content_hash(text: str) -> str:
     return hashlib.sha256(text.encode()).hexdigest()[:16]

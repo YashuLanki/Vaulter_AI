@@ -14,9 +14,10 @@ batch at current Sonnet pricing).
 """
 
 import hashlib
-import json
 import logging
 from pathlib import Path
+
+import safe_io
 
 import pandas as pd
 import anthropic
@@ -223,19 +224,6 @@ def _cache_key(full_record_text: str) -> str:
     return hashlib.sha256((PROMPT_VERSION + full_record_text).encode()).hexdigest()
 
 
-def _load_cache(cache_path: Path) -> dict:
-    if cache_path.exists():
-        try:
-            return json.loads(cache_path.read_text())
-        except Exception:
-            return {}
-    return {}
-
-
-def _save_cache(cache_path: Path, cache: dict) -> None:
-    cache_path.write_text(json.dumps(cache, indent=2))
-
-
 def run_deep_analysis(ranked_df: pd.DataFrame, api_key: str, top_n: int = TOP_N_DEFAULT,
                        cache_dir: Path | None = None) -> dict:
     """
@@ -261,7 +249,14 @@ def run_deep_analysis(ranked_df: pd.DataFrame, api_key: str, top_n: int = TOP_N_
     client = anthropic.Anthropic(api_key=api_key)
 
     cache_path = (cache_dir / "phase3_listing_cache.json") if cache_dir else None
-    cache = _load_cache(cache_path) if cache_path else {}
+    # A one-time snapshot read is fine here -- it's just for checking
+    # existing entries, and a slightly stale read only costs an occasional
+    # avoidable Claude call, not data loss. The WRITE side below is what
+    # matters: each new entry is merged into whatever's on disk at that
+    # moment (via locked_json_update), not overwritten from this snapshot,
+    # so another team member's concurrent additions to this same shared
+    # file are never clobbered.
+    cache = safe_io.load_json(cache_path) if cache_path else {}
     cache_hits = 0
 
     results = {}
@@ -282,8 +277,7 @@ def run_deep_analysis(ranked_df: pd.DataFrame, api_key: str, top_n: int = TOP_N_
             text = response.content[0].text
             parsed = parse_response(text)
             if cache_path:
-                cache[key] = dict(parsed)
-                _save_cache(cache_path, cache)
+                safe_io.locked_json_update(cache_path, lambda current, k=key, p=parsed: {**current, k: dict(p)})
 
         parsed["Composite_Score"] = row["Composite_Score"]
         results[addr] = parsed

@@ -12,11 +12,12 @@ Token is cached in outlook_token.json automatically.
 NEVER commit outlook_token.json to git.
 """
 
-import json
+import logging
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
+import safe_io
 from config import (
     OUTLOOK_CLIENT_ID,
     OUTLOOK_TENANT_ID,
@@ -24,6 +25,8 @@ from config import (
 )
 
 import msal
+
+log = logging.getLogger("vaulter.outlook_auth")
 
 SCOPES = ["https://graph.microsoft.com/Mail.Read"]
 
@@ -55,7 +58,17 @@ def get_access_token(interactive: bool = False) -> str:
     # Use a serializable token cache so tokens persist between runs
     cache = msal.SerializableTokenCache()
     if OUTLOOK_TOKEN_FILE.exists():
-        cache.deserialize(OUTLOOK_TOKEN_FILE.read_text())
+        try:
+            cache.deserialize(OUTLOOK_TOKEN_FILE.read_text())
+        except Exception as e:
+            # A corrupt cache (e.g. a crash mid-write before this file used
+            # atomic writes) must not crash this function -- treat it the
+            # same as no cache at all, so the normal re-auth path below
+            # (the RuntimeError telling the operator to run `python main.py
+            # auth`, or the device flow itself when interactive=True) can
+            # actually recover, instead of failing before ever reaching it.
+            log.warning(f"Outlook token cache was corrupt and could not be read ({e}) -- "
+                        f"treating as not signed in.")
 
     # PublicClientApplication — correct for device code flow
     app = msal.PublicClientApplication(
@@ -115,6 +128,10 @@ def run_auth_flow() -> str:
 
 
 def _save_cache(cache: msal.SerializableTokenCache):
-    """Save token cache to disk if it changed."""
+    """Save token cache to disk if it changed. Writes atomically (temp
+    file + rename) so a crash/kill mid-write can't leave a corrupt token
+    cache -- which would otherwise be worse than no cache at all, since
+    get_access_token() calls cache.deserialize() unconditionally before
+    ever reaching the interactive re-auth fallback."""
     if cache.has_state_changed:
-        OUTLOOK_TOKEN_FILE.write_text(cache.serialize())
+        safe_io.save_text_atomic(OUTLOOK_TOKEN_FILE, cache.serialize())

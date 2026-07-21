@@ -44,6 +44,7 @@ import requests
 import pandas as pd
 import anthropic
 
+import safe_io
 from . import phase3_deep_analysis
 
 log = logging.getLogger("vaulter.screening")
@@ -58,12 +59,12 @@ _PROBE_LAT, _PROBE_LNG = 33.4484, -112.0740
 
 # In-memory cache so each unique market only gets geocoded once per run,
 # even if multiple finalists share the same Market Name. get_market_reference_point
-# can also persist this to disk (shared across the team) when given a
-# cache_dir -- a market's geocode essentially never changes, so once ANYONE
-# has geocoded "Phoenix, AZ" it should never be looked up again by anyone,
-# instead of resetting every time this process restarts.
+# also checks the shared on-disk cache (cache_dir) on every miss, and
+# merges just the one new entry back in on write (never overwriting the
+# whole file) -- so a market geocoded by ANY team member, at ANY time
+# (not just once per process lifetime), is never looked up again by
+# anyone, and no one's contribution to the shared file is ever clobbered.
 _MARKET_GEOCODE_CACHE = {}
-_MARKET_GEOCODE_CACHE_LOADED_FROM: Path | None = None
 
 
 def _api_denied(status: str) -> bool:
@@ -170,23 +171,25 @@ def get_market_reference_point(market_name: str, api_key: str, cache_dir: Path |
     the CoStar export covers, no hardcoded state/city.
 
     If cache_dir is given (the pipeline passes SCREENING_OUTPUT_DIR, shared
-    across the team), this is persisted to disk on top of the in-memory
-    cache -- so it survives process restarts and is shared team-wide,
-    instead of re-geocoding the same handful of markets on every run."""
-    global _MARKET_GEOCODE_CACHE, _MARKET_GEOCODE_CACHE_LOADED_FROM
-
-    cache_path = (cache_dir / "market_geocode_cache.json") if cache_dir else None
-    if cache_path and _MARKET_GEOCODE_CACHE_LOADED_FROM != cache_dir:
-        # First use in this process with this cache_dir -- merge in whatever
-        # is already on disk (from this or another team member's prior runs).
-        _MARKET_GEOCODE_CACHE = {**_load_cache(cache_path), **_MARKET_GEOCODE_CACHE}
-        _MARKET_GEOCODE_CACHE_LOADED_FROM = cache_dir
+    across the team), a market genuinely only ever gets geocoded once,
+    ever, by anyone -- checked in-memory first (fast, for repeat lookups
+    within this run), then the shared on-disk cache (in case another team
+    member already geocoded it), before actually calling Google."""
+    global _MARKET_GEOCODE_CACHE
 
     if not market_name or pd.isna(market_name):
         return {"status": "NO_MARKET_NAME", "lat": None, "lng": None, "label": None}
 
     if market_name in _MARKET_GEOCODE_CACHE:
         return _MARKET_GEOCODE_CACHE[market_name]
+
+    cache_path = (cache_dir / "market_geocode_cache.json") if cache_dir else None
+    if cache_path:
+        disk_cache = safe_io.load_json(cache_path)
+        if market_name in disk_cache:
+            result = disk_cache[market_name]
+            _MARKET_GEOCODE_CACHE[market_name] = result
+            return result
 
     url = "https://maps.googleapis.com/maps/api/geocode/json"
     resp = requests.get(url, params={"address": market_name, "key": api_key}, timeout=15)
@@ -200,7 +203,11 @@ def get_market_reference_point(market_name: str, api_key: str, cache_dir: Path |
 
     _MARKET_GEOCODE_CACHE[market_name] = result
     if cache_path:
-        _save_cache(cache_path, _MARKET_GEOCODE_CACHE)
+        # Merge just this one new entry into whatever's on disk right now
+        # -- never overwrite with our own (possibly stale/incomplete)
+        # in-memory dict, which could clobber another team member's
+        # concurrently-added markets.
+        safe_io.locked_json_update(cache_path, lambda current, k=market_name, r=result: {**current, k: r})
     return result
 
 
@@ -736,19 +743,6 @@ def _final_cache_key(row: pd.Series, phase3_analysis: dict) -> str:
     return hashlib.sha256((_FINAL_PROMPT_VERSION + full_record + phase3_repr).encode()).hexdigest()
 
 
-def _load_cache(cache_path: Path) -> dict:
-    if cache_path.exists():
-        try:
-            return json.loads(cache_path.read_text())
-        except Exception:
-            return {}
-    return {}
-
-
-def _save_cache(cache_path: Path, cache: dict) -> None:
-    cache_path.write_text(json.dumps(cache, indent=2))
-
-
 def run_verification(
     ranked_df: pd.DataFrame,
     deep_analyses: dict,
@@ -799,7 +793,7 @@ def run_verification(
         }
 
     cache_path = (cache_dir / "phase4_verdict_cache.json") if cache_dir else None
-    cache = _load_cache(cache_path) if cache_path else {}
+    cache = safe_io.load_json(cache_path) if cache_path else {}
     cache_hits = 0
 
     client = anthropic.Anthropic(api_key=anthropic_api_key)
@@ -851,8 +845,7 @@ def run_verification(
             )
             parsed_final = parse_final_response(response.content[0].text)
             if cache_path:
-                cache[key] = dict(parsed_final)
-                _save_cache(cache_path, cache)
+                safe_io.locked_json_update(cache_path, lambda current, k=key, p=parsed_final: {**current, k: dict(p)})
 
         parsed_final["Composite_Score"] = deep_analyses[addr]["Composite_Score"]
         parsed_final["Phase3_Recommendation"] = deep_analyses[addr]["RECOMMENDATION"]
