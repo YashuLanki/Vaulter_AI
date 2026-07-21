@@ -94,6 +94,13 @@ except OSError as e:
     SHARED_DIR = _LOCAL_FALLBACK_DIR
     SHARED_DIR.mkdir(parents=True, exist_ok=True)
 
+# Whether SHARED_DIR is actually the real OneDrive-backed folder, or the
+# local fallback used when OneDrive wasn't found / couldn't be written to.
+# Exposed so the health-check tool (mcp_server.py) can report "silently
+# fell back to local" without reaching into this module's private
+# _LOCAL_FALLBACK_DIR/_detect_shared_dir internals.
+SHARED_DIR_IS_FALLBACK = (SHARED_DIR == _LOCAL_FALLBACK_DIR)
+
 # ─── Data Folders ─────────────────────────────────────────────────
 
 DATA_DIR       = (BASE_DIR / "data").resolve()
