@@ -230,19 +230,19 @@ or client ID at all. The **only** step that can't be pre-baked is the person pro
 identity — the actual Microsoft sign-in (email + password + MFA) — which isn't really "technical
 setup," just logging in.
 
-**Avoid needing admin/IT permissions where possible.** Whether a given work machine allows
-unprivileged installs depends on that machine's specific lockdown policy, which needs to be
-checked rather than assumed — but several of the dependencies don't need admin rights at all if
-installed correctly:
+**Assume unmanaged machines — no Intune/MDM.** IT was asked whether Vaulter's laptops are
+provisioned/imaged (which would let Python + Tesseract + Poppler simply ship as part of a
+standard image, handled once by IT instead of repeatedly by each non-technical user). That
+request has stalled with no response, so the installer must **not** depend on it — design
+onboarding entirely around per-user, no-admin-required installs on whatever machine a staffer
+already has:
 - Python's official installer has a per-user "install for me only" option that needs no admin
   (only its system-wide "for all users" option does).
 - Poppler isn't an installer at all — it's just a folder of binaries to unzip; nothing to
   install or elevate.
 - Tesseract's Windows installer also offers a non-admin, per-user install option.
-- If Vaulter's laptops are provisioned/imaged by IT, the cleanest fix is asking whether Python +
-  Tesseract + Poppler can simply be part of the standard laptop image — that removes this
-  problem for every future hire in one shot, handled once by IT instead of repeatedly by each
-  non-technical user.
+- If IT-managed imaging ever does materialize later, it's a pure bonus that removes this step
+  for future hires — but the installer can't be designed to depend on it.
 
 **Don't clobber an existing Claude Desktop setup.** Some staff may already have Claude Desktop
 installed (possibly with other MCP servers already configured for unrelated tools). The installer
