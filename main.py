@@ -18,14 +18,13 @@ Usage:
   python main.py web-sources                        — list all configured web sources
   python main.py email                              — pull new Outlook emails
   python main.py email --days 30                    — pull emails from last 30 days
-  python main.py property-scrape                    — scrape news for all 48 properties
+  python main.py property-scrape                    — scrape news for all active properties
   python main.py property-scrape "Magic Ranch 10"   — scrape one property
   python main.py properties                         — list all properties from Project Master
   python main.py schedule                           — start the background scheduler
   python main.py auth                               — authorize Outlook (run once on setup)
 
-  python main.py mcp                                — start the MCP server (Stage 3)
-  python main.py mcp <port>                         — start MCP server on a custom port
+  python main.py mcp                                — start the MCP server (Stage 3, stdio only)
 """
 
 import os
@@ -279,16 +278,14 @@ def cmd_schedule():
 # Stage 3 — MCP Server
 # ══════════════════════════════════════════════════════════════════
 
-def cmd_mcp(port: int = None):
-    from config import MCP_PORT
-    run_port = port or MCP_PORT
-
+def cmd_mcp():
     log.info("=" * 60)
     log.info("  Vaulter AI — MCP Server")
     log.info(f"  Transport  : stdio (this machine's own Claude Desktop launches this process directly)")
     log.info(f"  Access     : local only — whoever is logged into this computer with")
     log.info(f"               Claude Desktop configured to run it. Nothing is exposed")
-    log.info(f"               over the network, so there is no separate key/password.")
+    log.info(f"               over the network, so there is no separate key/password,")
+    log.info(f"               and no port to configure either.")
     log.info("  Connect via Claude Desktop → Settings → Developer → Edit Config")
     log.info("  (add this server's command/args — see mcp_server.py header for the exact entry)")
     log.info("  Press Ctrl+C to stop.")
@@ -296,7 +293,7 @@ def cmd_mcp(port: int = None):
 
     try:
         from mcp_server import run_mcp_server
-        run_mcp_server(port=run_port)
+        run_mcp_server()
     except ImportError as e:
         log.error(f"Missing dependency: {e}")
         log.error("Run: pip install mcp[cli] uvicorn")
@@ -355,8 +352,7 @@ if __name__ == "__main__":
         cmd_schedule()
 
     elif args[0] == "mcp":
-        port = int(args[1]) if len(args) > 1 else None
-        cmd_mcp(port=port)
+        cmd_mcp()
 
     elif args[0] in ("--help", "-h", "help"):
         print(__doc__)

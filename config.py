@@ -235,13 +235,12 @@ GOOGLE_MAPS_API_KEY = os.getenv("GOOGLE_MAPS_API_KEY", "")
 # Stage 3 — MCP Server
 # ══════════════════════════════════════════════════════════════════
 
-# No API key here on purpose: each staff member runs their own fully-local
-# instance of this server, launched directly by their own Claude Desktop
-# via stdio (see mcp_server.py's header). Nothing is exposed over a
-# network, so there's no request to gate with a shared secret — the real
-# access boundary is simply "is this your own computer, logged in as you."
-
-MCP_PORT = int(os.getenv("MCP_PORT", "8765"))
+# No API key or port here on purpose: each staff member runs their own
+# fully-local instance of this server, launched directly by their own
+# Claude Desktop via stdio (see mcp_server.py's header). Nothing is
+# exposed over a network, so there's no request to gate with a shared
+# secret and no port to listen on -- the real access boundary is simply
+# "is this your own computer, logged in as you."
 
 # ─── Proximity Search ────────────────────────────────────────────
 # Categories and settings for the proximity_search MCP tool.

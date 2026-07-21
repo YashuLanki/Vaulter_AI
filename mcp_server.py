@@ -58,6 +58,43 @@ log = logging.getLogger("vaulter.mcp")
 
 
 # ══════════════════════════════════════════════════════════════════
+# File Explorer / Finder Helper
+# ══════════════════════════════════════════════════════════════════
+
+def _open_in_file_manager(path: "Path", select: bool = False) -> None:
+    """
+    Opens `path` in the OS's file manager -- Explorer on Windows, Finder
+    on Mac, the default file manager on Linux (via xdg-open). Each staff
+    member's own instance could be running on any of these, per
+    mcp_server.py's own header (each person runs this locally on their
+    own machine). Previously this only ever ran `explorer`, which is
+    Windows-only -- silently failing (and returning a raw error instead
+    of the useful file list) for anyone on Mac or Linux.
+
+    If select=True and path is a file, opens the containing folder with
+    that file highlighted where the platform supports it (Windows/Mac);
+    Linux has no widely-supported equivalent, so it just opens the
+    containing folder unselected. If select=False, path is opened
+    directly (expected to be a folder).
+    """
+    import subprocess
+
+    if sys.platform == "win32":
+        if select:
+            subprocess.Popen(f'explorer /select,"{path}"')
+        else:
+            subprocess.Popen(f'explorer "{path}"')
+    elif sys.platform == "darwin":
+        if select:
+            subprocess.Popen(["open", "-R", str(path)])
+        else:
+            subprocess.Popen(["open", str(path)])
+    else:
+        target = path.parent if select else path
+        subprocess.Popen(["xdg-open", str(target)])
+
+
+# ══════════════════════════════════════════════════════════════════
 # Screening Source Resolver
 # ══════════════════════════════════════════════════════════════════
 
@@ -281,7 +318,7 @@ def create_mcp_server():
         name="Vaulter AI Property Intelligence",
         instructions="""You have access to Vaulter AI's complete property intelligence database.
 This includes:
-- 48 active properties across Arizona, California, New Mexico, Colorado, and Texas
+- The full active property portfolio across Arizona, California, New Mexico, Colorado, and Texas
 - Due diligence PDFs (surveys, ALTA, title reports)
 - Property intelligence scraped from Google News and City-Data for each property
 - Market research from CBRE, Marcus & Millichap, JLL, and GlobeSt
@@ -342,7 +379,7 @@ tabs, per-listing analyst notes, and a direct Excel download) in a browser."""
     @mcp.tool()
     def get_portfolio_list(group_by: str = "state") -> str:
         """
-        Get the complete list of all 48 active Vaulter AI properties.
+        Get the complete list of all active Vaulter AI properties.
         Args:
             group_by: "state" or "stage" (default: "state")
         """
@@ -424,7 +461,7 @@ tabs, per-listing analyst notes, and a direct Excel download) in a browser."""
             return f"Email retrieval failed: {e}"
 
     @mcp.tool()
-    def get_risk_scan(state: str = None) -> str:
+    def get_risk_scan(state: str = "") -> str:
         """
         Search the database for risk-related content across the portfolio.
         Args:
@@ -439,7 +476,7 @@ tabs, per-listing analyst notes, and a direct Excel download) in a browser."""
             return f"Risk scan failed: {e}"
 
     @mcp.tool()
-    def get_market_intelligence(state: str = None) -> str:
+    def get_market_intelligence(state: str = "") -> str:
         """
         Get market intelligence from web scrapes and property news.
         Args:
@@ -512,9 +549,15 @@ tabs, per-listing analyst notes, and a direct Excel download) in a browser."""
         Args:
             property_name: Property name (e.g. "Mesa Del Sol", "Magic Ranch 10", "Forney")
         """
-        import subprocess
         from config import PROCESSED_DIR
         try:
+            if not property_name.strip():
+                # An empty string is a substring of every folder name, so
+                # without this check every property folder would "match"
+                # and the code below would silently open an arbitrary one
+                # (whichever iterdir() happened to list first).
+                return "Which property? Please tell me the property name to open its files."
+
             matches = []
             if PROCESSED_DIR.exists():
                 for state_dir in PROCESSED_DIR.iterdir():
@@ -525,6 +568,7 @@ tabs, per-listing analyst notes, and a direct Excel download) in a browser."""
                             continue
                         if property_name.lower() in prop_dir.name.lower():
                             matches.append(prop_dir)
+            matches.sort(key=lambda p: p.name)  # deterministic, not iterdir()'s arbitrary order
 
             if len(matches) > 1:
                 exact = [m for m in matches if m.name.lower() == property_name.lower()]
@@ -537,15 +581,15 @@ tabs, per-listing analyst notes, and a direct Excel download) in a browser."""
             if folder and folder.exists():
                 files = sorted([f for f in folder.iterdir() if f.is_file()])
                 if files:
-                    # /select highlights the first file so user lands right on their files
-                    subprocess.Popen(f'explorer /select,"{files[0]}"')
+                    # select=True highlights the first file so user lands right on their files
+                    _open_in_file_manager(files[0], select=True)
                     file_list = "\n".join(f"  - {f.name}" for f in files)
                     return f"Opened File Explorer to {folder.name}.\n\nFiles:\n{file_list}"
                 else:
-                    subprocess.Popen(f'explorer "{folder}"')
+                    _open_in_file_manager(folder)
                     return f"Opened {folder.name} — no files there yet."
             else:
-                subprocess.Popen(f'explorer "{PROCESSED_DIR}"')
+                _open_in_file_manager(PROCESSED_DIR)
                 return f"No folder found for '{property_name}'. Opened the processed documents folder instead."
 
         except Exception as e:
@@ -559,12 +603,11 @@ tabs, per-listing analyst notes, and a direct Excel download) in a browser."""
         such as market reports, CoStar exports, general spreadsheets, or any file
         that came from email but wasn't matched to a specific property.
         """
-        import subprocess
         from config import PROCESSED_DIR
         try:
             general_dir = PROCESSED_DIR / "general"
             general_dir.mkdir(parents=True, exist_ok=True)
-            subprocess.Popen(f'explorer "{general_dir}"')
+            _open_in_file_manager(general_dir)
             files = [f for f in general_dir.iterdir() if f.is_file()]
             if files:
                 file_list = "\n".join(f"  - {f.name}" for f in sorted(files))
@@ -588,14 +631,13 @@ tabs, per-listing analyst notes, and a direct Excel download) in a browser."""
         Args:
             property_name: Property name to find matching files (e.g. "Mesa Del Sol")
         """
-        import subprocess
         from config import PROXIMITY_OUTPUT_DIR
         try:
             proximity_dir = PROXIMITY_OUTPUT_DIR
             proximity_dir.mkdir(parents=True, exist_ok=True)
             all_files = sorted([f for f in proximity_dir.iterdir() if f.is_file()], reverse=True)
             if not all_files:
-                subprocess.Popen(f'explorer "{proximity_dir}"')
+                _open_in_file_manager(proximity_dir)
                 return "Opened proximity output folder — no exports yet. Run a Google Places export first."
 
             # Find files matching this property
@@ -606,8 +648,7 @@ tabs, per-listing analyst notes, and a direct Excel download) in a browser."""
                 matching = all_files
 
             target = matching[0] if matching else all_files[0]
-            # /select opens the folder with that file highlighted
-            subprocess.Popen(f'explorer /select,"{target}"')
+            _open_in_file_manager(target, select=True)
 
             display = matching if matching else all_files
             file_list = "\n".join(f"  - {f.name}" for f in display[:10])
@@ -918,8 +959,14 @@ tabs, per-listing analyst notes, and a direct Excel download) in a browser."""
 
             project_root = Path(__file__).parent
             url = start_dashboard_server(project_root, SCREENING_OUTPUT_DIR)
-            webbrowser.open(url)
-            return f"Opened the screening dashboard at {url}"
+            opened = webbrowser.open(url)
+            if opened:
+                return f"Opened the screening dashboard at {url}"
+            return (
+                f"The dashboard server is running at {url}, but I couldn't confirm a "
+                f"browser actually launched (no default browser configured?). "
+                f"Open that URL manually to view it."
+            )
         except Exception as e:
             return f"Could not open screening dashboard: {e}"
 
@@ -945,20 +992,24 @@ tabs, per-listing analyst notes, and a direct Excel download) in a browser."""
                            (e.g. "Pacific & Pinson - Forney", "Mesa Del Sol")
             radius_miles:  Search radius in miles (default: 5.0)
         """
-        from pipeline.proximity_tool import run_proximity_search
-        from config import GOOGLE_PLACES_API_KEY
-        from pathlib import Path
+        try:
+            from pipeline.proximity_tool import run_proximity_search
+            from config import GOOGLE_PLACES_API_KEY
+            from pathlib import Path
 
-        api_key = GOOGLE_PLACES_API_KEY.strip()
-        if not api_key:
-            return "GOOGLE_PLACES_API_KEY not set. Add it to confidentials/.env and restart."
+            api_key = GOOGLE_PLACES_API_KEY.strip()
+            if not api_key:
+                return "GOOGLE_PLACES_API_KEY not set. Add it to confidentials/.env and restart."
 
-        return run_proximity_search(
-            property_name=property_name,
-            radius_miles=radius_miles,
-            vaulter_dir=Path(__file__).parent,
-            api_key=api_key,
-        )
+            return run_proximity_search(
+                property_name=property_name,
+                radius_miles=radius_miles,
+                vaulter_dir=Path(__file__).parent,
+                api_key=api_key,
+            )
+        except Exception as e:
+            log.error(f"[MCP] run_google_places_export failed: {e}", exc_info=True)
+            return f"Proximity export failed: {e}"
 
     return mcp
 
@@ -967,10 +1018,13 @@ tabs, per-listing analyst notes, and a direct Excel download) in a browser."""
 # Server Entry Point
 # ══════════════════════════════════════════════════════════════════
 
-def run_mcp_server(port: int = 8765):
+def run_mcp_server():
     """
     Start background services then launch the MCP server.
-    This is the single command that runs everything.
+    This is the single command that runs everything. Transport is stdio
+    (see this file's header) -- there is no port to configure; a `port`
+    parameter existed here previously but did nothing, since stdio has
+    no network listener at all.
     """
     # ── Start background services ─────────────────────────────────
     def _safe_watcher():

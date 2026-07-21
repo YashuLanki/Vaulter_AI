@@ -35,7 +35,7 @@ python main.py auth                      # one-time Outlook OAuth
 python main.py schedule                  # run the background scheduler standalone
 
 # Stage 3 — MCP server (what production actually runs)
-python main.py mcp [port]                # default port 8765, stdio transport
+python main.py mcp                       # stdio transport, no port (see mcp_server.py header)
 
 # CoStar screening pipeline — standalone smoke test, no MCP round-trip needed
 python test_screening.py                 # edit COSTAR_FILE at top of the file first

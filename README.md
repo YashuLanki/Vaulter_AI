@@ -270,7 +270,7 @@ Drop PDFs into `data/watched_folder/State/Property/` — ingestion is automatic.
 python main.py scrape                              # scrape all sources
 python main.py email                               # pull new emails
 python main.py email --days 30                     # pull last 30 days
-python main.py property-scrape                     # scrape all 48 properties
+python main.py property-scrape                     # scrape all active properties
 python main.py properties                          # list all properties
 python main.py schedule                            # run everything automatically
 python main.py auth                                # authorize Outlook (once)
@@ -278,8 +278,7 @@ python main.py auth                                # authorize Outlook (once)
 
 ### Stage 3 — MCP Server
 ```bash
-python main.py mcp                                 # start on default port 8765
-python main.py mcp 9000                            # start on custom port
+python main.py mcp                                 # stdio transport -- no port to configure
 ```
 
 ---
