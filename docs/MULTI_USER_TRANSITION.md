@@ -197,9 +197,44 @@ then C4/C5. C1 alone removes the only data-loss risk in the whole shared-folder 
 ### Priority 3 — Easy onboarding *(unblocks the actual rollout)*
 A guided installer/bootstrap that: creates the environment and installs dependencies, finds
 the OCR tools automatically (or clearly says what's missing), pins a known-good Python version,
-fixes the Windows secrets-folder trap, and prints the exact Claude Desktop configuration with
-the path already filled in. The goal: a staffer follows one guided flow, and it *verifies* each
-step instead of failing silently later.
+fixes the Windows secrets-folder trap, and sets up the exact Claude Desktop configuration
+automatically. The goal: a staffer follows one guided flow, and it *verifies* each step instead
+of failing silently later. The realistic end state for a non-technical user is **sign-in only**
+— everything else below is what makes that possible.
+
+**Bake in the values that aren't actually per-user secrets.** The Outlook client ID and the
+Anthropic/Google API keys are organization-wide values (one Azure app registration, one set of
+API keys for the whole team) — not something each person needs to look up or paste in. They can
+be embedded directly in the installer package IT builds once, so a staffer never sees an API key
+or client ID at all. The **only** step that can't be pre-baked is the person proving their own
+identity — the actual Microsoft sign-in (email + password + MFA) — which isn't really "technical
+setup," just logging in.
+
+**Avoid needing admin/IT permissions where possible.** Whether a given work machine allows
+unprivileged installs depends on that machine's specific lockdown policy, which needs to be
+checked rather than assumed — but several of the dependencies don't need admin rights at all if
+installed correctly:
+- Python's official installer has a per-user "install for me only" option that needs no admin
+  (only its system-wide "for all users" option does).
+- Poppler isn't an installer at all — it's just a folder of binaries to unzip; nothing to
+  install or elevate.
+- Tesseract's Windows installer also offers a non-admin, per-user install option.
+- If Vaulter's laptops are provisioned/imaged by IT, the cleanest fix is asking whether Python +
+  Tesseract + Poppler can simply be part of the standard laptop image — that removes this
+  problem for every future hire in one shot, handled once by IT instead of repeatedly by each
+  non-technical user.
+
+**Don't clobber an existing Claude Desktop setup.** Some staff may already have Claude Desktop
+installed (possibly with other MCP servers already configured for unrelated tools). The installer
+must not assume it owns that file — it needs to find the existing
+`claude_desktop_config.json`, and **merge** the Vaulter server entry into its `mcpServers` block
+rather than overwriting the whole file. If Claude Desktop isn't installed at all, the installer
+should simply point the user to install it first, since that's a separate app outside this
+project's control.
+
+*For implementers: the merge logic belongs in the same installer script that handles the
+Python/OCR setup — read the existing JSON if present, add/update only the Vaulter entry under
+`mcpServers`, and write it back preserving every other key untouched.*
 
 ### Priority 4 — Version & shared reference data
 Stamp a version on the code and on the shared results record so newer and older copies can't
