@@ -84,7 +84,6 @@ def _extract_pdf(path: Path, metadata: dict) -> tuple[str, dict]:
     an all-scanned PDF, missing the mixed case.
     """
     full_text = []
-    ocr_page_images = None  # lazily rendered only if some page needs it
 
     with pdfplumber.open(path) as pdf:
         metadata["page_count"] = len(pdf.pages)
@@ -100,16 +99,18 @@ def _extract_pdf(path: Path, metadata: dict) -> tuple[str, dict]:
                 full_text.append(f"[Page {page_num}]\n{text.strip()}")
             else:
                 log.info(f"  Page {page_num} has no text layer — running OCR...")
-                if ocr_page_images is None:
-                    ocr_page_images = convert_from_path(
-                        str(path), dpi=300, poppler_path=POPPLER_PATH
-                    )
-                    metadata["ocr_used"] = True
+                # Render only this one page, not the whole document --
+                # a mostly-digital PDF with one scanned/blank page would
+                # otherwise pay to rasterize every page at 300 DPI just to
+                # OCR the one that needs it.
+                page_images = convert_from_path(
+                    str(path), dpi=300, poppler_path=POPPLER_PATH,
+                    first_page=page_num, last_page=page_num,
+                )
+                metadata["ocr_used"] = True
 
-                if page_num <= len(ocr_page_images):
-                    ocr_text = pytesseract.image_to_string(
-                        ocr_page_images[page_num - 1], lang="eng"
-                    )
+                if page_images:
+                    ocr_text = pytesseract.image_to_string(page_images[0], lang="eng")
                     if ocr_text.strip():
                         full_text.append(f"[Page {page_num} - OCR]\n{ocr_text.strip()}")
 

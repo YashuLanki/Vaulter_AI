@@ -531,6 +531,13 @@ tabs, per-listing analyst notes, and a direct Excel download) in a browser."""
                 f"  Web sources scraped    : {len(web_registry)}",
                 f"  Emails processed       : {len(email_registry)}",
             ]
+            if stats.get("needs_reindex"):
+                lines.append(
+                    f"\n  Note: {stats['stale_chunks_sampled']} of {stats['chunks_sampled']} sampled "
+                    f"chunks were embedded with a different search model than what's active now "
+                    f"('{stats['current_embedding_model']}'). Search results for those older documents "
+                    f"may be weaker until you run: python main.py reindex"
+                )
             return "\n".join(lines)
         except Exception as e:
             return f"Stats failed: {e}"

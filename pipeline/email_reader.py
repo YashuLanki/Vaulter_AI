@@ -263,6 +263,9 @@ def store_email(msg_id, subject, sender, date_str, body, collection):
     # Takes the first meaningful sentence(s) up to 300 chars
     body_preview = body[:300].rsplit(" ", 1)[0] + "..." if len(body) > 300 else body
 
+    from ingestion.embedder import get_embedding_model_name
+    embedding_model = get_embedding_model_name()
+
     chunks = chunk_text(body)
     ids, docs, metas, embeds = [], [], [], []
     for i, chunk in enumerate(chunks):
@@ -276,6 +279,7 @@ def store_email(msg_id, subject, sender, date_str, body, collection):
             "chunk":        i,
             "type":         "email",
             "body_preview": body_preview,
+            "embedding_model": embedding_model,
             **prop_tags,
         })
         embeds.append(simple_embed(chunk))
@@ -291,6 +295,10 @@ def _store_attachment_chunks(name, msg_id, subject, text, file_type, collection,
     chunks = chunk_text(text, page_count=page_count)
     if not chunks:
         return 0
+
+    from ingestion.embedder import get_embedding_model_name
+    embedding_model = get_embedding_model_name()
+
     ids, docs, metas, embeds = [], [], [], []
     for i, chunk in enumerate(chunks):
         cid = f"email_att_{hashlib.sha256(chunk.encode()).hexdigest()[:12]}_{i}"
@@ -303,6 +311,7 @@ def _store_attachment_chunks(name, msg_id, subject, text, file_type, collection,
             "msg_id":   msg_id,
             "chunk":    i,
             "type":     f"email_attachment_{file_type}",
+            "embedding_model": embedding_model,
             **(prop_tags or {}),
         })
         embeds.append(simple_embed(chunk))

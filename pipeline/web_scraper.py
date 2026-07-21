@@ -218,6 +218,8 @@ def store_chunks(source_name: str, url: str, chunks: list[str], collection,
     except Exception as e:
         log.warning(f"Could not clear old chunks for '{source_name}' before storing new ones (continuing): {e}")
 
+    from ingestion.embedder import get_embedding_model_name
+
     timestamp = datetime.now().isoformat()
     ids, docs, metas, embeds = [], [], [], []
     base_meta = {
@@ -225,6 +227,7 @@ def store_chunks(source_name: str, url: str, chunks: list[str], collection,
         "url":        url,
         "type":       "web_scrape",
         "scraped_at": timestamp,
+        "embedding_model": get_embedding_model_name(),
         **(property_tags or {}),
     }
     for i, chunk in enumerate(chunks):

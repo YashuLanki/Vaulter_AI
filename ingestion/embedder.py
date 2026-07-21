@@ -70,6 +70,7 @@ class LocalHashEmbedding(EmbeddingFunction):
 
 
 _EMBEDDING_FUNCTION = None
+_EMBEDDING_MODEL_NAME: str | None = None  # identifies which function produced a chunk's vector
 _EMBEDDING_INIT_LOCK = threading.Lock()
 
 
@@ -81,7 +82,7 @@ def get_embedding_function():
     model can't be downloaded (e.g. no internet on first run). Loaded once
     and cached -- loading the model is slow, calling it per-chunk is not.
     """
-    global _EMBEDDING_FUNCTION
+    global _EMBEDDING_FUNCTION, _EMBEDDING_MODEL_NAME
     if _EMBEDDING_FUNCTION is not None:
         return _EMBEDDING_FUNCTION
 
@@ -92,6 +93,7 @@ def get_embedding_function():
         try:
             from chromadb.utils.embedding_functions import SentenceTransformerEmbeddingFunction
             _EMBEDDING_FUNCTION = SentenceTransformerEmbeddingFunction(model_name="all-MiniLM-L6-v2")
+            _EMBEDDING_MODEL_NAME = "all-MiniLM-L6-v2"
             log.info("Using semantic embeddings (all-MiniLM-L6-v2)")
         except Exception as e:
             log.warning(
@@ -100,8 +102,18 @@ def get_embedding_function():
                 f"until this is resolved): {e}"
             )
             _EMBEDDING_FUNCTION = LocalHashEmbedding()
+            _EMBEDDING_MODEL_NAME = "hash-fallback-v1"
 
         return _EMBEDDING_FUNCTION
+
+
+def get_embedding_model_name() -> str:
+    """The identifier of whichever embedding function is currently active
+    (e.g. 'all-MiniLM-L6-v2' or 'hash-fallback-v1'). Stamped onto every
+    stored chunk's metadata so a later mismatch (see
+    check_embedding_freshness) can be detected without guessing."""
+    get_embedding_function()  # ensures _EMBEDDING_MODEL_NAME is set
+    return _EMBEDDING_MODEL_NAME
 
 
 def embed_texts(texts: list[str]) -> list[list[float]]:
@@ -203,6 +215,7 @@ def store_chunks(chunks: list[str], metadata: dict, doc_hash: str):
         return
 
     ids = [f"{doc_hash}_{i}" for i in range(len(chunks))]
+    embedding_model = get_embedding_model_name()
     metadatas = [
         {
             "filename":     metadata["filename"],
@@ -216,6 +229,10 @@ def store_chunks(chunks: list[str], metadata: dict, doc_hash: str):
             "chunk_index":  str(i),
             "total_chunks": str(len(chunks)),
             "doc_hash":     doc_hash,
+            # Which embedding function produced this chunk's vector -- lets
+            # check_embedding_freshness() detect chunks left behind by an
+            # embedding-model upgrade instead of silently degrading search.
+            "embedding_model": embedding_model,
         }
         for i in range(len(chunks))
     ]
@@ -253,6 +270,7 @@ def reindex_all(batch_size: int = 200) -> dict:
     if total == 0:
         return {"total": 0, "reembedded": 0}
 
+    current_model = get_embedding_model_name()
     reembedded = 0
     offset = 0
     while offset < total:
@@ -260,6 +278,11 @@ def reindex_all(batch_size: int = 200) -> dict:
         ids, docs, metas = batch["ids"], batch["documents"], batch["metadatas"]
         if not ids:
             break
+
+        # Stamp the model that's actually producing these fresh embeddings
+        # so a later freshness check sees these chunks as up to date.
+        for meta in metas:
+            meta["embedding_model"] = current_model
 
         embeddings = embed_texts(docs)
         with _WRITE_LOCK:
@@ -334,7 +357,45 @@ def query_documents(
     return output
 
 
-def get_stats() -> dict:
-    """Return a summary of what is currently stored in ChromaDB."""
+def check_embedding_freshness(sample_limit: int = 500) -> dict:
+    """
+    Samples existing chunks and checks how many were embedded with a
+    DIFFERENT model than whatever is active right now (or predate the
+    "embedding_model" tag entirely, e.g. chunks stored before this check
+    existed -- treated the same as stale, since there's no way to tell
+    which model actually produced their vector).
+
+    This is the only way a switch like the old hash-based embedding ->
+    real semantic embeddings gets surfaced to a user at all: ChromaDB does
+    NOT retroactively re-embed existing data on its own (see
+    reindex_all's docstring), so without this check, older documents would
+    just silently return worse search results forever with no signal that
+    'python main.py reindex' would fix it.
+    """
     collection = get_collection()
-    return {"total_chunks": collection.count()}
+    total = collection.count()
+    if total == 0:
+        return {"needs_reindex": False, "stale_chunks_sampled": 0, "chunks_sampled": 0}
+
+    current_model = get_embedding_model_name()
+    sample = collection.get(limit=min(sample_limit, total), include=["metadatas"])
+    metas = sample.get("metadatas") or []
+
+    stale = sum(1 for m in metas if m.get("embedding_model") != current_model)
+
+    return {
+        "needs_reindex":         stale > 0,
+        "stale_chunks_sampled":  stale,
+        "chunks_sampled":        len(metas),
+        "current_embedding_model": current_model,
+    }
+
+
+def get_stats() -> dict:
+    """Return a summary of what is currently stored in ChromaDB, including
+    whether some chunks were embedded with a different (e.g. pre-upgrade)
+    model and would benefit from 'python main.py reindex'."""
+    collection = get_collection()
+    stats = {"total_chunks": collection.count()}
+    stats.update(check_embedding_freshness())
+    return stats

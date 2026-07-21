@@ -185,6 +185,12 @@ def cmd_stats():
         for label, count in sorted(email_type_counts.items(), key=lambda x: -x[1]):
             print(f"    · {label}: {count} chunks")
     print()
+    if stats.get("needs_reindex"):
+        print(f"  ⚠ {stats['stale_chunks_sampled']} of {stats['chunks_sampled']} sampled chunks were "
+              f"embedded with a different search model than what's active now "
+              f"('{stats['current_embedding_model']}').")
+        print(f"    Run 'python main.py reindex' to upgrade their search quality.")
+        print()
     print(f"{'=' * W}\n")
 
 
