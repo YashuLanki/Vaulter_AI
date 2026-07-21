@@ -191,32 +191,58 @@ def parse_csv(path: Path) -> list[dict]:
     return properties
 
 
-def parse_excel(path: Path) -> list[dict]:
+def parse_excel(path: Path) -> tuple[list[dict], set]:
+    """
+    Returns (active_properties, sold_names).
+
+    Sold/inactive deals are marked in the Smartsheet export by
+    strikethrough formatting on the row -- the exact same visual
+    convention already handled for PDF exports (see _parse_pdf_text's
+    strikethrough detection). Unlike a PDF (where strikethrough has to be
+    detected from rendered pixels), an .xlsx file carries this as real
+    font formatting openpyxl can read directly via cell.font.strike, so
+    iter_rows() here is NOT called with values_only=True -- that would
+    only give us the text and silently lose the strikethrough signal,
+    which is exactly what caused the CSV/Excel Project Master to never
+    filter out sold properties at all (every row was treated as active,
+    unlike the PDF path which already excluded struck-through rows).
+    """
     import openpyxl
     wb      = openpyxl.load_workbook(path, data_only=True)
     ws      = wb.active
     rows    = list(ws.iter_rows(values_only=True))
     if not rows:
-        return []
+        return [], set()
     headers = [str(c).strip() if c else "" for c in rows[0]]
     col     = {h: i for i, h in enumerate(headers)}
     name_i  = col.get("Project Name",     0)
     cat_i   = col.get("Project Category", 2)
     state_i = col.get("State",            3)
+
     properties = []
-    for row in rows[1:]:
+    sold_names = set()
+    for excel_row in ws.iter_rows(min_row=2):
+        row = [c.value for c in excel_row]
+        if name_i >= len(row):
+            continue
         name     = str(row[name_i]).strip()  if row[name_i]  else ""
-        category = str(row[cat_i]).strip()   if row[cat_i]   else ""
-        state    = str(row[state_i]).strip() if row[state_i] else ""
+        category = str(row[cat_i]).strip()   if cat_i   < len(row) and row[cat_i]   else ""
+        state    = str(row[state_i]).strip() if state_i < len(row) and row[state_i] else ""
         if not name or not category or name.lower() == "template":
             continue
+
+        name_cell = excel_row[name_i]
+        if name_cell.font and name_cell.font.strike:
+            sold_names.add(name)
+            continue
+
         properties.append({
             "name":     name,
             "city":     CITY_OVERRIDES.get(name, state),
             "state":    state,
             "category": category,
         })
-    return properties
+    return properties, sold_names
 
 
 def _clean_ocr_name(raw: str) -> str:
@@ -572,7 +598,7 @@ def load_properties() -> tuple[list[dict], str]:
         if ext == ".csv":
             props = parse_csv(file)
         elif ext in (".xlsx", ".xlsm", ".xls"):
-            props = parse_excel(file)
+            props, skipped_names = parse_excel(file)
         elif ext == ".pdf":
             props, skipped_names = parse_pdf(file)
         else:
@@ -639,19 +665,20 @@ def load_all_properties() -> tuple[list[dict], list[dict]]:
         elif ext == ".csv":
             all_props = parse_csv(file)
         elif ext in (".xlsx", ".xlsm", ".xls"):
-            all_props = parse_excel(file)
+            all_props, skipped_names = parse_excel(file)
         else:
             all_props = parse_text(file)
 
     except Exception as e:
         raise ValueError(f"Failed to parse {file.name}: {e}") from e
 
-    # Active = everything parse_pdf returned (struck-through already excluded)
+    # Active = everything parse_pdf/parse_excel returned (struck-through
+    # rows already excluded by those parsers themselves)
     active = all_props
 
-    # Sold = struck-through names looked up in BUILTIN_PROPERTIES for full details
-    # parse_pdf removes struck-through rows from all_props but tracks their names
-    # in skipped_names, so we rebuild full dicts from BUILTIN_PROPERTIES
+    # Sold = struck-through names looked up in BUILTIN_PROPERTIES for full details.
+    # parse_pdf/parse_excel remove struck-through rows from all_props but track
+    # their names in skipped_names, so we rebuild full dicts from BUILTIN_PROPERTIES
     builtin_map = {p["name"]: p for p in BUILTIN_PROPERTIES}
     sold = []
     for name in skipped_names:
