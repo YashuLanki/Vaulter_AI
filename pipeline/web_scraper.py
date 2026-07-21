@@ -14,7 +14,6 @@ Called by:  python main.py scrape
 
 import csv
 import hashlib
-import json
 import logging
 import sys
 import time
@@ -25,6 +24,7 @@ import requests
 from bs4 import BeautifulSoup
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
+import safe_io
 from config import (
     LOG_DIR, RAW_WEB_DIR, DATA_DIR, REGISTRY_DIR,
     CHROMA_DIR, CHROMA_COLLECTION_NAME,
@@ -121,12 +121,17 @@ HEADERS = {
 REGISTRY_FILE = REGISTRY_DIR / "web_registry.json"
 
 def load_registry() -> dict:
-    if REGISTRY_FILE.exists():
-        return json.loads(REGISTRY_FILE.read_text())
-    return {}
+    return safe_io.load_json(REGISTRY_FILE)
 
 def save_registry(registry: dict):
-    REGISTRY_FILE.write_text(json.dumps(registry, indent=2))
+    """Merges `registry`'s entries into whatever's currently on disk
+    (under a file lock), rather than overwriting the whole file with this
+    process's own snapshot -- scrape_all() loads the registry once at the
+    start of a run and only touches the sources it's actually scraping,
+    so a blind overwrite here would silently discard any OTHER source's
+    update made by a concurrently-running scrape job (e.g. two scheduled
+    per-source jobs firing close together)."""
+    safe_io.locked_json_update(REGISTRY_FILE, lambda current: {**current, **registry})
 
 
 # ─── Helpers ──────────────────────────────────────────────────────

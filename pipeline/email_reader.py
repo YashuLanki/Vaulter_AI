@@ -26,6 +26,7 @@ from pathlib import Path
 import requests
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
+import safe_io
 from config import (
     LOG_DIR, RAW_EMAIL_DIR, DATA_DIR, REGISTRY_DIR,
     WATCH_DIR, CHROMA_DIR, CHROMA_COLLECTION_NAME,
@@ -53,12 +54,18 @@ GRAPH = "https://graph.microsoft.com/v1.0"
 REGISTRY_FILE = REGISTRY_DIR / "email_registry.json"
 
 def load_registry() -> set:
-    if REGISTRY_FILE.exists():
-        return set(json.loads(REGISTRY_FILE.read_text()))
-    return set()
+    return set(safe_io.load_json(REGISTRY_FILE, default=[]))
 
 def save_registry(seen: set):
-    REGISTRY_FILE.write_text(json.dumps(sorted(seen), indent=2))
+    """Merges `seen` into whatever's currently on disk (under a file
+    lock) via set union, rather than overwriting -- process_all_emails()
+    accumulates seen_ids in memory for the whole run and saves once at
+    the end, so a blind overwrite here would discard any message ID
+    another concurrently-running email check (e.g. a manual run
+    overlapping the scheduler) already recorded as seen."""
+    safe_io.locked_json_update(
+        REGISTRY_FILE, lambda current: sorted(set(current) | seen), default=[],
+    )
 
 
 # ─── Graph API ────────────────────────────────────────────────────

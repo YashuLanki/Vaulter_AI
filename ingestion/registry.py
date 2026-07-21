@@ -7,25 +7,24 @@ Now also records property, state, and category for each ingested file.
 """
 
 import hashlib
-import json
 from datetime import datetime
 from pathlib import Path
 
+import safe_io
 from config import REGISTRY_FILE
 
 
 def load_registry() -> dict:
-    """Load the ingestion registry from disk. Returns empty dict if none exists."""
-    if REGISTRY_FILE.exists():
-        with open(REGISTRY_FILE) as f:
-            return json.load(f)
-    return {}
+    """Load the ingestion registry from disk. Returns empty dict if none
+    exists or if it's corrupt (e.g. a crash mid-write) -- corruption is
+    logged as a warning rather than crashing every future ingestion."""
+    return safe_io.load_json(REGISTRY_FILE)
 
 
 def save_registry(registry: dict):
-    """Save the ingestion registry to disk."""
-    with open(REGISTRY_FILE, "w") as f:
-        json.dump(registry, f, indent=2)
+    """Save the ingestion registry to disk atomically (temp file + rename,
+    so a crash mid-write can't leave a truncated/corrupt file)."""
+    safe_io.save_json_atomic(REGISTRY_FILE, registry)
 
 
 def get_file_hash(path: Path) -> str:
@@ -56,9 +55,12 @@ def record_ingestion(
     state: str = "unknown",
     category: str = "unknown",
 ):
-    """Add a successfully ingested file to the registry."""
-    registry = load_registry()
-    registry[file_hash] = {
+    """Add a successfully ingested file to the registry. Uses a file lock
+    around the read-modify-write so two files finishing ingestion at
+    close to the same moment (e.g. a startup batch scan racing a live
+    watcher event) can't have one's record silently overwrite the
+    other's."""
+    entry = {
         "filename":     filename,
         "ingested_at":  datetime.now().isoformat(),
         "chunks":       chunks,
@@ -68,4 +70,4 @@ def record_ingestion(
         "state":        state,
         "category":     category,
     }
-    save_registry(registry)
+    safe_io.locked_json_update(REGISTRY_FILE, lambda current: {**current, file_hash: entry})
