@@ -56,6 +56,29 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 log = logging.getLogger("vaulter.mcp")
 
+# In-memory scheduler status, read by the check_system_health tool.
+# Deliberately not persisted to disk -- it describes THIS process's
+# current run, and resets on restart along with the scheduler itself,
+# which is exactly what "is it running right now" should mean.
+_scheduler_status_lock = threading.Lock()
+_scheduler_status = {
+    "started": False,       # scheduler.start() was reached without raising
+    "start_error": None,    # exception message if setup/start failed
+    "jobs": {},              # job_id -> {"last_run": iso str, "last_error": str|None}
+}
+
+
+def _record_job_run(job_id: str, error: Exception = None) -> None:
+    """Record a scheduled job's outcome for check_system_health to report.
+    Called from inside each job's own try/except, so this never affects
+    whether a job's error is caught -- it only records what already
+    happened."""
+    import datetime as _dt
+    with _scheduler_status_lock:
+        entry = _scheduler_status["jobs"].setdefault(job_id, {})
+        entry["last_run"] = _dt.datetime.now().isoformat(timespec="seconds")
+        entry["last_error"] = str(error) if error else None
+
 
 # ══════════════════════════════════════════════════════════════════
 # File Explorer / Finder Helper
@@ -92,6 +115,32 @@ def _open_in_file_manager(path: "Path", select: bool = False) -> None:
     else:
         target = path.parent if select else path
         subprocess.Popen(["xdg-open", str(target)])
+
+
+# ══════════════════════════════════════════════════════════════════
+# Code Version
+# ══════════════════════════════════════════════════════════════════
+
+def _get_code_version() -> str:
+    """
+    Best-effort short git commit hash of the running code, for
+    check_system_health and support/debugging. Must never raise -- this
+    is read at the start of every conversation, and a machine without
+    git on PATH (or a non-git deployment) is a real possibility, not an
+    error condition.
+    """
+    import subprocess
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "--short", "HEAD"],
+            cwd=str(Path(__file__).parent),
+            capture_output=True, text=True, timeout=5,
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            return result.stdout.strip()
+    except Exception:
+        pass
+    return "unknown"
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -242,11 +291,14 @@ def _start_scheduler():
 
             for source in sources:
                 def _scrape(name=source["name"]):
+                    job_id = f"scrape_{name.replace(' ', '_')}"
                     try:
                         from pipeline.web_scraper import scrape_all
                         scrape_all(target_name=name)
+                        _record_job_run(job_id)
                     except Exception as ex:
                         log.warning(f"[SCHEDULER] Scrape failed ({name}): {ex}")
+                        _record_job_run(job_id, error=ex)
                 scheduler.add_job(
                     _scrape,
                     trigger=IntervalTrigger(hours=source["frequency_hours"]),
@@ -260,8 +312,10 @@ def _start_scheduler():
             try:
                 from pipeline.email_reader import process_all_emails
                 process_all_emails()
+                _record_job_run("check_email")
             except Exception as ex:
                 log.warning(f"[SCHEDULER] Email check failed: {ex}")
+                _record_job_run("check_email", error=ex)
 
         scheduler.add_job(
             _email,
@@ -277,8 +331,10 @@ def _start_scheduler():
                 try:
                     from pipeline.property_scraper import scrape_all_properties
                     scrape_all_properties()
+                    _record_job_run("property_scrape")
                 except Exception as ex:
                     log.warning(f"[SCHEDULER] Property scrape failed: {ex}")
+                    _record_job_run("property_scrape", error=ex)
 
             scheduler.add_job(
                 _property_scrape,
@@ -288,6 +344,8 @@ def _start_scheduler():
             )
 
         scheduler.start()
+        with _scheduler_status_lock:
+            _scheduler_status["started"] = True
         if RUN_SCHEDULED_SCRAPING:
             log.info("[SCHEDULER] Running — emails every 30min, web scrapes per source, property intel daily 6am")
         else:
@@ -296,6 +354,8 @@ def _start_scheduler():
 
     except Exception as e:
         log.warning(f"[SCHEDULER] Could not start scheduler: {e}")
+        with _scheduler_status_lock:
+            _scheduler_status["start_error"] = str(e)
 
     # Keepalive loop — runs whether or not the scheduler started.
     # Wrapped in its own try/except so any unexpected error just logs
@@ -316,7 +376,16 @@ def create_mcp_server():
 
     mcp = FastMCP(
         name="Vaulter AI Property Intelligence",
-        instructions="""You have access to Vaulter AI's complete property intelligence database.
+        instructions="""Before doing anything else in a brand-new conversation, call
+check_system_health() once to check whether this local instance is actually working
+(Outlook sign-in, database freshness, background scheduler, shared folder connectivity,
+active portfolio file, code version). Do not call it again later in the same conversation.
+If it comes back healthy, say nothing about it at all and just proceed with whatever the
+user asked. Only mention it if it reports an actual problem -- then state the problem in
+plain English and continue with the user's request anyway; never withhold help or delay a
+task because of what this check finds.
+
+You have access to Vaulter AI's complete property intelligence database.
 This includes:
 - The full active property portfolio across Arizona, California, New Mexico, Colorado, and Texas
 - Due diligence PDFs (surveys, ALTA, title reports)
@@ -343,6 +412,147 @@ will explain how to supply the file. After screening, call
 open_screening_dashboard to view the full breakdown (Pursue/Scrutinize/Pass
 tabs, per-listing analyst notes, and a direct Excel download) in a browser."""
     )
+
+    @mcp.tool()
+    def check_system_health() -> str:
+        """
+        Check whether this local Vaulter AI instance is actually working:
+        Outlook sign-in, database freshness, background scheduler status
+        (and last error per job), whether the shared team folder is really
+        connected (vs silently fallen back to local-only), which portfolio
+        file is active, and the running code version. Strictly read-only.
+
+        Call this once, automatically, at the very start of every new
+        conversation, before anything else -- not on every message, and
+        not again later in the same conversation. If everything comes
+        back healthy, say NOTHING about it and just proceed with the
+        user's actual request; a clean bill of health is not worth
+        reporting. Only surface this if it finds an actual problem, and
+        even then keep it brief and keep going -- state the issue in
+        plain English, then continue with whatever the user asked. Never
+        refuse or delay a task because of what this check finds; it is
+        informational only.
+        """
+        import datetime as _dt
+        import json as _json
+
+        issues = []
+        lines = []
+
+        # ── Outlook ──────────────────────────────────────────────
+        try:
+            from pipeline.outlook_auth import get_access_token
+            get_access_token(interactive=False)
+            lines.append("Outlook: signed in")
+        except Exception as e:
+            lines.append(f"Outlook: NOT signed in ({e})")
+            issues.append(
+                "Outlook sign-in has expired or was never completed -- "
+                "email ingestion is paused. Run `python main.py auth` to fix."
+            )
+
+        # ── Database ─────────────────────────────────────────────
+        try:
+            from ingestion.embedder import get_stats
+            from ingestion.registry import load_registry
+            from config import DATA_DIR
+
+            stats = get_stats()
+            registry = load_registry()
+
+            def _load_json(path):
+                try:
+                    return _json.loads(path.read_text()) if path.exists() else {}
+                except Exception:
+                    return {}
+
+            email_registry_file = DATA_DIR / "email_registry.json"
+            web_registry = _load_json(DATA_DIR / "web_registry.json")
+            email_registry = _load_json(email_registry_file)
+
+            timestamps = []
+            for entries in registry.values():
+                for entry in (entries if isinstance(entries, list) else [entries]):
+                    if entry.get("ingested_at"):
+                        timestamps.append(entry["ingested_at"])
+            for entry in web_registry.values():
+                if isinstance(entry, dict) and entry.get("scraped_at"):
+                    timestamps.append(entry["scraped_at"])
+            # email_registry.json is just a flat list of seen message IDs
+            # (no per-message timestamp), so its own file mtime is the
+            # best available proxy for "last time email was checked."
+            if email_registry_file.exists():
+                timestamps.append(
+                    _dt.datetime.fromtimestamp(email_registry_file.stat().st_mtime).isoformat(timespec="seconds")
+                )
+
+            lines.append(
+                f"Database: {stats['total_chunks']:,} chunks "
+                f"({len(registry)} PDFs, {len(email_registry)} emails seen, {len(web_registry)} web sources)"
+            )
+            if timestamps:
+                lines.append(f"  Last activity: {max(timestamps)}")
+            elif stats["total_chunks"] == 0:
+                lines.append("  Last activity: none yet")
+                issues.append("The database is empty -- nothing has been ingested yet.")
+        except Exception as e:
+            lines.append(f"Database: could not check ({e})")
+            issues.append(f"Could not read database stats: {e}")
+
+        # ── Scheduler ────────────────────────────────────────────
+        with _scheduler_status_lock:
+            status_snapshot = _json.loads(_json.dumps(_scheduler_status))
+        if status_snapshot["start_error"]:
+            lines.append(f"Scheduler: NOT running ({status_snapshot['start_error']})")
+            issues.append(f"The background scheduler failed to start: {status_snapshot['start_error']}")
+        elif not status_snapshot["started"]:
+            lines.append("Scheduler: still starting up")
+        else:
+            lines.append("Scheduler: running")
+            for job_id, info in sorted(status_snapshot["jobs"].items()):
+                if info.get("last_error"):
+                    lines.append(f"  {job_id}: last ran {info['last_run']} -- FAILED: {info['last_error']}")
+                    issues.append(f"Scheduled job '{job_id}' failed on its last run: {info['last_error']}")
+                elif info.get("last_run"):
+                    lines.append(f"  {job_id}: last ran {info['last_run']}, OK")
+
+        # ── Shared folder ────────────────────────────────────────
+        from config import SHARED_DIR, SHARED_DIR_IS_FALLBACK
+        if SHARED_DIR_IS_FALLBACK or not SHARED_DIR.exists():
+            lines.append(f"Shared folder: NOT connected -- using local fallback ({SHARED_DIR})")
+            issues.append(
+                "The shared OneDrive folder isn't connected, so screening results and other "
+                "team-shared data are only being saved locally, not shared with the team. "
+                "Check that OneDrive is signed in and syncing."
+            )
+        else:
+            lines.append(f"Shared folder: connected ({SHARED_DIR})")
+
+        # ── Portfolio file ───────────────────────────────────────
+        try:
+            from pipeline.property_scraper import find_project_file
+            pfile = find_project_file()
+            if pfile:
+                mtime = _dt.datetime.fromtimestamp(pfile.stat().st_mtime)
+                lines.append(f"Portfolio file: {pfile.name} (dated {mtime:%Y-%m-%d})")
+            else:
+                lines.append("Portfolio file: none found")
+                issues.append(
+                    "No Project Master file found in data/project_master/ -- property "
+                    "lookups are using only the built-in fallback list."
+                )
+        except Exception as e:
+            lines.append(f"Portfolio file: could not check ({e})")
+
+        # ── Version ──────────────────────────────────────────────
+        lines.append(f"Code version: {_get_code_version()}")
+
+        summary = "HEALTHY" if not issues else f"{len(issues)} ISSUE(S) FOUND"
+        body = "\n".join(lines)
+        if issues:
+            issue_block = "\n".join(f"  - {i}" for i in issues)
+            return f"Vaulter AI health check — {summary}\n\n{body}\n\nISSUES:\n{issue_block}"
+        return f"Vaulter AI health check — {summary}\n\n{body}"
 
     @mcp.tool()
     def search_database(query: str, n_results: int = 15) -> str:

@@ -111,11 +111,21 @@ There is no `MCP_API_KEY` / shared secret — the real access boundary is simply
 this your own computer, logged in as you." (The README's ngrok/HTTP-connector
 section describes a different, no-longer-intended shared-server design; treat it
 as stale if you encounter it.) Tools exposed:
-`search_database`, `get_property_info`, `get_portfolio_list`, `get_properties_by_stage`,
-`check_inbox_now`, `get_email_highlights`, `get_risk_scan`, `get_market_intelligence`,
-`get_database_stats`, `open_property_files`, `open_general_files`,
+`check_system_health`, `search_database`, `get_property_info`, `get_portfolio_list`,
+`get_properties_by_stage`, `check_inbox_now`, `get_email_highlights`, `get_risk_scan`,
+`get_market_intelligence`, `get_database_stats`, `open_property_files`, `open_general_files`,
 `open_proximity_files`, `get_screening_rules`, `test_screener`, `screen_listings`,
 `open_screening_dashboard`, `run_google_places_export`.
+
+`check_system_health` is the Priority 1 health-check tool from
+`docs/MULTI_USER_TRANSITION.md` — its own tool description instructs Claude Desktop to
+call it automatically once at the start of every conversation (not per-message, not
+again later in the same conversation), stay silent if everything's healthy, and only
+speak up when it finds a real problem (Outlook auth, scheduler, shared folder, portfolio
+file, code version) — never blocking or delaying whatever the user actually asked for.
+Scheduler job status is tracked in an in-memory `_scheduler_status` dict in
+`mcp_server.py`, updated by each job's own try/except — deliberately not persisted, since
+it describes this process's current run and should reset with the process.
 
 ### CoStar Listing Screener (`analysis/screening/`)
 A 4-phase pipeline, orchestrated end-to-end by `pipeline.py::run_full_screening()` (the
