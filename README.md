@@ -4,8 +4,9 @@ An end-to-end AI system built for a real estate investment company to automate
 market intelligence, document analysis, and broker email processing.
 
 Built as a data analyst intern project using Python, Claude AI, and a modern
-RAG (Retrieval-Augmented Generation) architecture — accessible directly through
-the team's existing Claude.ai Team subscription via an MCP server.
+RAG (Retrieval-Augmented Generation) architecture — each team member runs
+their own fully-local instance, accessible directly through their own Claude
+Desktop app via an MCP server (see Security Notes below for why).
 
 ---
 
@@ -15,7 +16,7 @@ the team's existing Claude.ai Team subscription via an MCP server.
 |-------|------|-------------|--------|
 | 1 | PDF Ingestion | Watches a folder, extracts text from PDFs (including scanned documents via OCR), and stores chunks in a vector database | ✅ Complete |
 | 2 | Web & Email Pipeline | Scrapes public market data, pulls broker emails, and searches for property-specific intelligence tied to the Vaulter Project Master | ✅ Complete |
-| 3 | MCP Server | Exposes the full database as tools Claude.ai can call — no separate UI needed, team uses claude.ai directly | ✅ Complete |
+| 3 | MCP Server | Exposes each person's own local database as tools their own Claude Desktop can call — no separate UI needed | ✅ Complete |
 | 4 | Speech-to-Knowledge | Records Monday meetings, transcribes audio, and extracts structured property updates | 🔜 Planned |
 
 ---
@@ -23,8 +24,8 @@ the team's existing Claude.ai Team subscription via an MCP server.
 ## CoStar Listing Screener (`analysis/screening/`)
 
 A 4-phase pipeline for screening inbound CoStar exports and broker spreadsheets,
-exposed through the MCP server so the team can screen a new listing sheet
-straight from claude.ai:
+exposed through the MCP server so anyone on the team can screen a new listing
+sheet straight from their own Claude Desktop:
 
 | Phase | Description |
 |-------|-------------|
@@ -56,15 +57,19 @@ enrichment step is skipped.
 
 ## How the Team Uses It
 
-1. Open **claude.ai** (already on Team plan — no extra cost)
-2. Go to **Settings → Connectors** and connect **Vaulter AI Property Intelligence**
-3. Ask questions in plain English — Claude automatically calls the right tools:
+Each person sets up their own local instance once (see Setup below), connected
+to their own Claude Desktop app:
+
+1. Open **Claude Desktop**
+2. Ask questions in plain English — Claude automatically calls the right tools:
    - *"What's the latest on Mesa Del Sol?"*
    - *"Any new broker emails this week?"*
    - *"Run a risk scan on our Arizona portfolio"*
    - *"List all properties in Final Engineering"*
 
-No separate app, no browser tab, no login — just Claude.ai the team already uses.
+No separate app beyond Claude Desktop itself, no browser tab, no login step
+each time — and because it's local, each person's own email stays private to
+them (see Security Notes).
 
 ---
 
@@ -78,7 +83,7 @@ No separate app, no browser tab, no login — just Claude.ai the team already us
 - **OCR** — Tesseract (PDFs, image-based Project Master, image email attachments)
 - **Document Parsing** — mammoth (Word), openpyxl (Excel), python-pptx (PowerPoint)
 - **Scheduling** — APScheduler
-- **MCP Server** — FastMCP (connects database to claude.ai)
+- **MCP Server** — FastMCP (stdio, launched by each person's own Claude Desktop)
 - **Transcription** — OpenAI Whisper (Stage 4)
 
 ---

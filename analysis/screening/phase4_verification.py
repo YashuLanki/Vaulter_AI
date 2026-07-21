@@ -103,7 +103,7 @@ def probe_available_apis(api_key: str, include_low_value_apis: bool = False,
 
     try:
         r = google_roads_snap(_PROBE_LAT, _PROBE_LNG, api_key)
-        results["roads"] = r["status"] != "ERROR"  # NO_ROAD_FOUND is a valid enabled-but-empty result
+        results["roads"] = not _api_denied(r["status"])  # NO_ROAD_FOUND is a valid enabled-but-empty result
     except Exception:
         results["roads"] = False
 
@@ -329,6 +329,16 @@ def google_roads_snap(lat: float, lng: float, api_key: str) -> dict:
     params = {"points": f"{lat},{lng}", "key": api_key}
     resp = requests.get(url, params=params, timeout=15)
     data = resp.json()
+
+    if resp.status_code != 200 or "error" in data:
+        # A genuine API error (not enabled for this key, invalid key,
+        # quota exceeded, etc.) -- NOT the same thing as "no road found,"
+        # which is a legitimate result (status_code 200, empty
+        # snappedPoints) for a real rural/landlocked parcel. Conflating
+        # the two previously made an unconfigured Roads API look like
+        # "possible landlocked parcel" in every Phase 4 verdict.
+        error_status = data.get("error", {}).get("status", "ERROR")
+        return {"status": error_status, "place_id": None}
 
     snapped = data.get("snappedPoints", [])
     if not snapped:
