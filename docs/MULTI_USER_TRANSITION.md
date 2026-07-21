@@ -183,12 +183,32 @@ Each item is independent and can be done on its own. Recommended order:
 Fix A1, A2, A3 above. Small, self-contained, no rollout dependencies.
 
 ### Priority 1 — Health-check tool *(highest leverage)*
-A read-only "is my copy working?" tool each person can run inside Claude Desktop. Reports, in
-plain English: Outlook sign-in status, how much data is in the database and when it last
-ingested, whether the background scheduler is running and its last error per job, whether the
-shared folder is really connected (vs silently fallen back to local), which portfolio file is
-in effect and its date, and the running code version. This turns every silent failure in
-Theme 2 and Theme 4 into a self-serve check.
+A read-only "is my copy working?" check covering, in plain English: Outlook sign-in status,
+how much data is in the database and when it last ingested, whether the background scheduler
+is running and its last error per job, whether the shared folder is really connected (vs
+silently fallen back to local), which portfolio file is in effect and its date, and the
+running code version. This turns every silent failure in Theme 2 and Theme 4 into something
+checkable.
+
+**Proactive, not on-demand.** For non-technical staff, a tool they have to remember to ask for
+defeats the purpose — the whole problem is failures that are silent, and someone who doesn't
+know to ask never finds out. Since Claude reads each MCP tool's own description when it
+connects, the health-check tool's description should instruct Claude to run it automatically
+at the start of every conversation, before anything else — not something the user has to
+request. Two things make this work well rather than becoming a nuisance:
+- **Silent when healthy.** If everything checks out, Claude says nothing about it at all and
+  just proceeds with whatever the user actually asked. The check should only surface into the
+  conversation when it finds something actually wrong (auth expired, scheduler dead, shared
+  folder disconnected, etc.) — otherwise every single conversation would open with a "yep,
+  all good!" that becomes noise nobody reads.
+- **One check per session, not per message.** It should run once when a conversation starts,
+  not be re-run on every message — a lightweight local check is cheap, but running it
+  constantly for no reason is still unnecessary overhead and risks feeling naggy.
+
+*For implementers: this depends on Claude actually following an instruction embedded in a tool
+description rather than a hard technical guarantee (MCP doesn't have a true server-push
+mechanism into an existing chat) — worth explicitly testing that Claude Desktop reliably calls
+it at conversation start before relying on it as the primary safety net.*
 
 ### Priority 2 — Shared-folder safety *(protects real money and data)*
 Fix C1 first (the silent-wipe), then C2 (conflict-copy merge), then C3 (in-progress marker),
@@ -253,6 +273,11 @@ This is the "what could go wrong with the fix itself" analysis.
 - *Prevention:* keep it strictly read-only and derive everything from state that already
   exists (database counts, the token file's timestamp, the scheduler's last-run record). It
   should be incapable of changing anything, so it can never itself cause a problem.
+- *Risk:* making it proactive (run automatically, not on request) turns a once-harmless check
+  into something that talks in every single conversation, becoming exactly the kind of noise
+  users learn to ignore — which defeats the purpose just as badly as silence does.
+- *Prevention:* only speak up when something is actually wrong; stay completely silent when
+  healthy. Run once per conversation, not per message.
 
 **Shared-folder safety**
 - *Risk:* an over-aggressive "refuse to write" rule blocks legitimate saves and makes screening
