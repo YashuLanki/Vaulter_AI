@@ -146,6 +146,82 @@ _INIT_LOCK  = threading.Lock()
 _WRITE_LOCK = threading.Lock()
 
 
+def _is_embedding_function_conflict(e: Exception) -> bool:
+    """True if `e` is ChromaDB refusing to open a collection because the
+    embedding function requested now differs from whichever one was
+    persisted when the collection was first created (e.g. an existing
+    user's database, created under the old sentence-transformers
+    function, opened by code that now requests the new ONNX one -- see
+    _migrate_collection_to_current_embedding_function's docstring for
+    why this needs handling here rather than just letting it raise)."""
+    return isinstance(e, ValueError) and "embedding function" in str(e).lower()
+
+
+def _migrate_collection_to_current_embedding_function(client) -> object:
+    """
+    Recreates CHROMA_COLLECTION_NAME so it can be opened under the
+    CURRENT embedding function, preserving every existing chunk's data
+    and vectors completely unchanged.
+
+    Why this is needed: ChromaDB persists which embedding function a
+    collection was created with, and refuses to open it with a
+    DIFFERENT one -- get_or_create_collection raises ValueError
+    ("Embedding function conflict") rather than just returning stale
+    results. This is fine and invisible for a brand new install (nothing
+    exists yet to conflict with), but for anyone with an EXISTING
+    database -- created under a since-replaced embedding function (e.g.
+    this project's own move from sentence-transformers to ChromaDB's
+    built-in ONNX model) -- every single call to get_collection() would
+    otherwise raise immediately, breaking every MCP tool that touches
+    the database (search, storage, the freshness check, reindexing
+    itself) the moment the new code runs against their old database.
+    ChromaDB also has no supported way to change a collection's
+    embedding-function TYPE in place (collection.modify(configuration=
+    {"embedding_function": ...}) explicitly rejects a type change, as
+    verified directly against this chromadb version) -- delete-and-
+    recreate is the only path.
+
+    This function does NOT re-embed anything -- it reads out every
+    existing id/document/metadata/embedding via the OLD (already-
+    working) collection handle, deletes the collection, recreates it
+    bound to the CURRENT embedding function, and re-inserts every chunk
+    with its EXACT SAME pre-existing vector and metadata (including its
+    existing "embedding_model" tag, left untouched). This is deliberately
+    cheap (no model calls) and leaves the data exactly as
+    check_embedding_freshness() already expects it: still tagged with
+    the OLD model name, so it's correctly detected as stale and picked
+    up by the already-existing reindex_all() flow -- which is what
+    actually recomputes each chunk's real vector, exactly as before this
+    fix. This function only unblocks OPENING the collection; it doesn't
+    change what "stale" means or how staleness gets fixed.
+    """
+    old_collection = client.get_collection(name=CHROMA_COLLECTION_NAME)
+    existing = old_collection.get(include=["documents", "metadatas", "embeddings"])
+    log.warning(
+        f"Collection '{CHROMA_COLLECTION_NAME}' was created under a different embedding "
+        f"function than the one now active -- recreating it (preserving all "
+        f"{len(existing['ids'])} existing chunk(s) and their vectors unchanged) so it can "
+        f"be opened going forward. Chunks keep their existing embedding_model tag, so the "
+        f"normal check_embedding_freshness()/reindex flow will still detect and re-embed "
+        f"them as usual."
+    )
+
+    client.delete_collection(name=CHROMA_COLLECTION_NAME)
+    new_collection = client.create_collection(
+        name=CHROMA_COLLECTION_NAME,
+        embedding_function=get_embedding_function(),
+        metadata={"hnsw:space": "cosine"},
+    )
+    if existing["ids"]:
+        new_collection.upsert(
+            ids=existing["ids"],
+            documents=existing["documents"],
+            embeddings=existing["embeddings"],
+            metadatas=existing["metadatas"],
+        )
+    return new_collection
+
+
 def get_collection():
     """
     Return the shared ChromaDB collection.
@@ -170,11 +246,16 @@ def get_collection():
                     path=str(CHROMA_DIR),
                     settings=chromadb.config.Settings(anonymized_telemetry=False),
                 )
-                _COLLECTION = _CLIENT.get_or_create_collection(
-                    name=CHROMA_COLLECTION_NAME,
-                    embedding_function=get_embedding_function(),
-                    metadata={"hnsw:space": "cosine"},
-                )
+                try:
+                    _COLLECTION = _CLIENT.get_or_create_collection(
+                        name=CHROMA_COLLECTION_NAME,
+                        embedding_function=get_embedding_function(),
+                        metadata={"hnsw:space": "cosine"},
+                    )
+                except Exception as e:
+                    if not _is_embedding_function_conflict(e):
+                        raise
+                    _COLLECTION = _migrate_collection_to_current_embedding_function(_CLIENT)
                 log.debug("ChromaDB collection initialized")
                 return _COLLECTION
             except Exception as e:
