@@ -178,16 +178,29 @@ def _migrate_collection_to_current_embedding_function(client) -> object:
     ChromaDB also has no supported way to change a collection's
     embedding-function TYPE in place (collection.modify(configuration=
     {"embedding_function": ...}) explicitly rejects a type change, as
-    verified directly against this chromadb version) -- delete-and-
-    recreate is the only path.
+    verified directly against this chromadb version) -- a rebuild is the
+    only path.
 
-    This function does NOT re-embed anything -- it reads out every
-    existing id/document/metadata/embedding via the OLD (already-
-    working) collection handle, deletes the collection, recreates it
-    bound to the CURRENT embedding function, and re-inserts every chunk
-    with its EXACT SAME pre-existing vector and metadata (including its
-    existing "embedding_model" tag, left untouched). This is deliberately
-    cheap (no model calls) and leaves the data exactly as
+    Populates a TEMPORARY, separately-named collection first, verifies
+    every row copied over correctly, and only THEN deletes the old
+    collection and renames the temporary one into place (collection
+    rename IS supported by ChromaDB, unlike an embedding-function-type
+    change) -- deliberately never deleting the original data until a
+    fully-populated replacement already exists and is confirmed intact.
+    A naive delete-then-recreate-then-repopulate ordering would leave a
+    window where a mid-migration crash (process killed, disk full)
+    permanently loses every chunk with no recovery path -- unacceptable
+    here since some of this data (email/web/property-intelligence
+    content) cannot always be re-ingested from its original source
+    afterward. This ordering closes that window: the old collection
+    stays fully intact and reachable under its original name for the
+    entire copy, and is only ever removed after its replacement is
+    verified complete.
+
+    This function does NOT re-embed anything -- it copies every existing
+    id/document/metadata/embedding across UNCHANGED (including each
+    chunk's existing "embedding_model" tag). This is deliberately cheap
+    (no model calls) and leaves the data exactly as
     check_embedding_freshness() already expects it: still tagged with
     the OLD model name, so it's correctly detected as stale and picked
     up by the already-existing reindex_all() flow -- which is what
@@ -195,31 +208,59 @@ def _migrate_collection_to_current_embedding_function(client) -> object:
     fix. This function only unblocks OPENING the collection; it doesn't
     change what "stale" means or how staleness gets fixed.
     """
+    temp_name = f"{CHROMA_COLLECTION_NAME}__migrating"
+    # Clean up any leftover temp collection from a previous run that
+    # crashed before completing (e.g. process killed mid-migration) --
+    # that attempt's old collection is still intact under its original
+    # name (this function never deletes it until the temp copy is
+    # verified), so it's always safe to discard a stale, unverified temp
+    # collection and simply try the whole migration again from scratch.
+    try:
+        client.delete_collection(name=temp_name)
+    except Exception:
+        pass
+
     old_collection = client.get_collection(name=CHROMA_COLLECTION_NAME)
     existing = old_collection.get(include=["documents", "metadatas", "embeddings"])
+    total = len(existing["ids"])
     log.warning(
         f"Collection '{CHROMA_COLLECTION_NAME}' was created under a different embedding "
-        f"function than the one now active -- recreating it (preserving all "
-        f"{len(existing['ids'])} existing chunk(s) and their vectors unchanged) so it can "
-        f"be opened going forward. Chunks keep their existing embedding_model tag, so the "
-        f"normal check_embedding_freshness()/reindex flow will still detect and re-embed "
-        f"them as usual."
+        f"function than the one now active -- migrating it ({total} existing chunk(s), "
+        f"vectors unchanged) so it can be opened going forward. Chunks keep their existing "
+        f"embedding_model tag, so the normal check_embedding_freshness()/reindex flow will "
+        f"still detect and re-embed them as usual."
     )
 
-    client.delete_collection(name=CHROMA_COLLECTION_NAME)
-    new_collection = client.create_collection(
-        name=CHROMA_COLLECTION_NAME,
+    temp_collection = client.create_collection(
+        name=temp_name,
         embedding_function=get_embedding_function(),
         metadata={"hnsw:space": "cosine"},
     )
-    if existing["ids"]:
-        new_collection.upsert(
+    if total:
+        temp_collection.upsert(
             ids=existing["ids"],
             documents=existing["documents"],
             embeddings=existing["embeddings"],
             metadatas=existing["metadatas"],
         )
-    return new_collection
+
+    copied = temp_collection.count()
+    if copied != total:
+        # Don't touch the original -- leave the incomplete temp copy
+        # for the next attempt to clean up and redo, and surface this
+        # clearly rather than silently proceeding with partial data.
+        raise RuntimeError(
+            f"Migration verification failed: expected {total} chunks in the temporary "
+            f"collection, found {copied}. The original collection '{CHROMA_COLLECTION_NAME}' "
+            f"was not touched and remains intact; this migration will be retried."
+        )
+
+    # Only now, with a verified, fully-populated replacement already in
+    # place, remove the original and take its name.
+    client.delete_collection(name=CHROMA_COLLECTION_NAME)
+    temp_collection.modify(name=CHROMA_COLLECTION_NAME)
+    log.warning(f"Migration of '{CHROMA_COLLECTION_NAME}' complete -- {copied} chunk(s) re-inserted.")
+    return temp_collection
 
 
 def get_collection():
