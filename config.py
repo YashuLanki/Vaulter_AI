@@ -144,6 +144,29 @@ OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 PROXIMITY_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 SCREENING_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
+# Priority 4 (docs/MULTI_USER_TRANSITION.md) — auto-update. UPDATES_DIR is
+# where release.py (run by whoever ships a reviewed fix) publishes a new
+# version's code package + version marker; every instance's scheduler
+# reads from there. Deliberately the same shared OneDrive location as
+# everything else shared across the team, not a new channel.
+# PENDING_UPDATE_DIR is LOCAL (per machine) -- where an update gets
+# staged once downloaded, before a human decides to actually apply it.
+UPDATES_DIR        = SHARED_DIR / "updates"
+PENDING_UPDATE_DIR = DATA_DIR / "pending_update"
+
+UPDATES_DIR.mkdir(parents=True, exist_ok=True)
+PENDING_UPDATE_DIR.mkdir(parents=True, exist_ok=True)
+
+# Which release channel this instance follows -- "general" (the default)
+# only picks up versions that have been explicitly promoted after a
+# canary check; "canary" picks up every new release immediately, before
+# it's been confirmed healthy anywhere else. Set on a small number of
+# designated machines only (e.g. the maintainer's own), via
+# confidentials/.env -- most instances should stay on "general".
+VAULTER_UPDATE_CHANNEL = os.getenv("VAULTER_UPDATE_CHANNEL", "general").strip().lower()
+if VAULTER_UPDATE_CHANNEL not in ("general", "canary"):
+    VAULTER_UPDATE_CHANNEL = "general"
+
 CHROMA_DIR.mkdir(parents=True, exist_ok=True)
 LOG_DIR.mkdir(parents=True, exist_ok=True)
 

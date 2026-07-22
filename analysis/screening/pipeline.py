@@ -29,6 +29,17 @@ from . import workbook_builder
 
 log = logging.getLogger("vaulter.screening")
 
+# Stamped onto every manifest entry this code WRITES, and checked against
+# every entry this code READS -- see Priority 4 in
+# docs/MULTI_USER_TRANSITION.md. Bump this only when a change to
+# new_entry's shape in _update_manifest() would make an OLDER reader
+# misinterpret a NEWER entry (e.g. a field renamed or repurposed, not
+# just a new field added -- an old reader already ignores fields it
+# doesn't look for, so purely additive changes don't need a bump).
+# Entries with no format_version at all predate this mechanism and are
+# treated as version 1, the original shape.
+MANIFEST_FORMAT_VERSION = 1
+
 
 def _load_manifest(output_dir: Path) -> dict:
     return safe_io.load_json(output_dir / "manifest.json", default={"markets": []})
@@ -178,6 +189,16 @@ def _find_cached_result(output_dir: Path, source_hash: str, top_n: int,
     """
     manifest = _load_manifest(output_dir)
     for entry in manifest.get("markets", []):
+        if entry.get("format_version", 1) > MANIFEST_FORMAT_VERSION:
+            # A newer teammate's instance wrote this entry in a format
+            # this (older) code doesn't understand yet -- ignore it
+            # rather than risk misreading fields that changed shape,
+            # exactly the mid-rollout mismatch Priority 4 guards against.
+            # This entry stays in the file for a newer instance to use;
+            # this one just re-screens instead of trusting it.
+            log.info(f"Ignoring a manifest entry with a newer format (v{entry.get('format_version')} "
+                     f"> v{MANIFEST_FORMAT_VERSION} this code understands) -- will re-screen instead.")
+            continue
         if (entry.get("source_hash") != source_hash
                 or entry.get("top_n") != top_n
                 or entry.get("include_low_value_apis", False) != include_low_value_apis):
@@ -218,6 +239,7 @@ def _update_manifest(output_dir: Path, market: str, market_slug: str, timestamp:
     """
     manifest_path = output_dir / "manifest.json"
     new_entry = {
+        "format_version": MANIFEST_FORMAT_VERSION,
         "market": market,
         "market_slug": market_slug,
         "timestamp": timestamp,

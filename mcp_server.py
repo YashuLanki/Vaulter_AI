@@ -143,6 +143,61 @@ def _get_code_version() -> str:
     return "unknown"
 
 
+def _check_and_stage_update() -> None:
+    """
+    Priority 4 (docs/MULTI_USER_TRANSITION.md): checks this instance's
+    release channel for a newer version than what's currently running,
+    and if found, downloads (copies) it into the local PENDING_UPDATE_DIR
+    staging area. Deliberately does NOT extract or apply anything -- this
+    first version of the mechanism is notify-and-stage only; a human
+    confirms in a Claude conversation once check_system_health surfaces
+    it, and Claude calls the apply_pending_update tool on their behalf
+    (no terminal needed).
+
+    Safe to call repeatedly: if the already-staged version matches the
+    current marker, does nothing.
+    """
+    import datetime as _dt
+    import json
+    import shutil as _shutil
+    from config import UPDATES_DIR, PENDING_UPDATE_DIR, VAULTER_UPDATE_CHANNEL
+
+    marker_path = UPDATES_DIR / f"latest_version_{VAULTER_UPDATE_CHANNEL}.json"
+    if not marker_path.exists():
+        return  # nothing published to this channel yet
+
+    remote = json.loads(marker_path.read_text())
+    remote_version = remote.get("version")
+    current_version = _get_code_version()
+    if not remote_version or remote_version == current_version:
+        return  # already on the latest version for this channel
+
+    ready_path = PENDING_UPDATE_DIR / "ready.json"
+    if ready_path.exists():
+        already_staged = json.loads(ready_path.read_text()).get("version")
+        if already_staged == remote_version:
+            return  # already downloaded, just waiting for a human to apply it
+
+    zip_filename = remote.get("zip_filename")
+    remote_zip = UPDATES_DIR / (zip_filename or "")
+    if not zip_filename or not remote_zip.exists():
+        log.warning(f"[UPDATE] {marker_path.name} points to version {remote_version}, but its "
+                    f"package file is missing -- skipping until it's available.")
+        return
+
+    local_zip = PENDING_UPDATE_DIR / zip_filename
+    _shutil.copy2(remote_zip, local_zip)
+    ready_path.write_text(json.dumps({
+        "version": remote_version,
+        "zip_filename": zip_filename,
+        "downloaded_at": _dt.datetime.now().isoformat(timespec="seconds"),
+        "notes": remote.get("notes", ""),
+        "current_version_at_download": current_version,
+    }, indent=2))
+    log.info(f"[UPDATE] Staged version {remote_version} (currently running {current_version}) -- "
+             f"run `python apply_update.py` when ready to apply it.")
+
+
 # ══════════════════════════════════════════════════════════════════
 # Screening Source Resolver
 # ══════════════════════════════════════════════════════════════════
@@ -322,6 +377,27 @@ def _start_scheduler():
             trigger=IntervalTrigger(minutes=30),
             id="check_email",
             next_run_time=_datetime.datetime.now() + FIRST_RUN_DELAY,
+            replace_existing=True,
+        )
+
+        # ── Check for a new version — daily at 5 AM ───────────────
+        # Priority 4 (docs/MULTI_USER_TRANSITION.md): only checks and
+        # STAGES a newer version if one exists on this instance's
+        # channel -- never applies it automatically. See
+        # check_system_health, which surfaces a staged update, and
+        # apply_update.py, which a human runs to actually apply one.
+        def _check_for_updates():
+            try:
+                _check_and_stage_update()
+                _record_job_run("check_for_updates")
+            except Exception as ex:
+                log.warning(f"[SCHEDULER] Update check failed: {ex}")
+                _record_job_run("check_for_updates", error=ex)
+
+        scheduler.add_job(
+            _check_for_updates,
+            trigger=CronTrigger(hour=5, minute=0),
+            id="check_for_updates",
             replace_existing=True,
         )
 
@@ -547,12 +623,71 @@ tabs, per-listing analyst notes, and a direct Excel download) in a browser."""
         # ── Version ──────────────────────────────────────────────
         lines.append(f"Code version: {_get_code_version()}")
 
+        try:
+            from config import PENDING_UPDATE_DIR
+            ready_path = PENDING_UPDATE_DIR / "ready.json"
+            if ready_path.exists():
+                staged = _json.loads(ready_path.read_text())
+                notes = f" — {staged['notes']}" if staged.get("notes") else ""
+                lines.append(f"  A new version ({staged.get('version')}) is downloaded and "
+                              f"ready{notes}. Ask the user if they'd like it installed now; if "
+                              f"so, call apply_pending_update (this is never done "
+                              f"automatically without asking first).")
+                issues.append(
+                    f"A new version ({staged.get('version')}) is ready — ask the user if "
+                    f"they'd like it applied now, and if so, call apply_pending_update."
+                )
+        except Exception:
+            pass  # update-check reporting is a nicety, never worth failing the whole check over
+
         summary = "HEALTHY" if not issues else f"{len(issues)} ISSUE(S) FOUND"
         body = "\n".join(lines)
         if issues:
             issue_block = "\n".join(f"  - {i}" for i in issues)
             return f"Vaulter AI health check — {summary}\n\n{body}\n\nISSUES:\n{issue_block}"
         return f"Vaulter AI health check — {summary}\n\n{body}"
+
+    @mcp.tool()
+    def apply_pending_update() -> str:
+        """
+        Applies a Vaulter AI code update that check_system_health has
+        reported as staged and ready: syncs the new version's files into
+        place, re-installs any new/changed Python dependencies, and
+        clears the staged update. Never touches confidentials/ or any
+        local data (screening results, ingested documents, etc.).
+
+        IMPORTANT -- only call this after the user has explicitly agreed
+        to apply the update IN THIS CONVERSATION (e.g. you mentioned one
+        is ready and they said something like "yes, go ahead" or "install
+        it"). Never call this proactively, speculatively, or without an
+        explicit go-ahead just given -- applying a code update is exactly
+        the kind of action that needs a deliberate human decision, not an
+        assumption, even though it's entirely safe to run.
+
+        After this succeeds, tell the user to fully quit and reopen
+        Claude Desktop -- the new code only takes effect on the next
+        launch, never while this server is still running.
+        """
+        try:
+            import apply_update
+            result = apply_update.apply_pending_update()
+            if not result["applied"]:
+                return f"Nothing to apply: {result['reason']}"
+
+            lines = [
+                f"Applied version {result['version']}: {result['files_updated']} file(s) "
+                f"updated, {result['files_deleted']} removed.",
+            ]
+            if not result["dependencies_ok"]:
+                lines.append(f"Note: refreshing Python dependencies hit a problem: "
+                              f"{result['dependencies_message']}")
+            lines.append("")
+            lines.append("Tell the user to fully quit and reopen Claude Desktop now — the new "
+                          "code only takes effect on the next launch.")
+            return "\n".join(lines)
+        except Exception as e:
+            log.error(f"[MCP] apply_pending_update failed: {e}", exc_info=True)
+            return f"Could not apply the update: {e}"
 
     @mcp.tool()
     def search_database(query: str, n_results: int = 15) -> str:
