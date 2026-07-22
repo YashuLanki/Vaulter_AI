@@ -232,7 +232,21 @@ def run_full_screening(
         "top_candidates": top_candidates,
     }
 
-    _update_manifest(output_dir, market, market_slug, timestamp, workbook_filename,
-                      source_hash, top_n, include_low_value_apis, summary)
+    try:
+        _update_manifest(output_dir, market, market_slug, timestamp, workbook_filename,
+                          source_hash, top_n, include_low_value_apis, summary)
+    except safe_io.UnreadableFileError as e:
+        # Phase 3/4 (the expensive, already-paid-for part) already
+        # succeeded and the workbook is already saved at workbook_path --
+        # don't throw all of that away just because the shared manifest
+        # couldn't be updated this instant. The only cost of proceeding
+        # here is that this result won't be served from cache to
+        # teammates until a future run's manifest update succeeds; the
+        # workbook itself is not lost or orphaned; retrying with the same
+        # file will simply write a fresh manifest entry next time.
+        log.error(f"Screening completed and the workbook was saved to {workbook_path}, but "
+                  f"the shared team manifest could not be updated: {e} This run's result "
+                  f"won't be reused from cache by teammates until a future manifest update "
+                  f"succeeds.")
 
     return {**summary, "cached": False}

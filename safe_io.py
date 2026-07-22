@@ -43,6 +43,7 @@ small as practically possible, but does not close it entirely.
 import json
 import logging
 import os
+import time
 from pathlib import Path
 from typing import Callable
 
@@ -52,24 +53,76 @@ log = logging.getLogger("vaulter.safe_io")
 
 DEFAULT_LOCK_TIMEOUT_SECONDS = 30
 
+# A file that exists but fails to parse is retried this many times, this
+# far apart, before being treated as genuinely unreadable -- long enough
+# to ride out a torn read caught mid-sync (e.g. OneDrive writing a new
+# copy of a shared file), short enough not to meaningfully delay a caller.
+UNREADABLE_RETRY_ATTEMPTS = 3
+UNREADABLE_RETRY_DELAY_SECONDS = 0.3
+
+
+class UnreadableFileError(Exception):
+    """
+    Raised when a JSON file exists on disk but can't be parsed, even
+    after retrying to ride out a transient torn read. This is
+    deliberately a distinct case from "the file doesn't exist" --
+    conflating the two (as this module used to) is exactly how a shared
+    team file gets silently wiped: a caller doing a read-modify-write
+    that misreads "present but currently unreadable" as "empty" goes on
+    to overwrite it with a near-empty file, discarding everyone else's
+    already-synced data. See C1 in docs/MULTI_USER_TRANSITION.md.
+
+    load_json() catches this internally and falls back to `default`,
+    since a plain read that doesn't write anything back can't lose data
+    this way. locked_json_update() deliberately does NOT catch it --
+    callers doing a real read-modify-write must let it propagate so the
+    write is refused rather than silently corrupting good data.
+    """
+
+
+def _read_json_or_raise(path: Path):
+    """Read and parse `path` as JSON, retrying briefly on failure to ride
+    out a transient torn read before giving up. Raises
+    UnreadableFileError (never silently returns something else) if the
+    file exists but still can't be parsed after retrying -- the caller
+    decides what "can't trust this as empty" means for it, rather than
+    this function silently deciding for them."""
+    last_error = None
+    for attempt in range(UNREADABLE_RETRY_ATTEMPTS):
+        try:
+            return json.loads(path.read_text())
+        except Exception as e:
+            last_error = e
+            if attempt < UNREADABLE_RETRY_ATTEMPTS - 1:
+                time.sleep(UNREADABLE_RETRY_DELAY_SECONDS)
+    raise UnreadableFileError(
+        f"{path} exists but could not be parsed as JSON after "
+        f"{UNREADABLE_RETRY_ATTEMPTS} attempts ({last_error}). This usually means a sync "
+        f"tool (e.g. OneDrive) caught it mid-write; if it keeps happening, check "
+        f"whether the file is genuinely corrupt (e.g. restore from OneDrive version "
+        f"history)."
+    )
+
 
 def load_json(path: Path, default=None):
     """Safely load a JSON file. Returns `default` (a fresh {} if not
-    given) if the file doesn't exist or fails to parse -- logging a
-    warning in the corrupt case so a torn write is visible in the logs
-    instead of silently and invisibly resetting to empty."""
+    given) if the file doesn't exist, or still fails to parse after a
+    few retries -- logging a warning in the latter case so a torn read is
+    visible in the logs instead of silently and invisibly resetting to
+    empty. Safe to treat as "just return default" here specifically
+    because this function never writes anything back -- a stale/empty
+    read only risks an occasional avoidable cache miss, never data loss.
+    Callers that DO write back (read-modify-write) must use
+    locked_json_update() instead, which refuses to do this."""
     if default is None:
         default = {}
     if not path.exists():
         return default
     try:
-        return json.loads(path.read_text())
-    except Exception as e:
-        log.warning(
-            f"Could not read {path} ({e}) -- treating as empty. If this "
-            f"keeps happening, check for a process that was killed mid-write "
-            f"or a sync conflict, and consider restoring from a backup."
-        )
+        return _read_json_or_raise(path)
+    except UnreadableFileError as e:
+        log.warning(f"{e} -- treating as empty for this read (nothing is written back "
+                    f"here, so no data is at risk).")
         return default
 
 
@@ -127,13 +180,26 @@ def locked_json_update(path: Path, update_fn: Callable[[dict], dict], default=No
     Raises TimeoutError if the lock can't be acquired within `timeout`
     seconds (e.g. another process hung while holding it) -- callers
     should let this propagate rather than silently skip the update.
+
+    Raises UnreadableFileError if `path` exists but can't be parsed even
+    after retrying -- e.g. caught mid-write by a sync tool like OneDrive,
+    or genuinely corrupt. This is intentional, not a bug: silently
+    treating an unreadable file as "empty" and writing update_fn's result
+    back would overwrite whatever's actually on disk with a near-empty
+    file, discarding it. Callers should let this propagate too -- see C1
+    in docs/MULTI_USER_TRANSITION.md for the data-loss incident this
+    prevents. A caller for whom aborting the whole operation over this is
+    too costly (e.g. after an expensive Claude/Google API call already
+    succeeded) should catch it specifically and decide its own fallback
+    -- see analysis/screening/pipeline.py, phase3_deep_analysis.py, and
+    phase4_verification.py for examples.
     """
     if default is None:
         default = {}
     lock_path = str(path) + ".lock"
     try:
         with FileLock(lock_path, timeout=timeout):
-            current = load_json(path, default=default)
+            current = _read_json_or_raise(path) if path.exists() else default
             updated = update_fn(current)
             save_json_atomic(path, updated)
             return updated

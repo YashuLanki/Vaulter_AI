@@ -341,8 +341,6 @@ def run_deep_analysis(ranked_df: pd.DataFrame, api_key: str, top_n: int = TOP_N_
                     raise ValueError("Claude returned an empty response (no content blocks)")
                 text = response.content[0].text
                 parsed = parse_response(text)
-                if cache_path:
-                    safe_io.locked_json_update(cache_path, lambda current, k=key, p=parsed: {**current, k: dict(p)})
             except Exception as e:
                 # One bad/empty Claude response must not abort the whole
                 # batch -- every OTHER listing in this run (including any
@@ -356,6 +354,20 @@ def run_deep_analysis(ranked_df: pd.DataFrame, api_key: str, top_n: int = TOP_N_
                     "RECOMMENDATION": f"ANALYSIS FAILED -- needs manual review ({e})",
                     "MOIC_FIT": "", "RED_FLAGS": "",
                 }
+            else:
+                # Separate try/except from the Claude call above on
+                # purpose: a cache-write hiccup (e.g. the shared cache
+                # file caught mid-sync) must not get treated as "the
+                # analysis failed" and discard a perfectly good `parsed`
+                # result -- only the team-sharing benefit of this one
+                # listing's cache entry is at risk, not this run's own
+                # output.
+                if cache_path:
+                    try:
+                        safe_io.locked_json_update(cache_path, lambda current, k=key, p=parsed: {**current, k: dict(p)})
+                    except safe_io.UnreadableFileError as e:
+                        log.warning(f"  Could not cache Phase 3 result for '{addr}' to share "
+                                    f"with the team: {e}")
 
         parsed["Composite_Score"] = row["Composite_Score"]
         results[addr] = parsed

@@ -206,8 +206,14 @@ def get_market_reference_point(market_name: str, api_key: str, cache_dir: Path |
         # Merge just this one new entry into whatever's on disk right now
         # -- never overwrite with our own (possibly stale/incomplete)
         # in-memory dict, which could clobber another team member's
-        # concurrently-added markets.
-        safe_io.locked_json_update(cache_path, lambda current, k=market_name, r=result: {**current, k: r})
+        # concurrently-added markets. A cache-write failure here must not
+        # prevent returning `result` below -- the geocode itself already
+        # succeeded (and is already in the in-memory cache above); only
+        # the team-sharing benefit of persisting it to disk is at risk.
+        try:
+            safe_io.locked_json_update(cache_path, lambda current, k=market_name, r=result: {**current, k: r})
+        except safe_io.UnreadableFileError as e:
+            log.warning(f"Could not cache market geocode for '{market_name}' to share with the team: {e}")
     return result
 
 
@@ -858,8 +864,6 @@ def run_verification(
                 if not response.content:
                     raise ValueError("Claude returned an empty response (no content blocks)")
                 parsed_final = parse_final_response(response.content[0].text)
-                if cache_path:
-                    safe_io.locked_json_update(cache_path, lambda current, k=key, p=parsed_final: {**current, k: dict(p)})
             except Exception as e:
                 # A single finalist's Google Maps/Claude call failing (rate
                 # limit, empty response, transient network error) must not
@@ -873,6 +877,19 @@ def run_verification(
                     "FINAL_RECOMMENDATION": f"VERIFICATION FAILED -- needs manual review ({e})",
                     "REMAINING_DILIGENCE_ITEMS": "",
                 }
+            else:
+                # Separate try/except from the Google/Claude calls above
+                # on purpose: a cache-write hiccup (e.g. the shared cache
+                # file caught mid-sync) must not get treated as "the
+                # verification failed" and discard a perfectly good
+                # `parsed_final` result -- only the team-sharing benefit
+                # of this one finalist's cache entry is at risk.
+                if cache_path:
+                    try:
+                        safe_io.locked_json_update(cache_path, lambda current, k=key, p=parsed_final: {**current, k: dict(p)})
+                    except safe_io.UnreadableFileError as e:
+                        log.warning(f"  Could not cache Phase 4 result for '{addr}' to share "
+                                    f"with the team: {e}")
 
         parsed_final["Composite_Score"] = deep_analyses[addr]["Composite_Score"]
         parsed_final["Phase3_Recommendation"] = deep_analyses[addr]["RECOMMENDATION"]
