@@ -130,14 +130,12 @@ REGISTRY_DIR   = DATA_DIR / "registry"
 REGISTRY_DIR.mkdir(parents=True, exist_ok=True)
 REGISTRY_FILE  = REGISTRY_DIR / "ingested_registry.json"
 
-# CoStar listing screener (analysis/screening/) — uploaded/pasted source
-# files land in SCREENING_UPLOADS_DIR (local, since an upload is specific to
-# whoever pasted it into their own conversation). Combined workbooks +
-# manifest.json land in SCREENING_OUTPUT_DIR, which is SHARED (under
-# SHARED_DIR) on purpose -- so one person's screening run is visible to the
-# whole team instead of sitting only on their own machine.
+# CoStar listing screener & proximity search — both produce outputs that are
+# SHARED (under SHARED_DIR) on purpose so one person's analysis run is visible
+# to the whole team instead of sitting only on their own machine, avoiding
+# duplicate API calls and letting the team benefit from each run.
 OUTPUT_DIR            = DATA_DIR / "output"
-PROXIMITY_OUTPUT_DIR  = OUTPUT_DIR / "proximity"
+PROXIMITY_OUTPUT_DIR  = SHARED_DIR / "proximity_output"
 SCREENING_OUTPUT_DIR  = SHARED_DIR / "screening_output"
 
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
