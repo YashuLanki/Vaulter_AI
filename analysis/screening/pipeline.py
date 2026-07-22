@@ -10,6 +10,8 @@ phases, no CLI orchestration.
 import hashlib
 import io
 import logging
+import os
+import time
 from datetime import datetime
 from pathlib import Path
 
@@ -77,6 +79,57 @@ def _reconcile_shared_files(output_dir: Path) -> None:
             safe_io.merge_conflict_copies(output_dir / filename, _merge_flat_cache_conflict)
     except Exception as e:
         log.warning(f"Could not reconcile OneDrive conflict copies of shared screening files: {e}")
+
+
+# How long an in-progress marker is trusted as "someone is still actively
+# working on this" before being treated as abandoned (a crashed run, or
+# one that never got a chance to clean up after itself). Also doubles as
+# the longest a second caller will wait for the first caller's result
+# before giving up and running the screen itself -- generous enough to
+# cover a realistic Phase 3 (up to 15 Claude calls) + Phase 4 (up to 10
+# finalists' worth of Google Maps + Claude calls) run, short enough that
+# an abandoned marker doesn't block this file for the rest of the day.
+IN_PROGRESS_MARKER_TTL_SECONDS = 15 * 60
+IN_PROGRESS_POLL_INTERVAL_SECONDS = 10
+
+
+def _marker_path(output_dir: Path, source_hash: str, top_n: int, include_low_value_apis: bool) -> Path:
+    return output_dir / f"in_progress_{source_hash}_{top_n}_{int(include_low_value_apis)}.json"
+
+
+def _marker_is_fresh(marker_path: Path) -> bool:
+    """A marker only counts as "someone is actively working on this" if
+    it's both present and recent. An old one almost certainly means
+    whoever created it crashed, was interrupted, or the process was
+    killed before it could clean up after itself -- not that they're
+    still genuinely working on it 15+ minutes later."""
+    data = safe_io.load_json(marker_path)
+    if not data:
+        return False
+    started_at = data.get("started_at")
+    if not started_at:
+        return False
+    try:
+        age = (datetime.now() - datetime.fromisoformat(started_at)).total_seconds()
+    except ValueError:
+        return False
+    return age < IN_PROGRESS_MARKER_TTL_SECONDS
+
+
+def _claim_in_progress(marker_path: Path) -> None:
+    marker_path.parent.mkdir(parents=True, exist_ok=True)
+    safe_io.save_json_atomic(marker_path, {"started_at": datetime.now().isoformat(), "pid": os.getpid()})
+
+
+def _release_in_progress(marker_path: Path) -> None:
+    """Best-effort cleanup -- if this fails, the marker just sits there
+    until it goes stale (see IN_PROGRESS_MARKER_TTL_SECONDS) and gets
+    treated as abandoned by the next caller; it never blocks this file
+    forever."""
+    try:
+        marker_path.unlink(missing_ok=True)
+    except OSError as e:
+        log.warning(f"Could not remove in-progress marker {marker_path}: {e}")
 
 
 def _find_cached_result(output_dir: Path, source_hash: str, top_n: int,
@@ -206,6 +259,12 @@ def run_full_screening(
     shared screening files back into their official versions (see C2 in
     docs/MULTI_USER_TRANSITION.md) -- this maximizes the chance step 0's
     cache lookup actually finds a teammate's already-paid-for result.
+
+    If someone else's screening run for this EXACT file/settings is
+    already in progress (a fresh in-progress marker exists), waits for
+    their result instead of independently re-running Phase 3/4 and paying
+    for the same Claude/Google Maps calls a second time -- see C3 in
+    docs/MULTI_USER_TRANSITION.md.
     """
     output_dir = screening_config.SCREENING_OUTPUT_DIR
     _reconcile_shared_files(output_dir)
@@ -227,6 +286,53 @@ def run_full_screening(
                   f"skipping Phase 3/4, no new API calls made.")
         return cached
 
+    marker_path = _marker_path(output_dir, source_hash, top_n, include_low_value_apis)
+    if _marker_is_fresh(marker_path):
+        log.info(f"Another in-progress screening run found for this exact file/settings -- "
+                  f"waiting up to {IN_PROGRESS_MARKER_TTL_SECONDS // 60} min for it to finish "
+                  f"instead of re-running Phase 3/4 a second time.")
+        waited = 0
+        while waited < IN_PROGRESS_MARKER_TTL_SECONDS:
+            time.sleep(IN_PROGRESS_POLL_INTERVAL_SECONDS)
+            waited += IN_PROGRESS_POLL_INTERVAL_SECONDS
+            cached = _find_cached_result(output_dir, source_hash, top_n, include_low_value_apis)
+            if cached:
+                log.info("The other in-progress run finished while we waited -- reusing its result.")
+                return cached
+            if not _marker_is_fresh(marker_path):
+                log.info("The other run's marker went stale before finishing (likely crashed or "
+                          "interrupted) -- proceeding with our own run instead of waiting further.")
+                break
+        else:
+            log.info("Gave up waiting for the other in-progress run to finish -- proceeding with our own.")
+
+    _claim_in_progress(marker_path)
+    try:
+        return _execute_screening_phases(
+            source_bytes, source_hash, top_n, include_low_value_apis,
+            anthropic_api_key, google_api_key, output_dir,
+        )
+    finally:
+        _release_in_progress(marker_path)
+
+
+def _execute_screening_phases(
+    source_bytes: bytes,
+    source_hash: str,
+    top_n: int,
+    include_low_value_apis: bool,
+    anthropic_api_key: str,
+    google_api_key: str | None,
+    output_dir: Path,
+) -> dict:
+    """
+    Runs Phases 1-4, builds the combined workbook, and updates the shared
+    manifest. Split out from run_full_screening() specifically so the
+    caller can wrap just this expensive part in a try/finally that always
+    releases the in-progress marker (see C3 in docs/MULTI_USER_TRANSITION.md)
+    -- the cache check and marker wait/claim logic above this needs to run
+    BEFORE the marker is claimed, not inside this function's own scope.
+    """
     df = pd.read_excel(io.BytesIO(source_bytes))
     total_screened = len(df)
 

@@ -151,7 +151,14 @@ person's screening run is visible to the whole team instead of sitting only on t
 own machine. `pipeline.py::run_full_screening()` hashes the input file's content and
 checks the shared manifest before running Phase 3/4 — if this exact file was already
 screened at the same `top_n`, it returns that cached result instead of re-paying for
-Claude/Google Maps calls. `dashboard_server.py` serves `dashboard/vaulter_dashboard.html`
+Claude/Google Maps calls. Before that, it also reconciles any OneDrive conflict copies of
+the shared manifest/caches back into the official files (C2), and if another machine has
+a fresh in-progress marker for this exact file/settings, it **waits** (polling, up to 15
+minutes) for that run's result instead of independently re-paying for Phase 3/4 (C3) — so
+`screen_listings` can legitimately take a while to return in that specific case; that's
+expected, not a hang. See Priority 2 / Part C in `docs/MULTI_USER_TRANSITION.md` for the
+full concurrency-bug writeup these three fixes (C1-C3) address.
+`dashboard_server.py` serves `dashboard/vaulter_dashboard.html`
 (a local Pursue/Scrutinize/Pass viewer opened via `open_screening_dashboard`) with a
 custom `translate_path` so it can read the shared output even though it lives outside
 the project root. `config.py` (hard rules + output columns) and `scoring_config.py`
