@@ -21,14 +21,14 @@ import os
 import threading
 import time
 
-# Must be set before chromadb/sentence-transformers/transformers are
-# imported below -- these libraries print download progress bars and
-# telemetry banners straight to stdout on first use, which would corrupt
+# Must be set before chromadb is imported below -- it prints a telemetry
+# banner straight to stdout on first use otherwise, which would corrupt
 # the MCP stdio connection to Claude Desktop (see mcp_server.py header).
+# (The three HF_HUB_/TRANSFORMERS_/TOKENIZERS_ env vars this block used
+# to set are gone along with sentence-transformers/transformers/tokenizers
+# -- those packages are no longer a dependency, so setting env vars only
+# they read would be meaningless dead code.)
 os.environ.setdefault("ANONYMIZED_TELEMETRY", "False")
-os.environ.setdefault("HF_HUB_DISABLE_PROGRESS_BARS", "1")
-os.environ.setdefault("TRANSFORMERS_VERBOSITY", "error")
-os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
 
 import numpy as np
 import chromadb
@@ -76,11 +76,13 @@ _EMBEDDING_INIT_LOCK = threading.Lock()
 
 def get_embedding_function():
     """
-    Returns the real semantic embedding function (all-MiniLM-L6-v2, 384
-    dimensions -- matches EMBEDDING_DIM) if it can be loaded, falling back
-    to LocalHashEmbedding if sentence-transformers isn't installed or the
-    model can't be downloaded (e.g. no internet on first run). Loaded once
-    and cached -- loading the model is slow, calling it per-chunk is not.
+    Returns the real semantic embedding function (ChromaDB's built-in
+    ONNXMiniLM_L6_V2 -- the same all-MiniLM-L6-v2 model, packaged as a
+    lightweight ONNX model instead of requiring the full sentence-
+    transformers/torch stack -- 384 dimensions, matches EMBEDDING_DIM) if
+    it can be loaded, falling back to LocalHashEmbedding if the model
+    can't be downloaded (e.g. no internet on first run). Loaded once and
+    cached -- loading the model is slow, calling it per-chunk is not.
     """
     global _EMBEDDING_FUNCTION, _EMBEDDING_MODEL_NAME
     if _EMBEDDING_FUNCTION is not None:
@@ -91,13 +93,13 @@ def get_embedding_function():
             return _EMBEDDING_FUNCTION
 
         try:
-            from chromadb.utils.embedding_functions import SentenceTransformerEmbeddingFunction
-            _EMBEDDING_FUNCTION = SentenceTransformerEmbeddingFunction(model_name="all-MiniLM-L6-v2")
-            _EMBEDDING_MODEL_NAME = "all-MiniLM-L6-v2"
-            log.info("Using semantic embeddings (all-MiniLM-L6-v2)")
+            from chromadb.utils.embedding_functions import ONNXMiniLM_L6_V2
+            _EMBEDDING_FUNCTION = ONNXMiniLM_L6_V2()
+            _EMBEDDING_MODEL_NAME = "onnx-all-MiniLM-L6-v2"
+            log.info("Using semantic embeddings (onnx-all-MiniLM-L6-v2)")
         except Exception as e:
             log.warning(
-                f"Could not load sentence-transformers model, falling back to "
+                f"Could not load the ONNX embedding model, falling back to "
                 f"non-semantic hash embeddings (search quality will be degraded "
                 f"until this is resolved): {e}"
             )
