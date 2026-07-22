@@ -1,5 +1,6 @@
 # ── Credentials & Secrets ─────────────────────────────────────────
-confidentials/
+confidentials/*
+!confidentials/.env.template
 .env
 *.env
 outlook_token.json

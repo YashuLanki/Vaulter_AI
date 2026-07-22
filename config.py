@@ -15,6 +15,7 @@ NEVER put real credentials directly in this file.
 """
 
 import os
+import shutil
 import sys
 from pathlib import Path
 from dotenv import load_dotenv
@@ -23,10 +24,27 @@ from dotenv import load_dotenv
 BASE_DIR = Path(__file__).parent
 
 # ─── Secrets Folder ───────────────────────────────────────────────
+# Canonical location is the project folder itself (same on every OS, and
+# what the installer/setup wizard writes to) -- this used to be a
+# DIFFERENT hardcoded path on Windows only, which was a real landmine:
+# setup instructions told people to create confidentials/ inside the
+# project, but the code only ever read from the hardcoded path, so
+# secrets could look "set up" and silently never load, with no error.
+#
+# Windows still checks that old hardcoded path as a fallback -- ONLY if
+# it already has a real .env in it and the project folder doesn't --
+# so the one existing setup that predates this fix keeps working
+# unchanged, without switching it out from under that machine.
+_PROJECT_SECRETS_DIR = BASE_DIR / "confidentials"
+
 if sys.platform == "win32":
-    SECRETS_DIR = Path(r"C:\Users") / os.environ.get("USERNAME", "YourName") / "Vaulter AI" / "confidentials"
+    _LEGACY_WIN_SECRETS_DIR = Path(r"C:\Users") / os.environ.get("USERNAME", "YourName") / "Vaulter AI" / "confidentials"
+    if not (_PROJECT_SECRETS_DIR / ".env").exists() and (_LEGACY_WIN_SECRETS_DIR / ".env").exists():
+        SECRETS_DIR = _LEGACY_WIN_SECRETS_DIR
+    else:
+        SECRETS_DIR = _PROJECT_SECRETS_DIR
 else:
-    SECRETS_DIR = BASE_DIR / "confidentials"
+    SECRETS_DIR = _PROJECT_SECRETS_DIR
 
 SECRETS_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -162,13 +180,77 @@ def get_chunk_settings(page_count: int) -> tuple[int, int]:
     return 1500, 200
 
 # ─── OCR Settings ─────────────────────────────────────────────────
+# Auto-detected rather than hardcoded to one exact install location --
+# a hardcoded exact-version path (e.g. a specific "poppler-26.02.0")
+# silently broke for anyone whose installer put a different version
+# anywhere else, and a hardcoded Homebrew path broke on Intel Macs
+# (Homebrew installs to /usr/local on Intel, /opt/homebrew on Apple
+# Silicon -- the old hardcoded path only ever covered the latter).
+#
+# Searches PATH first (covers a standard install on either platform/
+# architecture), then a few common install locations, including the
+# OLD hardcoded paths so a setup that predates this fix keeps working
+# unchanged. TESSERACT_PATH falls back to plain "tesseract" and
+# POPPLER_PATH to None if genuinely not found anywhere -- extractor.py's
+# pytesseract/pdf2image calls already treat both as "just search PATH at
+# the moment OCR actually runs" in that case, so this degrades to
+# exactly the same behavior a bare `tesseract`/`pdftoppm` on PATH would
+# give, rather than crashing on an invalid hardcoded path. Only
+# scanned-PDF OCR is affected if the tools truly aren't installed;
+# digital-text PDFs never touch this at all.
+
+
+def _find_executable(names: list, extra_dirs: list) -> str:
+    for name in names:
+        found = shutil.which(name)
+        if found:
+            return found
+    for d in extra_dirs:
+        for name in names:
+            candidate = d / name
+            if candidate.exists():
+                return str(candidate)
+    return ""
+
+
+def _find_poppler_bin_dir(extra_dirs: list) -> str:
+    pdftoppm = shutil.which("pdftoppm")
+    if pdftoppm:
+        return str(Path(pdftoppm).parent)
+    for d in extra_dirs:
+        if (d / "pdftoppm.exe").exists() or (d / "pdftoppm").exists():
+            return str(d)
+    return ""
+
 
 if sys.platform == "win32":
-    TESSERACT_PATH = str(Path(r"C:\Users") / os.environ.get("USERNAME", "YourName") / r"Packages\Tesseract-OCR\tesseract.exe")
-    POPPLER_PATH   = str(Path(r"C:\Users") / os.environ.get("USERNAME", "YourName") / r"Packages\poppler-26.02.0\Library\bin")
+    _username = os.environ.get("USERNAME", "YourName")
+    _tesseract_dirs = [
+        Path(r"C:\Program Files\Tesseract-OCR"),
+        Path(r"C:\Program Files (x86)\Tesseract-OCR"),
+        Path(r"C:\Users") / _username / r"AppData\Local\Programs\Tesseract-OCR",
+        Path(r"C:\Users") / _username / r"Packages\Tesseract-OCR",  # old hardcoded location
+    ]
+    TESSERACT_PATH = _find_executable(["tesseract.exe", "tesseract"], _tesseract_dirs) or "tesseract"
+
+    _poppler_dirs = []
+    _packages_dir = Path(r"C:\Users") / _username / "Packages"
+    if _packages_dir.exists():
+        _poppler_dirs += [d / "Library" / "bin" for d in _packages_dir.glob("poppler*") if d.is_dir()]
+    POPPLER_PATH = _find_poppler_bin_dir(_poppler_dirs) or None
 else:
-    TESSERACT_PATH = "/opt/homebrew/bin/tesseract"
-    POPPLER_PATH   = "/opt/homebrew/bin"
+    _mac_dirs = [Path("/opt/homebrew/bin"), Path("/usr/local/bin")]
+    TESSERACT_PATH = _find_executable(["tesseract"], _mac_dirs) or "tesseract"
+    POPPLER_PATH = _find_poppler_bin_dir(_mac_dirs) or None
+
+if TESSERACT_PATH == "tesseract" and not shutil.which("tesseract"):
+    print("WARNING: Tesseract OCR was not found anywhere -- scanned/image-only PDF pages "
+          "will not be readable until it's installed. See README.md's Setup section.",
+          file=sys.stderr)
+if POPPLER_PATH is None:
+    print("WARNING: Poppler was not found anywhere -- scanned/image-only PDF pages "
+          "will not be readable until it's installed. See README.md's Setup section.",
+          file=sys.stderr)
 
 # ─── ChromaDB ─────────────────────────────────────────────────────
 

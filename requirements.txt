@@ -1,5 +1,10 @@
 # Vaulter AI Property Intelligence System
 # Install all dependencies with: pip install -r requirements.txt
+#
+# Recommended Python: 3.11 or 3.12. A much newer interpreter may not yet
+# have ready-to-use installs for packages like chromadb/sentence-transformers
+# on every platform, forcing a slow or broken from-source build instead --
+# setup_wizard.py checks this and warns if it applies to you.
 
 # ── Stage 1: PDF Ingestion ─────────────────────────────────────────
 pdfplumber          # PDF text and table extraction

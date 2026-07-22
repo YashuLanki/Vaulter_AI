@@ -166,44 +166,88 @@ vaulter-ai/
 
 ## Setup
 
-### 1. Clone the repository
+For a non-technical staff member, this is the whole process — everything else
+below this is what makes it possible, not something you need to read.
+
+### 1. Install Python (one time, no admin rights needed)
+- **Windows**: https://www.python.org/downloads/ → run the installer → tick
+  **"Install for me only"** (this is the option that needs no admin rights;
+  its "for all users" option is the one that does).
+- **Mac**: `brew install python` (or use the official installer from
+  python.org). Recommended version: **3.11 or 3.12** — a much newer Python
+  may not yet have ready-to-use installs for some of this project's
+  dependencies, which the setup wizard below will warn you about if it
+  applies to you.
+
+### 2. Get the code
 ```bash
 git clone https://github.com/YashuLanki/vaulter-ai.git
 cd vaulter-ai
 ```
 
-### 2. Create a virtual environment
+### 3. Run the setup wizard
+```bash
+python setup_wizard.py
+```
+This installs Python dependencies, checks for the OCR tools (Tesseract +
+Poppler) and tells you exactly how to install them if they're missing (also
+no admin rights needed), sets up `confidentials/.env` from the shared team
+template, and connects Claude Desktop to your own local instance — merging
+in its own entry without touching any other MCP server or setting Claude
+Desktop already has configured. It checks and reports each step in plain
+English rather than assuming success; it's also safe to run more than once.
+
+### 4. Drop the Project Master into place
+Export the Vaulter Project Master from Smartsheet (PDF, CSV, or Excel) and
+drop it into `data/project_master/`.
+
+### 5. Sign into Outlook — the one step that's genuinely yours
+```bash
+python main.py auth
+```
+Everything else (the Azure app registration, the Anthropic/Google API keys)
+is a shared team value already baked in by the setup wizard — this is the
+only thing that's actually specific to you, since it's you proving your own
+identity, not "technical setup." This is what keeps your own email private
+to your own instance — no one else's Claude session ever sees it.
+
+### 6. Restart Claude Desktop
+Fully quit and reopen it, then start a new conversation — it connects to
+your own local Vaulter AI instance automatically. This only works with
+Claude Desktop (or Claude Code), not the claude.ai website, since a web app
+can't launch a process on your own computer.
+
+<details>
+<summary><strong>Manual / advanced setup</strong> (troubleshooting, or if you'd rather not run the wizard)</summary>
+
+#### Create a virtual environment
 ```bash
 python -m venv .venv
 .venv\Scripts\activate        # Windows
 source .venv/bin/activate     # Mac/Linux
 ```
 
-### 3. Install Python dependencies
+#### Install Python dependencies
 ```bash
 pip install -r requirements.txt
 ```
 
-### 4. Install external tools
-
+#### Install external tools
 **Windows:**
-- **Tesseract OCR**: https://github.com/UB-Mannheim/tesseract/wiki
-- **Poppler**: https://github.com/oschwartz10612/poppler-windows/releases
+- **Tesseract OCR**: https://github.com/UB-Mannheim/tesseract/wiki (per-user install option)
+- **Poppler**: https://github.com/oschwartz10612/poppler-windows/releases (just unzip it anywhere)
 
 **Mac:**
 ```bash
 brew install tesseract poppler
 ```
+`config.py` auto-detects both by searching your PATH and a few common
+install locations — there's no path to hand-edit anymore. If it can't find
+either, it prints a plain-English warning at startup explaining what's
+missing.
 
-### 5. Update paths in config.py (Windows only)
-```python
-TESSERACT_PATH = r"C:\Users\YourName\Packages\Tesseract-OCR\tesseract.exe"
-POPPLER_PATH   = r"C:\Users\YourName\Packages\poppler\Library\bin"
-```
-
-### 6. Set up credentials
-
-Create `confidentials/.env`:
+#### Set up credentials
+Copy `confidentials/.env.template` to `confidentials/.env` and fill in:
 ```
 OUTLOOK_CLIENT_ID=your-application-id
 OUTLOOK_TENANT_ID=your-directory-id
@@ -211,39 +255,26 @@ ANTHROPIC_API_KEY=sk-ant-your-key-here
 GOOGLE_PLACES_API_KEY=your-google-places-key
 GOOGLE_MAPS_API_KEY=your-google-maps-key
 ```
+`confidentials/` is always relative to the project folder now, on every OS —
+there's no longer a separate hardcoded Windows-only location to worry about.
 
-Each staff member sets up their OWN `confidentials/.env` with their OWN Outlook
-sign-in — this is what keeps each person's email private to their own instance.
-`OUTLOOK_CLIENT_ID`/`OUTLOOK_TENANT_ID` can be the **same one shared Azure app
-registration for the whole team** — it just identifies "this is the Vaulter AI
-Email Pipeline app," not any individual person. Each person still authenticates
-with their own Microsoft account via `python main.py auth`.
+`OUTLOOK_CLIENT_ID`/`OUTLOOK_TENANT_ID` are the **same one shared Azure app
+registration for the whole team** — it just identifies "this is the Vaulter
+AI Email Pipeline app," not any individual person. Each person still
+authenticates with their own Microsoft account via `python main.py auth`.
 
 To set up the shared Outlook app registration (do this once, for the whole team):
 1. Go to portal.azure.com → App registrations → New registration
 2. Name it "Vaulter Email Pipeline" → Single tenant → Register
 3. API Permissions → Microsoft Graph → Delegated → Mail.Read
 4. Authentication → Mobile/desktop → tick http://localhost → Allow public client flows: Yes
-5. Copy Application ID and Directory ID from Overview into everyone's `.env`
+5. Copy Application ID and Directory ID from Overview into `confidentials/.env.template`
    (no client secret needed — this uses the device-code flow, which
    authenticates each person individually rather than the app itself)
 
-### 7. Authorize Outlook (run once)
-```bash
-python main.py auth
-```
-
-### 8. Drop the Project Master into place
-Export the Vaulter Project Master from Smartsheet (PDF, CSV, or Excel) and drop it
-into `data/project_master/`.
-
-### 9. Connect to Claude Desktop
-Each staff member connects their own Claude Desktop app to their own local server —
-this only works with Claude Desktop (or Claude Code), not the claude.ai website,
-since a web app can't launch a process on your own computer.
-
+#### Connect to Claude Desktop
 1. Open Claude Desktop → Settings → Developer → Edit Config
-2. Add an entry to `mcpServers`:
+2. Add an entry to `mcpServers`, preserving every other key already there:
    ```json
    {
      "mcpServers": {
@@ -256,6 +287,8 @@ since a web app can't launch a process on your own computer.
    ```
 3. Restart Claude Desktop. No ngrok, no API key, no network exposure needed —
    each instance is local-only by design.
+
+</details>
 
 ---
 
