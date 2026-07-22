@@ -51,7 +51,7 @@ PROJECT_ROOT = Path(__file__).parent.resolve()
 # (no slow/fragile from-source compiles) on these Python versions across
 # Windows and Mac. A much newer interpreter (e.g. whatever the latest
 # release is at any given time) may not have prebuilt wheels yet for
-# packages like chromadb/sentence-transformers, forcing a slow or
+# packages like chromadb/onnxruntime, forcing a slow or
 # outright broken source build -- exactly the "author's bleeding-edge
 # Python" risk flagged in docs/MULTI_USER_TRANSITION.md.
 RECOMMENDED_PYTHON = [(3, 11), (3, 12)]
