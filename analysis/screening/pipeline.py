@@ -31,6 +31,54 @@ def _load_manifest(output_dir: Path) -> dict:
     return safe_io.load_json(output_dir / "manifest.json", default={"markets": []})
 
 
+def _merge_manifest_conflict(official: dict, conflict: dict) -> dict:
+    """Folds a conflict copy's market entries into the official manifest.
+    A plain union is safe here specifically because entries are uniquely
+    keyed by (market_slug, source_hash, top_n, include_low_value_apis) --
+    the same key _update_manifest's own eviction logic uses -- so an
+    entry already present in `official` is never duplicated or
+    overwritten by the conflict copy's version of it."""
+    official.setdefault("markets", [])
+    existing_keys = {
+        (m.get("market_slug"), m.get("source_hash"), m.get("top_n"), m.get("include_low_value_apis", False))
+        for m in official["markets"]
+    }
+    for m in conflict.get("markets", []):
+        key = (m.get("market_slug"), m.get("source_hash"), m.get("top_n"), m.get("include_low_value_apis", False))
+        if key not in existing_keys:
+            official["markets"].append(m)
+            existing_keys.add(key)
+    official["markets"].sort(key=lambda m: m.get("timestamp", ""), reverse=True)
+    return official
+
+
+def _merge_flat_cache_conflict(official: dict, conflict: dict) -> dict:
+    """For the flat key->value shared caches (Phase 3 listing analyses,
+    Phase 4 verdicts, market geocodes) -- add any entry the conflict copy
+    has that the official file doesn't. `official` wins if both sides
+    somehow recomputed the exact same key, since it reflects whatever was
+    already confirmed on disk most recently."""
+    return {**conflict, **official}
+
+
+def _reconcile_shared_files(output_dir: Path) -> None:
+    """
+    Finds and merges any OneDrive conflict copies of this project's 4
+    shared screening files back into their official versions before this
+    run reads any of them -- maximizing the chance of a cache hit and
+    recovering entries that would otherwise sit invisible in a renamed
+    conflict copy forever (see C2 in docs/MULTI_USER_TRANSITION.md).
+    Best-effort: any failure here is logged and never blocks screening
+    itself, since this is a reconciliation nicety, not a required step.
+    """
+    try:
+        safe_io.merge_conflict_copies(output_dir / "manifest.json", _merge_manifest_conflict)
+        for filename in ("phase3_listing_cache.json", "phase4_verdict_cache.json", "market_geocode_cache.json"):
+            safe_io.merge_conflict_copies(output_dir / filename, _merge_flat_cache_conflict)
+    except Exception as e:
+        log.warning(f"Could not reconcile OneDrive conflict copies of shared screening files: {e}")
+
+
 def _find_cached_result(output_dir: Path, source_hash: str, top_n: int,
                          include_low_value_apis: bool) -> dict | None:
     """
@@ -153,8 +201,14 @@ def run_full_screening(
       7. Build the combined workbook via workbook_builder.build_combined_workbook
       8. Update manifest.json
       9. Return a summary dict
+
+    Before any of that, reconciles any OneDrive conflict copies of the 4
+    shared screening files back into their official versions (see C2 in
+    docs/MULTI_USER_TRANSITION.md) -- this maximizes the chance step 0's
+    cache lookup actually finds a teammate's already-paid-for result.
     """
     output_dir = screening_config.SCREENING_OUTPUT_DIR
+    _reconcile_shared_files(output_dir)
     # Read the file's bytes ONCE, immediately, and reuse them for both the
     # hash and the actual Excel parse below (via BytesIO) instead of
     # re-opening source_path a second time later. A pasted/uploaded CoStar

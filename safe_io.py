@@ -208,3 +208,64 @@ def locked_json_update(path: Path, update_fn: Callable[[dict], dict], default=No
             f"Could not acquire lock on {path} within {timeout}s -- "
             f"another process may be stuck holding it."
         )
+
+
+def merge_conflict_copies(path: Path, merge_fn: Callable[[dict, dict], dict],
+                           timeout: float = DEFAULT_LOCK_TIMEOUT_SECONDS) -> int:
+    """
+    Finds and reconciles OneDrive conflict-copy files for `path`.
+
+    When two different machines write to the same shared file (in
+    config.SHARED_DIR) at close to the same moment, OneDrive can't merge
+    the changes and keeps both: the "official" file at `path`, and a
+    renamed copy with the conflicting device's name appended -- e.g.
+    "manifest-JOHNS-SURFACE.json" alongside "manifest.json" (confirmed
+    behavior for OneDrive for work/school with non-Office file types,
+    which creates up to 5 such copies -- see Microsoft's own docs:
+    https://learn.microsoft.com/en-us/troubleshoot/sharepoint/sync/
+    troubleshoot-sync-issues). Nothing ever reads these renamed copies on
+    their own, so whatever entry the "losing" side just saved silently
+    vanishes from the shared record -- see C2 in
+    docs/MULTI_USER_TRANSITION.md.
+
+    For each conflict copy found (matching "<path.stem>-*<path.suffix>"),
+    this reads it, merges its contents into the official file via
+    merge_fn(official_dict, conflict_copy_dict) -- called under the same
+    lock as the write via locked_json_update(), so this is safe to run
+    alongside any other locked_json_update() caller for this same path --
+    and deletes the conflict copy once it's been folded in. merge_fn must
+    return the merged dict; a plain union is safe here specifically
+    because every caller's entries are uniquely keyed (a market/hash/
+    top_n combo, or a content-hash cache key), so merging can't silently
+    clobber one machine's entry with another's.
+
+    An unreadable conflict copy (itself caught mid-sync) or one that
+    can't currently be merged (e.g. the official file is momentarily
+    unreadable too) is left in place, not deleted, so a future call can
+    retry it -- never delete a file this function hasn't successfully
+    folded in yet.
+
+    Returns how many conflict copies were merged and removed.
+    """
+    merged_count = 0
+    for candidate in sorted(path.parent.glob(f"{path.stem}-*{path.suffix}")):
+        try:
+            conflict_data = _read_json_or_raise(candidate)
+        except UnreadableFileError as e:
+            log.warning(f"Found a possible OneDrive conflict copy {candidate.name}, but "
+                        f"couldn't read it yet ({e}) -- will retry next time.")
+            continue
+
+        try:
+            locked_json_update(path, lambda current, cd=conflict_data: merge_fn(current, cd),
+                                timeout=timeout)
+        except (UnreadableFileError, TimeoutError) as e:
+            log.warning(f"Found OneDrive conflict copy {candidate.name}, but couldn't merge "
+                        f"it into {path.name} right now ({e}) -- will retry next time.")
+            continue
+
+        candidate.unlink()
+        merged_count += 1
+        log.info(f"Merged and removed OneDrive conflict copy: {candidate.name}")
+
+    return merged_count
