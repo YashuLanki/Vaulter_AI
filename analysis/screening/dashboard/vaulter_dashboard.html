@@ -358,13 +358,25 @@ let manifest = { markets: [] };
 
 async function loadManifest() {
   const statusEl = document.getElementById('loadStatus');
-  try {
-    const resp = await fetch(OUTPUT_DIR + '/manifest.json', { cache: 'no-store' });
-    if (!resp.ok) throw new Error('manifest not found');
-    manifest = await resp.json();
-  } catch (e) {
-    statusEl.textContent = 'No results found yet — run screen_listings first.';
-    return;
+  // Retry a few times before giving up -- OneDrive can still be mid-sync
+  // on manifest.json for a moment right after a screening run finishes,
+  // and a single failed fetch shouldn't read as "nothing has ever been
+  // screened" (see C5 in docs/MULTI_USER_TRANSITION.md).
+  const MAX_ATTEMPTS = 3;
+  let loaded = false;
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS && !loaded; attempt++) {
+    try {
+      const resp = await fetch(OUTPUT_DIR + '/manifest.json', { cache: 'no-store' });
+      if (!resp.ok) throw new Error(`manifest not found (HTTP ${resp.status})`);
+      manifest = await resp.json();
+      loaded = true;
+    } catch (e) {
+      if (attempt === MAX_ATTEMPTS) {
+        statusEl.textContent = 'No results found yet — run screen_listings first.';
+        return;
+      }
+      await new Promise(r => setTimeout(r, 400));
+    }
   }
 
   const select = document.getElementById('marketSelect');
@@ -390,6 +402,7 @@ async function loadManifest() {
 // deep/final data structures the rest of this dashboard's JS expects.
 async function fetchAndParseWorkbook(filename) {
   const resp = await fetch(OUTPUT_DIR + '/' + filename, { cache: 'no-store' });
+  if (!resp.ok) throw new Error(`workbook not found (HTTP ${resp.status})`);
   const buf = await resp.arrayBuffer();
   const wb = XLSX.read(new Uint8Array(buf), { type: 'array' });
 
@@ -428,8 +441,18 @@ async function onMarketChange() {
   }
 
   if (entry.workbook) {
-    const parsed = await fetchAndParseWorkbook(entry.workbook);
-    store = parsed;
+    try {
+      store = await fetchAndParseWorkbook(entry.workbook);
+    } catch (e) {
+      // A single market's workbook failing to load (still mid-sync,
+      // corrupt, or removed) must not leave the whole dashboard stuck on
+      // "Loading..." forever -- show a clear error for THIS market and
+      // let the user pick a different one from the dropdown, which still
+      // works fine (see C5 in docs/MULTI_USER_TRANSITION.md).
+      statusEl.textContent = `Could not load this market's workbook (${e.message}). `
+        + `It may still be syncing -- try again in a moment, or pick a different market.`;
+      return;
+    }
   }
 
   buildRecords();

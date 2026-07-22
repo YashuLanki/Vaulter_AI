@@ -15,6 +15,7 @@ import time
 from datetime import datetime
 from pathlib import Path
 
+import openpyxl
 import pandas as pd
 
 import safe_io
@@ -132,6 +133,33 @@ def _release_in_progress(marker_path: Path) -> None:
         log.warning(f"Could not remove in-progress marker {marker_path}: {e}")
 
 
+WORKBOOK_VALIDATION_RETRY_ATTEMPTS = 3
+WORKBOOK_VALIDATION_RETRY_DELAY_SECONDS = 0.5
+
+
+def _workbook_is_valid(workbook_path: Path) -> bool:
+    """
+    Confirms a cached result's workbook file is actually fully present
+    and openable -- not just that a filesystem entry for it exists.
+
+    OneDrive can finish syncing a small manifest.json update to this
+    machine before its much larger paired workbook.xlsx has finished
+    downloading -- so path.exists() alone is not proof the file is
+    actually usable yet; it can be a placeholder or a partial download
+    that reads as corrupt. Retries briefly to ride out a file still
+    mid-sync before giving up (see C4 in docs/MULTI_USER_TRANSITION.md).
+    """
+    for attempt in range(WORKBOOK_VALIDATION_RETRY_ATTEMPTS):
+        try:
+            wb = openpyxl.load_workbook(workbook_path, read_only=True)
+            wb.close()
+            return True
+        except Exception:
+            if attempt < WORKBOOK_VALIDATION_RETRY_ATTEMPTS - 1:
+                time.sleep(WORKBOOK_VALIDATION_RETRY_DELAY_SECONDS)
+    return False
+
+
 def _find_cached_result(output_dir: Path, source_hash: str, top_n: int,
                          include_low_value_apis: bool) -> dict | None:
     """
@@ -145,7 +173,8 @@ def _find_cached_result(output_dir: Path, source_hash: str, top_n: int,
     Claude reads the same result for free."
 
     Returns the cached summary dict (same shape run_full_screening returns)
-    if found and its workbook file still exists on disk, else None.
+    if found and its workbook file is actually present and openable, else
+    None.
     """
     manifest = _load_manifest(output_dir)
     for entry in manifest.get("markets", []):
@@ -154,8 +183,12 @@ def _find_cached_result(output_dir: Path, source_hash: str, top_n: int,
                 or entry.get("include_low_value_apis", False) != include_low_value_apis):
             continue
         workbook_path = output_dir / entry.get("workbook", "")
-        if not workbook_path.exists():
-            continue  # recorded but the file is gone -- don't trust a dangling reference
+        if not workbook_path.exists() or not _workbook_is_valid(workbook_path):
+            # Recorded but the file is gone, still mid-sync, or corrupt --
+            # don't serve a dangling/incomplete reference (see C4 in
+            # docs/MULTI_USER_TRANSITION.md). Falls through to a fresh
+            # screening run rather than risking handing back a broken file.
+            continue
         return {
             "market": entry.get("market"),
             "workbook_path": str(workbook_path.resolve()),
@@ -363,7 +396,13 @@ def _execute_screening_phases(
         if addr in deep_analyses:
             finalist_tiers[addr] = phase4_verification.classify_tier(deep_analyses[addr].get("RECOMMENDATION", ""))
 
-    workbook_filename = f"{screening_config.COMBINED_WORKBOOK_PREFIX}_{market_slug}_{timestamp}.xlsx"
+    # source_hash[:8] guarantees two DIFFERENT files screened for the SAME
+    # market within the same second (timestamp has only 1-second
+    # resolution) still get distinct filenames -- two people screening the
+    # exact SAME file/settings never reach here at all, since that's
+    # already served from cache above (see C5 in
+    # docs/MULTI_USER_TRANSITION.md).
+    workbook_filename = f"{screening_config.COMBINED_WORKBOOK_PREFIX}_{market_slug}_{timestamp}_{source_hash[:8]}.xlsx"
     workbook_path = output_dir / workbook_filename
 
     workbook_builder.build_combined_workbook(

@@ -321,16 +321,31 @@ def ingest_file(path: Path):
         log.info(f"  Moved to {folder_label}")
 
         # Step 7: Record in registry
-        record_ingestion(
-            file_hash=doc_hash,
-            filename=dest_path.name,
-            chunks=len(chunks),
-            pages=page_count,
-            ocr_used=metadata.get("ocr_used", False),
-            property_name=match["property"],
-            state=match["state"],
-            category=match["category"],
-        )
+        try:
+            record_ingestion(
+                file_hash=doc_hash,
+                filename=dest_path.name,
+                chunks=len(chunks),
+                pages=page_count,
+                ocr_used=metadata.get("ocr_used", False),
+                property_name=match["property"],
+                state=match["state"],
+                category=match["category"],
+            )
+        except safe_io.UnreadableFileError as e:
+            # The file is ALREADY chunked, stored in ChromaDB, and moved to
+            # processed/ by this point -- only the registry bookkeeping
+            # failed (the registry file itself was unreadable, e.g. a rare
+            # local write caught mid-save). Log this distinctly rather than
+            # letting the outer except below report a misleading "failed to
+            # ingest" for a file that actually succeeded. The one real
+            # consequence: this file's dedup record is missing, so if the
+            # exact same file is dropped again later, it will be
+            # re-ingested (redoing cheap, idempotent work) instead of being
+            # recognized as a duplicate.
+            log.error(f"  [WARN] '{path.name}' was ingested and moved to {folder_label} successfully, "
+                      f"but its registry entry could not be saved: {e} If this exact file is dropped "
+                      f"again later, it will be re-ingested rather than recognized as already-seen.")
 
         log.info(f"  [DONE] {path.name} ({len(chunks)} chunks, {folder_label.strip('/')}, method={method})\n")
 

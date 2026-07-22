@@ -13,6 +13,7 @@ This sheet order and these exact sheet names matter -- the dashboard
 (analysis/screening/dashboard/vaulter_dashboard.html) reads them by name.
 """
 
+import os
 from pathlib import Path
 
 import pandas as pd
@@ -153,5 +154,12 @@ def build_combined_workbook(
     _write_row_per_listing_sheet(wb, "Phase1_Screening", screening_df, PHASE1_DISPLAY_COLS)
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    wb.save(output_path)
+    # Save to a temp file in the same directory, then rename into place --
+    # Path.replace() is atomic on both POSIX and Windows for a same-
+    # filesystem rename, so a reader (a teammate's OneDrive-synced copy,
+    # or this machine's own dashboard) can never catch a half-written
+    # workbook mid-save (see C5 in docs/MULTI_USER_TRANSITION.md).
+    tmp_path = output_path.with_name(f"{output_path.name}.tmp{os.getpid()}")
+    wb.save(tmp_path)
+    tmp_path.replace(output_path)
     return output_path
