@@ -681,6 +681,13 @@ tabs, per-listing analyst notes, and a direct Excel download) in a browser."""
             if not result["dependencies_ok"]:
                 lines.append(f"Note: refreshing Python dependencies hit a problem: "
                               f"{result['dependencies_message']}")
+            reindex = result.get("reindex", {})
+            if reindex.get("reindexed"):
+                lines.append("The search index was refreshed to match this update — this "
+                              "happens automatically, no action needed.")
+            elif reindex.get("error"):
+                lines.append(f"Note: an automatic search-index refresh hit a problem: "
+                              f"{reindex['error']}")
             lines.append("")
             lines.append("Tell the user to fully quit and reopen Claude Desktop now — the new "
                           "code only takes effect on the next launch.")
