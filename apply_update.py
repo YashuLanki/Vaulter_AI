@@ -145,6 +145,57 @@ def refresh_dependencies(project_root: Path) -> tuple[bool, str]:
     return True, ""
 
 
+def _reindex_if_needed(project_root: Path) -> dict:
+    """
+    Checks whether the just-applied update changed which embedding model
+    is active, and if so, re-embeds every existing chunk so search isn't
+    silently degraded for anyone until they happen to notice and run this
+    by hand -- see check_embedding_freshness's own docstring in
+    ingestion/embedder.py for why ChromaDB never does this automatically
+    on its own.
+
+    Runs the check in a FRESH subprocess rather than importing
+    ingestion.embedder directly in THIS process -- this process (e.g. the
+    long-running MCP server calling apply_pending_update()) may have
+    already imported the OLD version of that module before the files
+    were just synced above, and Python does not re-read an already-
+    imported module from disk. A fresh subprocess is the only reliable
+    way to see what the JUST-UPDATED code on disk actually considers
+    current.
+
+    Returns {"reindexed": False} if nothing needed it, or
+    {"reindexed": True, "stale_chunks_before": N} if it ran. Never
+    raises -- returns {"reindexed": False, "error": "..."} on any
+    failure, so a problem here can't take down the rest of
+    apply_pending_update()'s already-successful file sync.
+    """
+    check = subprocess.run(
+        [sys.executable, "-c",
+         "from ingestion.embedder import check_embedding_freshness as f; "
+         "import json; print(json.dumps(f()))"],
+        cwd=str(project_root), capture_output=True, text=True, timeout=120,
+    )
+    if check.returncode != 0:
+        return {"reindexed": False, "error": (check.stderr or check.stdout).strip()[-500:]}
+
+    try:
+        freshness = json.loads(check.stdout.strip().splitlines()[-1])
+    except Exception as e:
+        return {"reindexed": False, "error": f"could not parse freshness check output: {e}"}
+
+    if not freshness.get("needs_reindex"):
+        return {"reindexed": False}
+
+    reindex = subprocess.run(
+        [sys.executable, "main.py", "reindex"],
+        cwd=str(project_root), capture_output=True, text=True, timeout=1800,
+    )
+    if reindex.returncode != 0:
+        return {"reindexed": False, "error": (reindex.stderr or reindex.stdout).strip()[-500:]}
+
+    return {"reindexed": True, "stale_chunks_before": freshness.get("stale_chunks_sampled", 0)}
+
+
 def apply_pending_update(project_root: Path = None) -> dict:
     """
     Applies whatever update is currently staged, with NO interactive
@@ -175,6 +226,7 @@ def apply_pending_update(project_root: Path = None) -> dict:
 
     updated, deleted = apply_update(project_root, zip_path)
     deps_ok, deps_message = refresh_dependencies(project_root)
+    reindex_result = _reindex_if_needed(project_root)
 
     zip_path.unlink(missing_ok=True)
     (PENDING_UPDATE_DIR / "ready.json").unlink(missing_ok=True)
@@ -186,6 +238,7 @@ def apply_pending_update(project_root: Path = None) -> dict:
         "files_deleted": deleted,
         "dependencies_ok": deps_ok,
         "dependencies_message": deps_message,
+        "reindex": reindex_result,
     }
 
 
