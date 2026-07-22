@@ -2,7 +2,7 @@
 # Install all dependencies with: pip install -r requirements.txt
 #
 # Recommended Python: 3.11 or 3.12. A much newer interpreter may not yet
-# have ready-to-use installs for packages like chromadb/sentence-transformers
+# have ready-to-use installs for packages like chromadb/onnxruntime
 # on every platform, forcing a slow or broken from-source build instead --
 # setup_wizard.py checks this and warns if it applies to you.
 
@@ -11,7 +11,6 @@ pdfplumber          # PDF text and table extraction
 pytesseract         # Python wrapper for Tesseract OCR
 pdf2image           # Convert PDF pages to images for OCR
 chromadb>=0.5.20        # Vector database — 0.5.20+ fixes RustBindingsAPI concurrent access bug
-sentence-transformers   # Real semantic embeddings (all-MiniLM-L6-v2) for RAG search quality
 numpy               # Numerical computing (used for embeddings)
 watchdog            # File system monitoring for watched_folder
 filelock            # Cross-process file locking for shared registry/cache files

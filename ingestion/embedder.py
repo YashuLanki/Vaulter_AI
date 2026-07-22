@@ -14,6 +14,7 @@ Examples:
   query_documents("flood zone", state="arizona")         # Arizona only
   query_documents("easements", property="Magic Ranch 50") # one property
 """
+from __future__ import annotations
 
 import hashlib
 import logging
@@ -111,8 +112,8 @@ def get_embedding_function():
 
 def get_embedding_model_name() -> str:
     """The identifier of whichever embedding function is currently active
-    (e.g. 'all-MiniLM-L6-v2' or 'hash-fallback-v1'). Stamped onto every
-    stored chunk's metadata so a later mismatch (see
+    (e.g. 'onnx-all-MiniLM-L6-v2' or 'hash-fallback-v1'). Stamped onto
+    every stored chunk's metadata so a later mismatch (see
     check_embedding_freshness) can be detected without guessing."""
     get_embedding_function()  # ensures _EMBEDDING_MODEL_NAME is set
     return _EMBEDDING_MODEL_NAME
