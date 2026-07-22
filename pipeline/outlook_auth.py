@@ -17,7 +17,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
-import safe_io
+from core import safe_io
 from config import (
     OUTLOOK_CLIENT_ID,
     OUTLOOK_TENANT_ID,

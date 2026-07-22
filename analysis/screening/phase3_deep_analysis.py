@@ -17,7 +17,7 @@ import hashlib
 import logging
 from pathlib import Path
 
-import safe_io
+from core import safe_io
 
 import pandas as pd
 import anthropic
