@@ -44,7 +44,7 @@ import requests
 import pandas as pd
 import anthropic
 
-import safe_io
+from core import safe_io
 from . import phase3_deep_analysis
 
 log = logging.getLogger("vaulter.screening")

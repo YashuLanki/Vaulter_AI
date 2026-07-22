@@ -33,7 +33,7 @@ from pathlib import Path
 from watchdog.events import FileSystemEventHandler
 from watchdog.observers import Observer
 
-import safe_io
+from core import safe_io
 from config import WATCH_DIR, PROCESSED_DIR, get_chunk_settings
 from ingestion.extractor import extract, is_supported
 from ingestion.chunker import chunk_text

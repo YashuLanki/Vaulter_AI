@@ -46,7 +46,8 @@ import tempfile
 import zipfile
 from pathlib import Path
 
-PROJECT_ROOT = Path(__file__).parent.resolve()
+PROJECT_ROOT = Path(__file__).parent.parent.resolve()
+sys.path.insert(0, str(PROJECT_ROOT))
 
 # Must match release.py's EXCLUDED_DIR_NAMES exactly -- these are never
 # in the update package to begin with, so they must never be treated as

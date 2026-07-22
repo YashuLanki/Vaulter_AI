@@ -1,0 +1,40 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -m py_compile:*)",
+      "Bash(python main.py stats)",
+      "Bash(python main.py properties)",
+      "Bash(python main.py web-sources)",
+      "Bash(python main.py query:*)",
+      "Bash(git status:*)",
+      "Bash(git diff:*)",
+      "Bash(git log:*)",
+      "PowerShell(python -m py_compile:*)",
+      "PowerShell(python main.py stats)",
+      "PowerShell(git status:*)",
+      "PowerShell(git diff:*)",
+      "PowerShell(git log:*)"
+    ],
+    "ask": [
+      "Edit(./confidentials/**)",
+      "Write(./confidentials/**)"
+    ],
+    "deny": [
+      "Read(./confidentials/.env)",
+      "Read(./confidentials/outlook_token.json)"
+    ]
+  },
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python .claude/hooks/check_python_syntax.py"
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -40,7 +40,8 @@ import zipfile
 from datetime import datetime
 from pathlib import Path
 
-PROJECT_ROOT = Path(__file__).parent.resolve()
+PROJECT_ROOT = Path(__file__).parent.parent.resolve()
+sys.path.insert(0, str(PROJECT_ROOT))
 
 # Never include these in a published package -- secrets, local data,
 # virtual environments, and git/OS metadata are all machine-specific or
@@ -98,7 +99,7 @@ def _build_package(version: str) -> Path:
 
 def _write_marker(channel: str, version: str, zip_filename: str, notes: str) -> None:
     from config import UPDATES_DIR
-    import safe_io
+    from core import safe_io
 
     marker_path = UPDATES_DIR / f"latest_version_{channel}.json"
     safe_io.save_json_atomic(marker_path, {
@@ -125,7 +126,7 @@ def publish(notes: str) -> None:
 
 def promote() -> None:
     from config import UPDATES_DIR
-    import safe_io
+    from core import safe_io
 
     canary_marker = UPDATES_DIR / "latest_version_canary.json"
     canary_data = safe_io.load_json(canary_marker)

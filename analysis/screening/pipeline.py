@@ -18,7 +18,7 @@ from pathlib import Path
 import openpyxl
 import pandas as pd
 
-import safe_io
+from core import safe_io
 from . import config as screening_config
 from . import phase1_rules
 from . import phase2_ranking

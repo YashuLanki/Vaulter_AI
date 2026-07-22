@@ -26,7 +26,7 @@ from pathlib import Path
 import requests
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
-import safe_io
+from core import safe_io
 from config import (
     LOG_DIR, RAW_EMAIL_DIR, DATA_DIR, REGISTRY_DIR,
     WATCH_DIR, CHROMA_DIR, CHROMA_COLLECTION_NAME,

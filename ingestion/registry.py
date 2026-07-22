@@ -10,7 +10,7 @@ import hashlib
 from datetime import datetime
 from pathlib import Path
 
-import safe_io
+from core import safe_io
 from config import REGISTRY_FILE
 
 

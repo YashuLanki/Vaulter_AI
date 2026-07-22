@@ -45,7 +45,8 @@ import subprocess
 import sys
 from pathlib import Path
 
-PROJECT_ROOT = Path(__file__).parent.resolve()
+PROJECT_ROOT = Path(__file__).parent.parent.resolve()
+sys.path.insert(0, str(PROJECT_ROOT))
 
 # Dependencies in requirements.txt are known to have prebuilt wheels
 # (no slow/fragile from-source compiles) on these Python versions across
@@ -208,7 +209,7 @@ def setup_claude_desktop() -> bool:
               f"https://claude.ai/download, open it once, then re-run this wizard.")
         return False
 
-    import safe_io
+    from core import safe_io
 
     existing = safe_io.load_json(config_path) if config_path.exists() else {}
     existing.setdefault("mcpServers", {})
