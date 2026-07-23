@@ -274,7 +274,11 @@ def cmd_email(lookback_days: int = None):
 
 def cmd_auth():
     from pipeline.outlook_auth import run_auth_flow
-    run_auth_flow()
+    try:
+        run_auth_flow()
+    except Exception as e:
+        print(f"\nCould not complete Outlook sign-in: {e}")
+        print("Double-click \"Sign In to Outlook\" again (or re-run this command) to try again.")
 
 
 def cmd_property_scrape(target: str = None):
