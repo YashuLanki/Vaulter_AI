@@ -25,6 +25,6 @@ pause
 exit /b 1
 
 :run
-%PYCMD% setup_wizard.py
+%PYCMD% "scripts\setup_wizard.py"
 echo.
 pause

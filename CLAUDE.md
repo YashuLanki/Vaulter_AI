@@ -127,12 +127,12 @@ Scheduler job status is tracked in an in-memory `_scheduler_status` dict in
 `mcp_server.py`, updated by each job's own try/except — deliberately not persisted, since
 it describes this process's current run and should reset with the process.
 
-### Auto-update (`release.py`, `apply_update.py`)
-Priority 4 in `docs/MULTI_USER_TRANSITION.md`. `release.py` (run by whoever ships a
+### Auto-update (`scripts/release.py`, `scripts/apply_update.py`)
+Priority 4 in `docs/MULTI_USER_TRANSITION.md`. `scripts/release.py` (run by whoever ships a
 reviewed fix, never by staff) packages the current code — excluding `confidentials/`,
 `data/`, any virtualenv, and `.git` — into a zip, and publishes it plus a version marker
-to `config.UPDATES_DIR` (shared OneDrive). Staged rollout: `python release.py` publishes
-to the `canary` channel only; `python release.py --promote` copies that same already-published
+to `config.UPDATES_DIR` (shared OneDrive). Staged rollout: `python scripts/release.py` publishes
+to the `canary` channel only; `python scripts/release.py --promote` copies that same already-published
 version's marker to the `general` channel once it's confirmed healthy. Each instance's
 scheduler (`mcp_server.py::_check_and_stage_update`, daily at 5am) reads its own
 `config.VAULTER_UPDATE_CHANNEL` (`.env`, defaults to `general`) and, if a newer version is
@@ -142,11 +142,11 @@ to ask the user whether to apply it now.
 
 **Applying stays entirely inside the Claude Desktop conversation — no terminal, ever.**
 Once the user says yes, Claude calls the `apply_pending_update` MCP tool, which calls
-straight into `apply_update.py::apply_pending_update()`: syncs the new version's files into
+straight into `scripts/apply_update.py::apply_pending_update()`: syncs the new version's files into
 place, then re-runs `pip install -r requirements.txt` with the same interpreter already
 running the project (so a fix that adds/changes a dependency doesn't leave the app broken
-for want of an uninstalled package), then clears the staging area. `apply_update.py`'s own
-`python apply_update.py` CLI entry point (with a y/N prompt) still exists as a manual/
+for want of an uninstalled package), then clears the staging area. `scripts/apply_update.py`'s own
+`python scripts/apply_update.py` CLI entry point (with a y/N prompt) still exists as a manual/
 troubleshooting fallback, but is not the expected path. Either way, this first version of
 the mechanism is deliberately confirm-then-apply, not fully automatic with zero human
 involvement, given the "could break every instance at once" blast radius a bug in auto-apply
@@ -154,7 +154,7 @@ would have — the human decision just happens in chat instead of a terminal. Th
 step that can't be automated at all: fully quitting and reopening Claude Desktop afterward,
 since an MCP server can't restart its own parent application.
 
-`apply_update.py`'s `PRESERVED_DIR_NAMES` must always match `release.py`'s
+`scripts/apply_update.py`'s `PRESERVED_DIR_NAMES` must always match `scripts/release.py`'s
 `EXCLUDED_DIR_NAMES` exactly — the apply step trusts that anything under those paths was
 never in the package to begin with, so it never deletes or overwrites them.
 

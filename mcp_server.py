@@ -195,7 +195,7 @@ def _check_and_stage_update() -> None:
         "current_version_at_download": current_version,
     }, indent=2))
     log.info(f"[UPDATE] Staged version {remote_version} (currently running {current_version}) -- "
-             f"run `python apply_update.py` when ready to apply it.")
+             f"run `python scripts/apply_update.py` when ready to apply it.")
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -669,7 +669,7 @@ tabs, per-listing analyst notes, and a direct Excel download) in a browser."""
         launch, never while this server is still running.
         """
         try:
-            import apply_update
+            from scripts import apply_update
             result = apply_update.apply_pending_update()
             if not result["applied"]:
                 return f"Nothing to apply: {result['reason']}"
