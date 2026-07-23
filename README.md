@@ -91,7 +91,7 @@ them (see Security Notes).
 ## Project Structure
 
 ```
-vaulter-ai/
+Vaulter_AI/
 ├── main.py                    # Entry point — all commands run from here
 ├── config.py                  # All settings and paths in one place
 ├── requirements.txt           # All dependencies
@@ -182,7 +182,7 @@ makes that possible, not something you need to read.
   if it applies to you.
 
 ### 2. Download the code
-Go to https://github.com/YashuLanki/vaulter-ai → click the green **Code**
+Go to https://github.com/YashuLanki/Vaulter_AI → click the green **Code**
 button → **Download ZIP** → unzip it into a folder (e.g. your Documents
 folder). This is a normal file download, no `git` needed.
 
@@ -287,7 +287,7 @@ To set up the shared Outlook app registration (do this once, for the whole team)
    ```json
    {
      "mcpServers": {
-       "vaulter-ai": {
+       "vaulter_ai": {
          "command": "python",
          "args": ["/absolute/path/to/main.py", "mcp"]
        }

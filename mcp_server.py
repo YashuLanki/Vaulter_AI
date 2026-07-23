@@ -34,7 +34,7 @@ Connect in Claude Desktop:
 
     {
       "mcpServers": {
-        "vaulter-ai": {
+        "vaulter_ai": {
           "command": "python",
           "args": ["/absolute/path/to/main.py", "mcp"]
         }

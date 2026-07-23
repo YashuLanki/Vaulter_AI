@@ -20,7 +20,7 @@ English rather than assumed to have succeeded:
   4. Creates confidentials/.env from confidentials/.env.template if it
      doesn't exist yet, and reports which organization-wide values (if
      any) are still blank placeholders.
-  5. Merges a "vaulter-ai" entry into Claude Desktop's own config file --
+  5. Merges a "vaulter_ai" entry into Claude Desktop's own config file --
      without touching any other entry already in it -- or explains how
      to install Claude Desktop first if it isn't found.
   6. Signs the user into their own Microsoft/Outlook account right here,
@@ -233,12 +233,12 @@ def setup_claude_desktop() -> bool:
     existing = safe_io.load_json(config_path) if config_path.exists() else {}
     existing.setdefault("mcpServers", {})
     main_py = str(PROJECT_ROOT / "main.py")
-    existing["mcpServers"]["vaulter-ai"] = {
+    existing["mcpServers"]["vaulter_ai"] = {
         "command": sys.executable,
         "args": [main_py, "mcp"],
     }
     safe_io.save_json_atomic(config_path, existing)
-    print(f"  ✓ Added/updated the \"vaulter-ai\" entry in {config_path}")
+    print(f"  ✓ Added/updated the \"vaulter_ai\" entry in {config_path}")
     print("     Every other entry already in that file (other MCP servers, preferences) "
           "was left untouched.")
     print("     Restart Claude Desktop (fully quit and reopen) for this to take effect.")
