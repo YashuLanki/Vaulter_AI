@@ -45,6 +45,19 @@ import subprocess
 import sys
 from pathlib import Path
 
+# Windows consoles default to a legacy codepage (e.g. cp1252), not UTF-8 --
+# this wizard prints ✓/⚠/✗ throughout, which crashes with UnicodeEncodeError
+# on that default. This is THE non-technical onboarding path (double-clicked
+# via "Setup Vaulter AI.bat"), so it must degrade gracefully, not crash on
+# its very first status line. reconfigure() exists on both streams since
+# Python 3.7; guarded in case stdout/stderr don't support it in some
+# environment.
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
 PROJECT_ROOT = Path(__file__).parent.parent.resolve()
 sys.path.insert(0, str(PROJECT_ROOT))
 

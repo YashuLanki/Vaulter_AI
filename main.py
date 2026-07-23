@@ -32,6 +32,22 @@ import sys
 import logging
 from pathlib import Path
 
+# ─── Console encoding ──────────────────────────────────────────────
+# Windows consoles default to a legacy codepage (e.g. cp1252), not UTF-8 --
+# any print()/log message containing a symbol like an arrow, box-drawing
+# character, or checkmark then crashes with UnicodeEncodeError. This project
+# uses such symbols throughout its CLI output (this file, the setup wizard,
+# etc.), and per the project's "never crash for non-technical staff"
+# convention, this must degrade (replacing the unprintable character)
+# rather than take down the whole command. reconfigure() exists on both
+# streams since Python 3.7; guarded anyway in case stdout/stderr have been
+# replaced with something that doesn't support it (e.g. some CI runners).
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
 # ─── Lock working directory to project root ───────────────────────
 os.chdir(str(Path(__file__).parent))
 
@@ -186,7 +202,7 @@ def cmd_stats():
             print(f"    · {label}: {count} chunks")
     print()
     if stats.get("needs_reindex"):
-        print(f"  ⚠ {stats['stale_chunks_sampled']} of {stats['chunks_sampled']} sampled chunks were "
+        print(f"  ! {stats['stale_chunks_sampled']} of {stats['chunks_sampled']} sampled chunks were "
               f"embedded with a different search model than what's active now "
               f"('{stats['current_embedding_model']}').")
         print(f"    Run 'python main.py reindex' to upgrade their search quality.")

@@ -20,11 +20,11 @@ Actions:
 COMPOUND_RULES apply on top of individual rules (e.g. "too many flags").
 
 Output location:
-  This merged project reuses the root-level config.py's DATA_DIR convention
-  (see /config.py — same pattern as PROCESSED_DIR, RAW_WEB_DIR, etc.) instead
-  of costar_screener's standalone "data/output" path. All screening outputs
-  (workbooks + manifest.json) live under DATA_DIR / "screening_output", and
-  uploaded/pasted CoStar files live under DATA_DIR / "screening_uploads".
+  This merged project reuses the root-level config.py's SCREENING_OUTPUT_DIR
+  (see /config.py) instead of costar_screener's standalone "data/output" path.
+  SCREENING_OUTPUT_DIR lives under the shared OneDrive folder (SHARED_DIR),
+  not DATA_DIR, on purpose -- so one person's screening run is visible to the
+  whole team. All screening outputs (workbooks + manifest.json) live there.
 """
 
 from config import DATA_DIR, SCREENING_OUTPUT_DIR
