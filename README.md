@@ -187,7 +187,7 @@ button → **Download ZIP** → unzip it into a folder (e.g. your Documents
 folder). This is a normal file download, no `git` needed.
 
 ### 3. Double-click "Setup Vaulter AI"
-Inside the unzipped folder, double-click **`Setup Vaulter AI.command`** (Mac)
+Inside the unzipped folder, open the **`quick_start/`** folder and double-click **`Setup Vaulter AI.command`** (Mac)
 or **`Setup Vaulter AI.bat`** (Windows). A plain window opens showing its
 progress — it installs Python dependencies, checks for the OCR tools
 (Tesseract + Poppler) and tells you exactly how to install them if they're
@@ -222,8 +222,8 @@ Claude Desktop (or Claude Code), not the claude.ai website, since a web app
 can't launch a process on your own computer.
 
 *If your Outlook sign-in ever expires later on* (e.g. a password change),
-double-click **`Sign In to Outlook.command`** (Mac) or
-**`Sign In to Outlook.bat`** (Windows) in the same folder to redo just that
+open the **`quick_start/`** folder and double-click **`Sign In to Outlook.command`** (Mac) or
+**`Sign In to Outlook.bat`** (Windows) to redo just that
 one step — you don't need to re-run the whole setup wizard for this.
 
 <details>
