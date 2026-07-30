@@ -17,7 +17,7 @@ Usage:
 
 Exits 0 if everything checked out, 1 if anything looks wrong. Prints a plain
 PASS/FAIL report either way -- this is meant to be run by a human or a
-subagent (vaulter-mcp-doctor), not parsed by other code.
+subagent (vaulter-connection-doctor), not parsed by other code.
 
 This does NOT check corpus/shared-folder/portfolio connectivity in detail --
 check_system_health already reports that, and this script's own call to it

@@ -10,7 +10,7 @@ fixed the same way every time, instead of a one-off "huh, that's weird" followed
 
 ## Steps
 
-1. **Delegate to `vaulter-mcp-doctor`.** Don't run `scripts/check_mcp_health.py` yourself first --
+1. **Delegate to `vaulter-connection-doctor`.** Don't run `scripts/check_mcp_health.py` yourself first --
    the subagent runs it as its own first step, and delegating keeps its context (and any fix it
    makes) isolated from this conversation.
 2. **If it reports PASS**, tell the user briefly and move on. Don't pad this out.
@@ -29,7 +29,7 @@ fixed the same way every time, instead of a one-off "huh, that's weird" followed
   the *connector* is reachable and fast at all -- a different failure mode, checked a different
   way (a real subprocess handshake, not just reading tool output).
 - **Not something the user needs to remember to run.** `mcp_server.py`'s own MCP `instructions`
-  string already tells Claude to invoke `vaulter-mcp-doctor` automatically the moment any
+  string already tells Claude to invoke `vaulter-connection-doctor` automatically the moment any
   vaulter_ai tool call errors or hangs, in any conversation, for any teammate running their own
   instance -- this skill is the explicit on-demand path for "check it right now," not the only
   path to a fix.

@@ -34,15 +34,15 @@ no connector and never did.
 
 | Task | Agent | Notes |
 |---|---|---|
-| Read portfolio docs, extract findings | `vaulter-doc-analyst` | Fan out one per document or property folder. Handles scanned/visual/long docs. |
-| Build a jurisdiction dossier | `vaulter-jurisdiction-researcher` | One per jurisdiction — **parallelize freely**, they're fully independent. |
-| Check a derived number or cited signal | `vaulter-claim-verifier` | One per claim. See the mandatory rule below. |
+| Read portfolio docs, extract findings | `vaulter-document-reader` | Fan out one per document or property folder. Handles scanned/visual/long docs. |
+| Build a jurisdiction dossier | `vaulter-city-researcher` | One per jurisdiction — **parallelize freely**, they're fully independent. |
+| Check a derived number or cited signal | `vaulter-fact-checker` | One per claim. See the mandatory rule below. |
 | Code changes (geo swap, Phase 3 move) | do it inline | These are small and localized; a subagent adds overhead without isolation benefit. |
 
 ## The mandatory rule: verify before ratifying
 
 Any **number** derived from prose documents, and any **trajectory signal** headed for an
-investment memo, goes through `vaulter-claim-verifier` before it's treated as true. This is not
+investment memo, goes through `vaulter-fact-checker` before it's treated as true. This is not
 optional ceremony — it's the structural answer to the plan's two stated invisible-failure modes
 (a wrong disqualifier silently killing deal flow; a fabricated CIP project in a memo).
 
@@ -73,11 +73,11 @@ What's actually left on Phase 0:
 1. **Human ratification.** The profile is marked draft/unverified throughout and is built for a
    senior person to correct, not approve. See [[user-new-to-team]] — the user cannot validate
    historical firm criteria themselves.
-2. Fan out `vaulter-claim-verifier` over any numeric criterion before it hardens into a rule.
+2. Fan out `vaulter-fact-checker` over any numeric criterion before it hardens into a rule.
 3. Keep the **disqualifiers vs preferences** split — the halves fail differently. A wrong
    disqualifier silently destroys deal flow; a wrong preference just misranks.
 
-If extending the evidence base, `vaulter-doc-analyst` over more closed-deal files is the way —
+If extending the evidence base, `vaulter-document-reader` over more closed-deal files is the way —
 but the patterns were already consistent across five deals from three eras, so expect
 diminishing returns versus getting a human to correct the draft.
 

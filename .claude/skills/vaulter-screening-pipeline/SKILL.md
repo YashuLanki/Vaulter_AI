@@ -15,7 +15,7 @@ reviewing the screener kept turning up one more issue, then another, with no end
 
 1. **Run the screen.** Follow `screening-run` — resolve the file, run `main.py screen` (or
    `screen_listings`), get the ranked output and `column_sources`.
-2. **Screening QA gate — mandatory, every time.** Delegate to `vaulter-screening-qa` with the
+2. **Screening QA gate — mandatory, every time.** Delegate to `vaulter-screening-checker` with the
    file path. Do not skip this because the file "looks like a normal export" — every past bug
    looked normal until it didn't.
    - If it returns **"Do not trust until: X"** — fix X, re-run the screen, and re-run the QA
@@ -29,8 +29,11 @@ reviewing the screener kept turning up one more issue, then another, with no end
    area, road access, incorporated-place status.
 5. **Build the report.** Run `report.py` (or however `open_screening_dashboard` triggers it) to
    produce the HTML.
-6. **Dashboard QA gate — mandatory before sharing.** Delegate to `vaulter-dashboard-qa` against
+6. **Dashboard QA gate — mandatory before sharing.** Delegate to `vaulter-report-checker` against
    the generated report. Fix anything it flags and rebuild before calling this done.
+7. **Claim gate — only when a specific number or finding from this screen is headed into an
+   investment memo or a decision.** Delegate that one claim to `vaulter-fact-checker` (one
+   agent per claim, parallel across claims). Not needed for an ordinary ranked shortlist.
 
 ## What this is not
 

@@ -435,7 +435,7 @@ task because of what this check finds.
 If ANY vaulter_ai tool call -- including check_system_health itself -- errors, times out,
 or hangs, that's a different situation from check_system_health reporting a data problem:
 it means the connector itself may be broken, not just the data behind it. Don't just
-surface the raw error and move on. Automatically invoke the vaulter-mcp-doctor subagent to
+surface the raw error and move on. Automatically invoke the vaulter-connection-doctor subagent to
 investigate; it's authorized to fix a real code bug it finds and re-verify, the same way
 any other Vaulter QA subagent would. Do this without waiting to be asked -- that's the
 reason it exists. Still don't let this block the user for long: once it reports back

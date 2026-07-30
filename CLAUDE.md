@@ -151,8 +151,8 @@ precisely so no thread is needed.
 That covers whether the *data behind* a healthy connector is in good shape. Whether the
 *connector itself* is reachable and fast is a different failure mode (found 2026-07-30:
 `check_system_health` itself hung 60-240+s on a stuck git subprocess — see
-`docs/agents/mcp-doctor/memory.md` for the full account and fix). `create_mcp_server()`'s own
-`instructions=` string tells Claude to invoke the `vaulter-mcp-doctor` subagent automatically,
+`docs/agents/connection-doctor/memory.md` for the full account and fix). `create_mcp_server()`'s own
+`instructions=` string tells Claude to invoke the `vaulter-connection-doctor` subagent automatically,
 for any teammate, the moment any `vaulter_ai` tool call errors or hangs — no scheduled/background
 process involved, consistent with this file's "no background threads" rule; it fires only in
 reaction to a real tool-call failure inside an active conversation. `scripts/check_mcp_health.py`
@@ -381,17 +381,18 @@ pattern without a name for it at the time. Generic version of this framework cal
 **Layer 1 — Skills (the instructions).** Markdown playbooks in `.claude/skills/*/SKILL.md`. Each
 one defines the objective, which tools or subagents to use, the expected output, and how to
 handle edge cases, in plain language — the same way you'd brief a colleague. `screening-run`,
-`vaulter-screening-pipeline`, `commit_git`, `cleanup`, `recap`, `vaulter-rebuild`, and
-`mcp-health-check` are all Layer 1. This is this project's "workflows/" — there is no separate
-directory by that name, and one should not be created; the skill *is* the workflow doc.
+`vaulter-screening-pipeline`, `proximity-mapping`, `document-research`, `commit_git`, `cleanup`,
+`recap`, `vaulter-rebuild`, and `mcp-health-check` are all Layer 1. This is this project's
+"workflows/" — there is no separate directory by that name, and one should not be created; the
+skill *is* the workflow doc.
 
 **Layer 2 — Agents (the decision-maker).** Claude's own role, whether the main session or a
 subagent in `.claude/agents/*.md`. Read the relevant skill, run tools/subagents in the correct
 sequence, handle failures, ask clarifying questions when needed — connect intent to execution
-without trying to do every step in one undifferentiated pass. `vaulter-screening-qa`,
-`vaulter-dashboard-qa`, `vaulter-shared-folder-qa`, `vaulter-doc-analyst`,
-`vaulter-claim-verifier`, `vaulter-jurisdiction-researcher`, `vaulter-security`, and
-`vaulter-mcp-doctor` are all Layer 2.
+without trying to do every step in one undifferentiated pass. `vaulter-screening-checker`,
+`vaulter-report-checker`, `vaulter-onedrive-auditor`, `vaulter-document-reader`,
+`vaulter-fact-checker`, `vaulter-city-researcher`, `vaulter-leak-guard`,
+`vaulter-connection-doctor`, and `vaulter-setup-tester` are all Layer 2.
 
 **Layer 3 — Tools (the execution).** Deterministic Python: `analysis/screening/fit_screen.py`,
 `pipeline/proximity_tool.py`, `corpus/`, `scripts/` (including `check_mcp_health.py`, a real-stdio-
@@ -399,6 +400,26 @@ subprocess health check for the connector itself), and the `@mcp.tool()` functio
 `mcp_server.py`. Consistent, testable, fast. Credentials live only in `confidentials/.env` — see
 "Conventions to preserve" above; this is this project's version of "never store secrets anywhere
 else."
+
+**The desks (2026-07-30).** The skills and subagents are organized into seven domains, each with
+one lead and its workers. **A subagent cannot spawn other subagents** — only the main session
+dispatches agents — so every desk's "lead" is a Layer 1 skill (a playbook the main session runs,
+fanning out to workers), except the three single-agent desks where the worker is the whole desk.
+Don't create a new standalone agent without placing it on a desk; don't create a new desk without
+asking.
+
+| Desk | Lead (Layer 1) | Workers (Layer 2) | Deterministic core (Layer 3) |
+|---|---|---|---|
+| CoStar screening | `vaulter-screening-pipeline` | screening-checker, report-checker, fact-checker | `fit_screen.py`, `report.py`, `check_screener.py` |
+| Proximity mapping | `proximity-mapping` | onedrive-auditor (output hygiene), fact-checker (memo-bound claims) | `proximity_tool.py`, `geo_providers.py`, `geo_federal.py` |
+| Connector health | `mcp-health-check` (+ auto-dispatch from the server's own MCP instructions) | connection-doctor | `check_mcp_health.py` |
+| Install & onboarding | agent-led | setup-tester | `setup_wizard.py`, `release.py`/`apply_update.py` |
+| Documents & research | `document-research` | document-reader, city-researcher, fact-checker | `corpus/` |
+| OneDrive shared folder | agent-led | onedrive-auditor | `config.py` path layer |
+| Security | agent-led + hook | leak-guard | `.claude/hooks/check_no_leaks.py` (the hook is the only layer that can actually *block*) |
+
+`vaulter-fact-checker` deliberately serves three desks — it's a shared verification worker, one
+agent per claim, not a desk of its own.
 
 **Why this matters:** when a single agent pass tries to handle every step of reasoning directly,
 accuracy compounds downward — five steps at 90% each chains down to 59%. Offloading execution to
@@ -425,7 +446,7 @@ regression suite plus a fresh real-world test, not just "it imports") → record
 (a subagent's own memory.md, or a project-type memory entry) → move on with a measurably stronger
 system. The 2026-07-29 session is the worked example: a real bug found → `fit_screen.py` fixed →
 `check_screener.py` + a fresh-process re-test confirmed it → the fix and the reasoning behind it
-recorded in `docs/agents/screening-qa/memory.md` and this file's own history.
+recorded in `docs/agents/screening-checker/memory.md` and this file's own history.
 
 **Where things go:**
 - **Deliverables** (what a person actually looks at) → `Vaulter AI Shared` (OneDrive), never
