@@ -1,0 +1,47 @@
+# Vaulter AI Property Intelligence System
+# Install all dependencies with: pip install -r requirements.txt
+#
+# Recommended Python: 3.11 or 3.12.
+
+# ── Document library (corpus/) ─────────────────────────────────────
+# Reading documents out of the firm's OneDrive-synced SharePoint library.
+# The index itself needs nothing: it's SQLite, from the standard library.
+pdfplumber          # PDF text and table extraction
+pytesseract         # Python wrapper for Tesseract OCR (scanned pages)
+pdf2image           # Render PDF pages to images for OCR
+Pillow              # Image handling for OCR
+mammoth             # Word (.docx) text extraction
+openpyxl            # Excel .xlsx reading
+xlrd                # Excel .xls reading (older format)
+pandas              # CSV reading and data handling
+
+# ── CoStar screening (analysis/screening/) ─────────────────────────
+# No API key is needed anywhere: ranking is arithmetic, ground truth is
+# federal open data, and the qualitative read happens in the Claude
+# conversation that asked for the screen.
+requests            # Keyless geodata (FEMA, Census TIGER, USGS, OSM, NAIP)
+filelock            # Cross-process locking for the shared manifest/caches
+python-dotenv       # Load credentials from confidentials/.env
+
+# ── Proximity export (pipeline/proximity_tool.py) ──────────────────
+geopy               # Geodesic distance
+
+# ── MCP server ─────────────────────────────────────────────────────
+mcp[cli]            # MCP server framework (local stdio, launched by Claude Desktop)
+
+# ── External Tools (install separately, not via pip) ───────────────
+# Tesseract OCR  : https://github.com/UB-Mannheim/tesseract/wiki
+# Poppler        : https://github.com/oschwartz10612/poppler-windows/releases
+# Mac            : brew install tesseract poppler
+#
+# ── Removed in the 2026-07 rebuild ─────────────────────────────────
+# chromadb, numpy       vector database — replaced by filesystem search
+# watchdog              PDF folder watcher — removed
+# msal                  Outlook OAuth — email ingestion removed
+# beautifulsoup4        web scraping — removed
+# apscheduler           background scheduler — removed
+# python-pptx           PowerPoint email attachments — removed with email
+# rapidfuzz             fuzzy property-name matching in the scrapers
+# openai                Whisper transcription — never wired up to anything
+# anthropic             the 4-phase pipeline's Claude calls; that pipeline is gone
+# uvicorn               only needed for MCP SSE transport; this is stdio

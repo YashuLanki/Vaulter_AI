@@ -1,0 +1,1199 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Land screen</title>
+<style>
+:root{
+  --paper:#FCFCFB; --panel:#FFFFFF; --sunk:#F4F5F4;
+  --ink:#1A1D21; --ink-2:#4A5257; --ink-3:#727C82;
+  --rule:#E1E5E5; --rule-2:#CDD4D5;
+  --accent:#0B4F63; --accent-soft:#E8F0F3;
+  --t1:#0B4F63; --t2:#2A7E96; --t3:#5C9FB3; --t4:#8AB6C3;
+  --good:#127C4E; --warn:#B58A00; --crit:#C13B22;
+  --good-bg:#E7F1EB; --warn-bg:#F7EFE0; --crit-bg:#F8E9E6;
+  --map-bg:#EDF1F2; --map-land:#F7F8F7; --map-city:#E4EBEC;
+  --map-cityline:#C9D6D8; --map-county:#9AACB0;
+  --map-road:#B9A88C; --map-road2:#D8D2C6;
+  --serif:"Iowan Old Style","Palatino Linotype",Palatino,Georgia,serif;
+  --sans:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  --mono:ui-monospace,"Cascadia Mono",Consolas,"Liberation Mono",monospace;
+}
+@media (prefers-color-scheme:dark){
+  :root{
+    --map-bg:#0E1112; --map-land:#181D1E; --map-city:#212829;
+    --map-cityline:#2E393A; --map-county:#4A5A5C;
+    --map-road:#6B5F4B; --map-road2:#33322C;
+    --paper:#131615; --panel:#1A1E1E; --sunk:#202525;
+    --ink:#ECEFEE; --ink-2:#AEB8B8; --ink-3:#7E8A8A;
+    --rule:#2C3333; --rule-2:#3C4545;
+    --accent:#9CD2E4; --accent-soft:#1C2E34;
+    --t1:#9CD2E4; --t2:#5FA8BF; --t3:#3B7B90; --t4:#2E5964;
+    --good:#2E9E7C; --warn:#B08A18; --crit:#A34435;
+    --good-bg:#1B2A22; --warn-bg:#2C2417; --crit-bg:#2E1E1B;
+  }
+}
+:root[data-theme="dark"]{
+    --map-bg:#0E1112; --map-land:#181D1E; --map-city:#212829;
+    --map-cityline:#2E393A; --map-county:#4A5A5C;
+    --map-road:#6B5F4B; --map-road2:#33322C;
+  --paper:#131615; --panel:#1A1E1E; --sunk:#202525;
+  --ink:#ECEFEE; --ink-2:#AEB8B8; --ink-3:#7E8A8A;
+  --rule:#2C3333; --rule-2:#3C4545;
+  --accent:#9CD2E4; --accent-soft:#1C2E34;
+  --t1:#9CD2E4; --t2:#5FA8BF; --t3:#3B7B90; --t4:#2E5964;
+  --good:#2E9E7C; --warn:#B08A18; --crit:#A34435;
+  --good-bg:#1B2A22; --warn-bg:#2C2417; --crit-bg:#2E1E1B;
+}
+:root[data-theme="light"]{
+  --map-bg:#EDF1F2; --map-land:#F7F8F7; --map-city:#E4EBEC;
+  --map-cityline:#C9D6D8; --map-county:#9AACB0;
+  --map-road:#B9A88C; --map-road2:#D8D2C6;
+  --paper:#FCFCFB; --panel:#FFFFFF; --sunk:#F4F5F4;
+  --ink:#1A1D21; --ink-2:#4A5257; --ink-3:#727C82;
+  --rule:#E1E5E5; --rule-2:#CDD4D5;
+  --accent:#0B4F63; --accent-soft:#E8F0F3;
+  --t1:#0B4F63; --t2:#2A7E96; --t3:#5C9FB3; --t4:#8AB6C3;
+  --good:#127C4E; --warn:#B58A00; --crit:#C13B22;
+  --good-bg:#E7F1EB; --warn-bg:#F7EFE0; --crit-bg:#F8E9E6;
+}
+*{box-sizing:border-box}
+/* Several blocks below set an explicit `display`, which outranks the UA's
+   [hidden]{display:none} and left them visible when hidden. */
+[hidden]{display:none!important}
+body{margin:0;background:var(--paper);color:var(--ink);
+  font-family:var(--sans);font-size:16px;line-height:1.55;
+  -webkit-font-smoothing:antialiased}
+.wrap{max-width:1080px;margin:0 auto;padding:40px 24px 96px}
+h1,h2,h3{text-wrap:balance;margin:0}
+.eyebrow{font-family:var(--mono);font-size:11px;letter-spacing:.14em;
+  text-transform:uppercase;color:var(--ink-3)}
+.num{font-family:var(--mono);font-variant-numeric:tabular-nums}
+
+/* masthead */
+header{border-bottom:2px solid var(--ink);padding-bottom:18px;margin-bottom:8px}
+header h1{font-family:var(--serif);font-size:clamp(28px,4vw,42px);
+  line-height:1.1;letter-spacing:-.015em;margin:6px 0 10px}
+.meta{display:flex;flex-wrap:wrap;gap:8px 20px;color:var(--ink-2);font-size:13.5px}
+.meta b{color:var(--ink);font-weight:600}
+
+section{margin-top:52px}
+.shead{display:flex;align-items:baseline;justify-content:space-between;
+  gap:16px;border-bottom:1px solid var(--rule);padding-bottom:8px;margin-bottom:22px}
+.shead h2{font-family:var(--serif);font-size:23px;letter-spacing:-.01em;font-weight:600}
+.shead p{margin:0;color:var(--ink-3);font-size:13px;text-align:right}
+
+/* answer block */
+.answer{background:var(--panel);border:1px solid var(--rule);border-radius:8px;
+  padding:26px 28px}
+.figs{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));
+  gap:2px;background:var(--rule);border:1px solid var(--rule);
+  border-radius:6px;overflow:hidden;margin-bottom:26px}
+.fig{background:var(--panel);padding:15px 16px}
+.fig .v{font-family:var(--mono);font-size:26px;font-variant-numeric:tabular-nums;
+  letter-spacing:-.02em;line-height:1.15;color:var(--ink)}
+.fig .l{font-size:12px;color:var(--ink-3);margin-top:5px;line-height:1.35}
+
+.cand{display:grid;grid-template-columns:auto 1fr;gap:0 18px;width:100%;
+  padding:19px 4px;border:0;border-top:1px solid var(--rule);background:none;
+  text-align:left;font:inherit;color:inherit;cursor:pointer}
+.cand:first-of-type{border-top:0}
+.cand:hover{background:var(--sunk)}
+.cand:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
+.cand .rk{font-family:var(--mono);font-size:12px;color:var(--paper);
+  background:var(--t1);width:26px;height:26px;border-radius:50%;
+  display:grid;place-items:center;font-weight:700;margin-top:2px}
+.cand-b{display:block}
+.cand-h{display:block;font-size:17px;font-weight:650;letter-spacing:-.01em}
+.cand .sub{display:block;font-family:var(--mono);font-size:12.5px;color:var(--ink-2);margin-top:3px}
+.cand .case{display:block;margin-top:9px;font-size:14.5px;color:var(--ink-2);max-width:66ch;line-height:1.5}
+.cand .tags{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}
+.tag{font-size:11.5px;font-family:var(--mono);padding:2.5px 8px;border-radius:3px;
+  background:var(--sunk);color:var(--ink-2);border:1px solid var(--rule)}
+.tag.ok{background:var(--good-bg);color:var(--good);border-color:transparent}
+.tag.warn{background:var(--warn-bg);color:var(--warn);border-color:transparent}
+.tag.crit{background:var(--crit-bg);color:var(--crit);border-color:transparent}
+
+/* market note */
+.note{display:grid;grid-template-columns:auto 1fr;gap:16px;background:var(--accent-soft);
+  border-radius:6px;padding:18px 20px;margin-top:26px}
+.note .date{font-family:var(--mono);font-size:11.5px;color:var(--accent);
+  font-weight:700;letter-spacing:.06em;white-space:nowrap}
+.note p{margin:0;font-size:14.5px;color:var(--ink-2);max-width:62ch}
+.note b{color:var(--ink)}
+/* Same block, amber, for what the file could NOT tell the screener. */
+.note.gap{background:var(--warn-bg);margin-top:18px}
+.note.gap .date{color:var(--warn)}
+.note.gap p{margin:0 0 9px}
+.note.gap p:last-child{margin-bottom:0}
+.note.gap .tags{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 10px}
+.note.gap .tags:last-child{margin-bottom:0}
+@media (max-width:560px){.note{grid-template-columns:1fr}}
+
+/* time reality */
+.time{display:grid;grid-template-columns:1fr 1fr;gap:2px;background:var(--rule);
+  border:1px solid var(--rule);border-radius:6px;overflow:hidden;margin-top:14px}
+.time>div{background:var(--panel);padding:16px 18px}
+.time .v{font-family:var(--mono);font-size:24px;letter-spacing:-.02em}
+.time .l{font-size:12.5px;color:var(--ink-3);margin-top:4px}
+.time .hi{color:var(--good)} .time .lo{color:var(--crit)}
+
+/* map */
+figure{margin:0}
+.mapwrap{background:var(--panel);border:1px solid var(--rule);border-radius:8px;padding:12px}
+.mapbar{display:flex;flex-wrap:wrap;gap:12px;align-items:center;justify-content:space-between;margin-bottom:10px}
+.zoom{display:flex;gap:6px}
+.zoom button{font-family:var(--sans);font-size:13px;line-height:1;padding:7px 11px;
+  border:1px solid var(--rule-2);background:var(--panel);color:var(--ink-2);
+  border-radius:5px;cursor:pointer}
+.zoom button:hover{background:var(--sunk);color:var(--ink)}
+.zoom button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+svg#svgmap{display:block;width:100%;height:auto;aspect-ratio:1000/640;
+  border-radius:5px;cursor:grab;touch-action:none;background:var(--map-bg)}
+svg#svgmap.grab{cursor:grabbing}
+.pin{stroke:var(--panel);stroke-width:1.5;cursor:pointer;
+  vector-effect:non-scaling-stroke}
+.pin.t1{fill:var(--t1)} .pin.t2{fill:var(--t2)}
+.pin.t3{fill:var(--t3)} .pin.t4{fill:var(--t4);opacity:.8}
+.pin:hover{stroke:var(--ink);stroke-width:2.5}
+.pin.sel{stroke:var(--ink);stroke-width:3}
+.pin:focus-visible{outline:none;stroke:var(--accent);stroke-width:3}
+.own{fill:var(--ink-3);stroke:var(--panel);stroke-width:1.5;vector-effect:non-scaling-stroke}
+text.pl{font-family:var(--sans);font-size:10px;fill:var(--ink-3);
+  paint-order:stroke;stroke:var(--map-land);stroke-width:2.5px;pointer-events:none}
+.mapinfo{margin-top:12px;padding:13px 15px;background:var(--sunk);border-radius:6px;min-height:74px}
+.mi{display:grid;grid-template-columns:200px 1fr;gap:16px;align-items:start}
+.mi-img{margin:0}
+.mi-img img{width:100%;border-radius:5px;display:block;border:1px solid var(--rule-2)}
+.mi-img figcaption{font-size:11px;color:var(--ink-3);margin-top:5px}
+@media (max-width:620px){.mi{grid-template-columns:1fr}.mi-img img{max-width:260px}}
+.mi-h{display:flex;justify-content:space-between;align-items:center;gap:12px;
+  margin-bottom:9px;font-size:15px}
+.mi-g{display:grid;grid-template-columns:repeat(auto-fit,minmax(128px,1fr));gap:7px 18px;font-size:13px}
+.mi-g span{color:var(--ink-3);display:block;font-size:11.5px}
+.mi-g b{font-family:var(--mono);font-weight:500;font-size:13.5px}
+figcaption{font-size:12.5px;color:var(--ink-3);margin-top:10px;max-width:70ch}
+.legend{display:flex;flex-wrap:wrap;gap:14px;font-size:12.5px;color:var(--ink-2);align-items:center}
+.legend span{display:inline-flex;align-items:center;gap:6px}
+.sw{width:11px;height:11px;border-radius:50%;flex:none}
+.sw.d{border-radius:2px;transform:rotate(45deg);background:var(--ink-3)}
+
+/* cards */
+.cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:14px}
+.card{display:flex;gap:0;background:var(--panel);border:1px solid var(--rule);
+  border-radius:7px;border-left:3px solid var(--t2);overflow:hidden;padding:0;
+  text-align:left;font:inherit;color:inherit;cursor:pointer}
+.card:hover{border-color:var(--rule-2);background:var(--sunk)}
+.card:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.card-img{width:84px;height:auto;object-fit:cover;align-self:stretch;flex:none}
+.card-b{display:block;padding:14px 16px;flex:1;min-width:0}
+.card .top{display:flex;justify-content:space-between;gap:10px;align-items:baseline}
+.card-h{font-size:15px;font-weight:650;letter-spacing:-.005em}
+.card .sc{font-family:var(--mono);font-size:19px;color:var(--ink);flex:none}
+.card .ln{display:block;font-family:var(--mono);font-size:12px;color:var(--ink-3);margin-top:4px}
+.bars{display:grid;gap:5px;margin-top:12px}
+.bar{display:grid;grid-template-columns:64px 1fr 28px;gap:8px;align-items:center;
+  font-size:11.5px;color:var(--ink-3)}
+.bar .track{height:6px;background:var(--sunk);border-radius:3px;overflow:hidden;display:block}
+.card .bar .track{background:var(--rule)}
+.bar .fill{height:100%;border-radius:3px;display:block}
+.bar .n{font-family:var(--mono);text-align:right;color:var(--ink-2)}
+
+/* detail sheet */
+.overlay{position:fixed;inset:0;background:rgba(10,14,15,.55);z-index:50;
+  display:grid;place-items:center;padding:20px}
+.overlay[hidden]{display:none}
+.sheet{background:var(--panel);border-radius:10px;max-width:760px;width:100%;
+  max-height:88vh;overflow:auto;padding:26px 28px 28px;position:relative;
+  border:1px solid var(--rule)}
+.dclose{position:absolute;top:12px;right:14px;border:0;background:none;
+  font-size:26px;line-height:1;color:var(--ink-3);cursor:pointer;padding:4px 8px}
+.dclose:hover{color:var(--ink)}
+.dclose:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.d-head{display:flex;justify-content:space-between;gap:16px;align-items:flex-start;
+  margin-bottom:18px;padding-right:30px}
+.d-head h3{font-family:var(--serif);font-size:22px;letter-spacing:-.01em}
+.d-sup{font-family:var(--mono);font-size:12px;color:var(--ink-3);margin-top:4px}
+.d-grid{display:grid;grid-template-columns:240px 1fr;gap:20px;align-items:start}
+.d-img{margin:0}
+.d-img img{width:100%;border-radius:6px;display:block;border:1px solid var(--rule-2)}
+.d-img figcaption{font-size:11px;color:var(--ink-3);margin-top:5px}
+.d-noimg{background:var(--sunk);border-radius:6px;padding:22px 16px;font-size:12.5px;
+  color:var(--ink-3);text-align:center}
+.d-sub{font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-3);
+  margin:0 0 9px;font-weight:600}
+/* Each label and its value must be ONE grid item. As two, an odd column count
+   split every pair across a row boundary — "Size / 42 ac / Asking price" then
+   "$1.20M / Price per acre / …" — and the sheet is exactly the width where
+   auto-fit lands on three columns. */
+.d-facts{display:grid;grid-template-columns:repeat(auto-fit,minmax(132px,1fr));
+  gap:10px 16px;margin-top:16px}
+.d-facts>div{min-width:0}
+.d-facts span{display:block;font-size:11.5px;color:var(--ink-3)}
+.d-facts b{display:block;font-family:var(--mono);font-weight:500;font-size:13.5px;
+  overflow-wrap:anywhere}
+.d-coord{margin-top:14px;padding-top:12px;border-top:1px solid var(--rule);
+  display:flex;flex-wrap:wrap;gap:4px 10px;align-items:baseline}
+.d-coord>span{font-size:11.5px;color:var(--ink-3)}
+.d-coord em{font-style:normal;font-size:11px;color:var(--ink-3)}
+.coord{font-family:var(--mono);font-size:13.5px;color:var(--accent);
+  text-decoration:none;border-bottom:1px dotted currentColor}
+.coord:hover{border-bottom-style:solid}
+.coord:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.d-checks{display:grid;grid-template-columns:auto 1fr;gap:9px 16px;margin-bottom:4px}
+.d-checks>span{font-size:12px;color:var(--ink-3);padding-top:2px}
+.d-p{font-size:13.5px;color:var(--ink-2);margin:0 0 4px;line-height:1.5}
+h4.d-sub{margin-top:20px}
+
+/* the money, as a ledger: ask + entitlement + carry, times the target, against
+   what the market pays for the product this would exit as */
+.led{display:grid;grid-template-columns:1fr auto;gap:6px 18px;font-size:13.5px;
+  align-items:baseline;max-width:520px}
+.led .k{color:var(--ink-2)}
+.led .v{font-family:var(--mono);font-variant-numeric:tabular-nums;text-align:right;
+  white-space:nowrap}
+.led .none{font-family:var(--sans);font-size:12.5px;color:var(--ink-3);text-align:right;
+  white-space:normal}
+.led .rule{grid-column:1/-1;border-top:1px solid var(--rule-2);margin:3px 0 1px}
+.led .k.tot,.led .v.tot{font-weight:650;color:var(--ink)}
+.hr{display:flex;align-items:baseline;gap:12px;margin-top:13px;padding-top:12px;
+  border-top:1px solid var(--rule);flex-wrap:wrap}
+.hr .n{font-family:var(--mono);font-size:27px;letter-spacing:-.02em;line-height:1}
+.hr .t{font-size:12.5px;color:var(--ink-3);max-width:46ch;flex:1;min-width:180px}
+@media (max-width:620px){.d-grid{grid-template-columns:1fr}.sheet{padding:22px 18px}}
+
+/* table */
+.tablewrap{overflow-x:auto;border:1px solid var(--rule);border-radius:7px;background:var(--panel)}
+table{border-collapse:collapse;width:100%;font-size:13px}
+th,td{padding:8px 11px;text-align:left;border-bottom:1px solid var(--rule);white-space:nowrap}
+th{position:sticky;top:0;background:var(--sunk);font-size:11px;letter-spacing:.06em;
+  text-transform:uppercase;color:var(--ink-3);font-weight:600;z-index:1;cursor:pointer;
+  user-select:none}
+th:hover{color:var(--ink)}
+td.n{font-family:var(--mono);font-variant-numeric:tabular-nums;text-align:right}
+tbody tr[data-rank]{cursor:pointer}
+tbody tr:hover{background:var(--sunk)}
+tbody tr:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
+.pill{display:inline-block;padding:1.5px 7px;border-radius:3px;font-size:11px;
+  font-family:var(--mono);color:#fff}
+/* A selector list cannot end in a comma before an @media block — the whole
+   rule was invalid and dropped, leaving white pill text on the pale blue dark
+   -mode tier colours at about 1.7:1. */
+@media (prefers-color-scheme:dark){.pill{color:#121514}}
+:root[data-theme="dark"] .pill{color:#121514}
+:root[data-theme="light"] .pill{color:#fff}
+.controls{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px;align-items:center}
+select,input[type=search]{font-family:var(--sans);font-size:13px;padding:6px 10px;
+  border:1px solid var(--rule-2);border-radius:5px;background:var(--panel);color:var(--ink)}
+select:focus-visible,input:focus-visible,th:focus-visible,summary:focus-visible{
+  outline:2px solid var(--accent);outline-offset:2px}
+
+details{background:var(--panel);border:1px solid var(--rule);border-radius:7px;
+  margin-top:14px;overflow:hidden}
+summary{padding:13px 17px;cursor:pointer;font-weight:600;font-size:14.5px;
+  list-style:none;display:flex;justify-content:space-between;align-items:center}
+summary::-webkit-details-marker{display:none}
+summary::after{content:"+";font-family:var(--mono);color:var(--ink-3);font-size:17px}
+details[open] summary::after{content:"\2212"}
+details .body{padding:0 17px 17px}
+dl{display:grid;grid-template-columns:auto 1fr;gap:7px 16px;margin:0;font-size:13.5px}
+dt{font-family:var(--mono);color:var(--ink-3);font-size:12.5px}
+dd{margin:0;color:var(--ink-2)}
+footer{margin-top:60px;padding-top:18px;border-top:1px solid var(--rule);
+  font-size:12.5px;color:var(--ink-3);line-height:1.6}
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+@media (max-width:640px){
+  .wrap{padding:26px 16px 70px}
+  .time{grid-template-columns:1fr}
+  .cand{grid-template-columns:1fr}
+  .cand .rk{display:none}
+}
+</style>
+
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <div class="eyebrow" id="m-eyebrow">Land acquisition screen</div>
+  <h1 id="m-head"></h1>
+  <div class="meta" id="m-meta"></div>
+</header>
+
+<!-- What this export could and could not tell the screener. Hidden when the
+     file was complete, so a full export is not nagged at. -->
+<div id="gaps" class="note gap" hidden>
+  <div class="date">This file</div>
+  <div id="gaps-b"></div>
+</div>
+
+<!-- ─────────────── THE ANSWER ─────────────── -->
+<section id="answer">
+  <div class="shead">
+    <h2>What to do about it</h2>
+    <p>The three strongest, and what they&rsquo;d cost</p>
+  </div>
+
+  <div class="answer">
+    <div class="figs">
+      <div class="fig"><div class="v" id="f-cap"></div><div class="l" id="f-cap-l"></div></div>
+      <div class="fig"><div class="v" id="f-acres"></div><div class="l">combined acreage of those three</div></div>
+      <div class="fig"><div class="v" id="f-tier1"></div><div class="l" id="f-tier1-l"></div></div>
+      <div class="fig"><div class="v" id="f-county"></div><div class="l" id="f-county-l"></div></div>
+    </div>
+
+    <div id="top3"></div>
+
+    <!-- The multiple on its own reads innocently. The firm's own published
+         figures are 2.40x at 5 years and 1.61x at 15, and measured holds ran
+         5.9-15.1 years against 30-60 months underwritten. -->
+    <div id="timewrap" hidden>
+      <h3 class="d-sub" style="margin-top:28px" id="time-h"></h3>
+      <div class="time" id="time"></div>
+      <p id="time-n" style="font-size:13px;color:var(--ink-3);margin:10px 0 0;max-width:70ch"></p>
+    </div>
+
+    <div class="note" id="pinal-note" hidden>
+      <div class="date">3 Mar 2026</div>
+      <p><b>Pinal&rsquo;s water constraint broke four months ago.</b> The area&rsquo;s water utility received a
+      100-year Assured Water Supply designation covering Coolidge and Casa Grande &mdash; the first in
+      the Pinal Active Management Area in over two decades, enough to support an estimated 80,000
+      homes. Residential platting there had been stalled on groundwater limits. Every Coolidge-area
+      listing above was put on the market <b>before</b> that decision, and has been sitting
+      430&ndash;1,700 days. That gap is the opportunity.
+      <br><br>
+      <b>Sewer did not break with it.</b> Coolidge treats 2 million gallons a day &mdash; roughly
+      8&ndash;10,000 homes, not 80,000. Access to the trunk line, not water, is now the constraint
+      that decides these deals.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ─────────────── MAP ─────────────── -->
+<section id="map">
+  <div class="shead">
+    <h2>Where they are</h2>
+    <p>Click any point for the full detail &middot; scroll to zoom, drag to pan</p>
+  </div>
+  <figure>
+    <div class="mapwrap" id="nomap" hidden>
+      <p class="d-p" style="margin:8px 2px">This export carries no coordinates, so there is no map.
+      Everything below is ranked without any location signal &mdash; see
+      <a href="#method" class="coord">how the ranking works</a>.</p>
+    </div>
+    <div class="mapwrap" id="mapwrap">
+      <div class="mapbar">
+        <div class="legend">
+          <span><i class="sw d"></i> Land already owned</span>
+          <span><i class="sw" style="background:var(--t1)"></i> Pursue</span>
+          <span><i class="sw" style="background:var(--t2)"></i> Investigate</span>
+          <span><i class="sw" style="background:var(--t3)"></i> Watch</span>
+          <span><i class="sw" style="background:var(--t4)"></i> Not now</span>
+        </div>
+        <div class="zoom">
+          <button id="zout" type="button" aria-label="Zoom out">&minus;</button>
+          <button id="zin" type="button" aria-label="Zoom in">+</button>
+          <button id="zreset" type="button">Reset</button>
+        </div>
+      </div>
+      <svg id="svgmap" role="img" aria-label="Map of screened listings over county, city and highway outlines."></svg>
+    </div>
+    <figcaption id="mapcap">County lines, city outlines and highways are drawn from US Census data.
+    Grey diamonds are land the firm already owns.</figcaption>
+  </figure>
+</section>
+
+<!-- ─────────────── SHORTLIST ─────────────── -->
+<section id="shortlist">
+  <div class="shead">
+    <h2>The shortlist</h2>
+    <p>Click any card for the full detail</p>
+  </div>
+  <div class="cards" id="cards"></div>
+  <figcaption style="margin-top:14px">Each bar scores 0&ndash;100.
+  <b>Location</b> &mdash; how close it is to land the firm already owns.
+  <b>Price</b> &mdash; how far the asking price sits below what the exit has to fetch.
+  <b>Seller</b> &mdash; time on market, lender ownership, price against what the seller paid.
+  <b>Size</b> &mdash; whether the acreage fits how the firm buys.</figcaption>
+</section>
+
+<!-- ─────────────── VERIFIED ─────────────── -->
+<section id="verified" hidden>
+  <div class="shead">
+    <h2>What we checked on the ground</h2>
+    <p>Click a row for the full detail</p>
+  </div>
+  <div class="tablewrap">
+    <table id="vtable">
+      <thead><tr><th>Property</th><th>Does it flood?</th><th>In a city?</th><th>Roads to it</th><th class="n">Slope</th></tr></thead>
+      <tbody></tbody>
+    </table>
+  </div>
+  <figcaption style="margin-top:11px">Flood zones reduce the acreage that can be built on, so a survey
+  is needed before pricing. Checks cover a parcel footprint estimated from the stated acreage, not a
+  surveyed boundary.</figcaption>
+</section>
+
+<!-- ─────────────── FULL TABLE ─────────────── -->
+<section id="all">
+  <div class="shead">
+    <h2>Every listing</h2>
+    <p>Nothing was eliminated &mdash; low-ranked entries are still here, with their reason</p>
+  </div>
+  <div class="controls">
+    <select id="fTier"><option value="">All tiers</option></select>
+    <select id="fType"><option value="">All land types</option></select>
+    <select id="fCounty"><option value="">All counties</option></select>
+    <input type="search" id="fText" placeholder="Search address or city&hellip;" style="flex:1;min-width:200px">
+    <span class="eyebrow" id="count"></span>
+  </div>
+  <div class="tablewrap" style="max-height:560px;overflow-y:auto">
+    <table id="tbl">
+      <thead><tr>
+        <th data-k="rank">#</th><th data-k="addr">Address</th><th data-k="city">City</th>
+        <th data-k="type">Type</th><th data-k="acres" class="n">Acres</th>
+        <th data-k="price" class="n">Price</th><th data-k="askPerAcre" class="n">$/acre</th>
+        <th data-k="reqExit" class="n">Exit must fetch</th>
+        <th data-k="headroom" class="n">Headroom</th>
+        <th data-k="dist" class="n">Miles to owned land</th>
+        <th data-k="dom" class="n">Days listed</th>
+        <th data-k="score" class="n">Score</th><th data-k="tier">Tier</th>
+      </tr></thead>
+      <tbody></tbody>
+    </table>
+  </div>
+  <figcaption style="margin-top:11px">Click any row for the full detail on that site.</figcaption>
+</section>
+
+<!-- ─────────────── METHOD ─────────────── -->
+<section id="method">
+  <div class="shead"><h2>How the ranking works</h2><p>Every assumption, in one place</p></div>
+
+  <details>
+    <summary>What each factor measures</summary>
+    <div class="body">
+      <p id="w-note" class="d-p" style="max-width:70ch;margin-bottom:12px" hidden></p>
+      <dl>
+      <dt id="w-proximity">Proximity</dt><dd>Distance to the nearest Vaulter holding. Clustering is the firm&rsquo;s
+        most consistent behaviour &mdash; roughly 34 of 57 holdings sit in one of 15 clusters. Where
+        the firm owns nothing nearby this factor goes neutral rather than counting against a listing,
+        so an unfamiliar market isn&rsquo;t penalised for being unfamiliar.</dd>
+      <dt id="w-pricing">Pricing</dt><dd>Not whether the asking price is fair against comparable sales &mdash;
+        Vaulter is not a builder. It asks what the entitled position must sell for to return 3&times;,
+        and compares that to what the market actually pays for parcels of the size this would be
+        subdivided into.</dd>
+      <dt id="w-distress">Distress</dt><dd>Long time on market, a lender or REO owner, an asking price at or below
+        what the seller paid. Counted as favourable, not risky: a distressed basis was the stated
+        reason behind one of the firm&rsquo;s best-returning acquisitions.</dd>
+      <dt id="w-size_fit">Size</dt><dd>Judged in context. Small is normal inside a cluster; large is normal as an
+        assemblage. Only one combination scores badly &mdash; large <em>and</em> isolated in a market
+        with no presence, the pattern behind 41 California foreclosures.</dd>
+    </dl></div>
+  </details>
+
+  <details>
+    <summary>Inputs and their status</summary>
+    <div class="body"><dl id="assum"></dl>
+      <p style="font-size:13.5px;color:var(--ink-2);margin:16px 0 0;max-width:66ch">
+      <b>The weakest inputs are the four weights above.</b> Every cost figure here is measured from the
+      firm&rsquo;s own budgets and settlement statements, and anything with no record &mdash; entitlement
+      cost for non-residential land, most obviously &mdash; is left out and declared on the row rather
+      than estimated. The weights are the exception: two document searches found nothing in the corpus
+      that ranks or weights selection factors, so they are a judgement nobody has signed off.
+      <br><br>
+      No horizontal development cost is carried at all &mdash; streets, utilities, grading. That is
+      deliberate: the firm sells entitled rather than improved land, and the only measured figures are
+      Pinal County. Where a listing shows unusually generous headroom, the comparison is probably
+      against improved land while the subject is raw, and the row says so.</p>
+    </div>
+  </details>
+
+  <details id="colsrc-d">
+    <summary>What this file actually contained</summary>
+    <div class="body">
+      <p class="d-p" style="max-width:70ch;margin-bottom:12px">No two CoStar exports carry the same
+      columns, and a broker&rsquo;s spreadsheet varies more still. Each concept below was resolved from
+      whatever this file provided &mdash; by name, by pattern and value check, or derived. A concept with
+      no source is absent, and nothing was invented to fill it.</p>
+      <div class="tablewrap">
+        <table id="colsrc">
+          <thead><tr><th>What the screener needs</th><th>Where it came from</th><th class="n">Listings covered</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+  </details>
+
+  <details id="evid-d">
+    <summary>What the portfolio can say about these markets</summary>
+    <div class="body">
+      <p class="d-p" style="max-width:70ch;margin-bottom:12px">The ranking is computed from this file
+      and travels anywhere. Whether there is any of the firm&rsquo;s own history to read it against is a
+      separate question, and this is the answer to it. An unevidenced market still ranks normally &mdash;
+      marking it down would rank the firm&rsquo;s data coverage rather than the deals.</p>
+      <dl id="evid"></dl>
+    </div>
+  </details>
+
+  <details>
+    <summary>What this deliberately does not do</summary>
+    <div class="body"><dl>
+      <dt>Eliminate</dt><dd>Nothing is filtered out. Measured on a 216-row Arizona export, the
+        earlier hard-filtering version discarded 69 listings on rules the firm&rsquo;s own deal history
+        contradicts &mdash; 46 for flood risk and 14 for having a structure on site. Eleven of those
+        sat within three miles of land the firm already owns.</dd>
+      <dt>Rank on type</dt><dd>Residential, commercial, industrial and agricultural all compete.
+        Single deals have spanned several.</dd>
+      <dt>Judge the market</dt><dd>Whether a jurisdiction can actually deliver sewer, annexation or a
+        plat is researched separately, per jurisdiction. See the Coolidge file.</dd>
+    </dl></div>
+  </details>
+</section>
+
+<footer id="foot"></footer>
+</div>
+
+<div id="detail" class="overlay" hidden>
+  <div class="sheet" role="dialog" aria-modal="true" aria-label="Property detail">
+    <button id="dclose" class="dclose" type="button" aria-label="Close">&times;</button>
+    <div id="dbody"></div>
+  </div>
+</div>
+
+<script>/*__BASEMAP__*/</script>
+<script>/*__IMAGERY__*/</script>
+<script>/*__DATA__*/</script>
+<script>
+(function(){
+"use strict";
+const L = DATA.listings, H = DATA.holdings;
+const V = DATA.verified || {};
+const IMGS = (typeof IMG!=="undefined") ? IMG : {};
+const TIER = {"1":"var(--t1)","2":"var(--t2)","3":"var(--t3)","4":"var(--t4)"};
+const TIER_NAME = {"1":"Pursue","2":"Investigate","3":"Watch","4":"Not now"};
+const tk = t => String(t||"").trim().charAt(0);
+const money = v => v==null ? "—" : "$" + (v>=1e6 ? (v/1e6).toFixed(2)+"M" : Math.round(v/1e3)+"k");
+const usd   = v => v==null ? "—" : "$" + Math.round(v).toLocaleString();
+const acres = v => v==null ? "—" : v.toLocaleString(undefined,{maximumFractionDigits:0});
+const coord = (la,ln) => (la==null||ln==null) ? "—" :
+  `<a href="https://www.google.com/maps?q=${la},${ln}" target="_blank" rel="noopener"
+     class="coord">${la.toFixed(5)}, ${ln.toFixed(5)}</a>`;
+const esc   = s => String(s??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const A     = DATA.assumptions || {};
+const N     = DATA.screened;
+
+/* A tier can also be "Unranked — nothing in this file separates them", which
+   the screener returns when every row scores the same. Without a fallback the
+   pill rendered with no colour and the word "undefined". */
+const tcol  = t => TIER[tk(t)] || "var(--ink-3)";
+const tname = t => TIER_NAME[tk(t)] || "Unranked";
+
+/* Exit headroom: what the market pays for the product this parcel would exit
+   AS, divided by what the deal needs it to pay. Above 1.0 clears the target.
+   Above 4.0 is amber, not green — that width almost always means the exit comp
+   is improved land while the subject is raw, and horizontal development is
+   deliberately absent from the arithmetic. */
+const hrc    = h => h==null ? "var(--ink-3)" : h>=4 ? "var(--warn)"
+                  : h>=1.3 ? "var(--good)" : h>=1.0 ? "var(--warn)" : "var(--crit)";
+const hrCell = x => x.headroom==null ? "—"
+  : `<span style="color:${hrc(x.headroom)}">${x.headroom.toFixed(2)}&times;</span>`;
+
+/* Sample size travels with every price comparison. A 20-row export legitimately
+   yields low confidence; saying nothing about it is what made a near-empty file
+   read as a flat, dull market. */
+const CONF = {high:["ok","High confidence"],medium:["","Medium confidence"],low:["warn","Low confidence"]};
+const confTag = x => {
+  const c = CONF[x.conf]; if(!c) return "";
+  const n = x.compN==null ? 0 : Math.round(x.compN);
+  // "Low confidence — 0 comparable listings" is not a confidence level, it is
+  // no comparison at all, and the row already says that in words.
+  if(!n) return "";
+  return `<span class="tag ${c[0]}">${c[1]} &mdash; ${n} comparable listing${n===1?"":"s"}</span>`;
+};
+
+const FLAB = {"Land Area (AC)":"Acreage","For Sale Price":"Asking price",
+  "Secondary Type":"Land type","Latitude":"Latitude","Longitude":"Longitude",
+  "Days On Market":"Days on market","Last Sale Price":"Prior sale price",
+  "Market Name":"Market","Submarket Name":"Submarket","County Name":"County",
+  "Property Address":"Address","City":"City","State":"State"};
+const flab = f => FLAB[f] || f;
+const andList = a => a.length<2 ? (a[0]||"") : a.slice(0,-1).join(", ")+" and "+a[a.length-1];
+
+/* Green above 75, amber 50–74, red below. The number sits beside every bar —
+   the red step is just under 3:1 on the dark surface, so the label is doing
+   required work rather than decoration. */
+const band = v => v>=75 ? "var(--good)" : v>=50 ? "var(--warn)" : "var(--crit)";
+const FACT = [["Location","proximity"],["Price","pricing"],["Seller","distress"],["Size","size"]];
+const bars = x => FACT.map(([lab,key])=>{
+  const v = x.comp[key] ?? 0;
+  return `<span class="bar"><span>${lab}</span>
+    <span class="track"><span class="fill" style="width:${v}%;background:${band(v)}"></span></span>
+    <span class="n">${Math.round(v)}</span></span>`;
+}).join("");
+
+/* ── how complete was this export? ────────────────────────────────────
+   The screener resolves each concept it needs from whatever columns the file
+   happens to carry, and reports where each one came from. A 24-column export
+   with no coordinates, no days-on-market and acreage on 5 of 50 rows used to
+   produce a page that looked exactly as confident as a 216-row one. It says
+   so now, before the reader gets to a single number.                      */
+const SRC      = DATA.columnSources || [];
+const absent   = SRC.filter(c=>!c.rows);
+const derived  = SRC.filter(c=>c.rows && c.derived);
+const renamed  = SRC.filter(c=>c.rows && !c.derived && c.note);
+const flagged  = new Set([...derived,...renamed].map(c=>c.field));
+const sparse   = SRC.filter(c=>c.rows && c.rows < N*0.5 && !flagged.has(c.field));
+const noEvid   = (DATA.evidenceCoverage||[]).filter(e=>/^none/i.test(e.evidence||""));
+const proxOff  = DATA.weights && DATA.weights.proximity === 0;
+const thin     = absent.length>0 || derived.length>0;
+
+let gaps = "";
+if(absent.length) gaps +=
+  `<p><b>Absent from this export.</b> Nothing in the file supplies ${absent.length===1?"this":"these"},
+   so no listing is ranked on ${absent.length===1?"it":"them"}.</p>
+   <div class="tags">${absent.map(c=>`<span class="tag crit">${esc(flab(c.field))}</span>`).join("")}</div>`;
+if(derived.length||renamed.length) gaps +=
+  `<p><b>Not read straight from a CoStar column.</b> Recovered from elsewhere in the file, and
+   only where the file happened to say.</p>
+   <div class="tags">${[...derived,...renamed].map(c=>
+     `<span class="tag warn">${esc(flab(c.field))} &mdash; ${esc(c.derived||("from "+c.source))}, ${c.rows} of ${N}</span>`).join("")}</div>`;
+if(sparse.length) gaps +=
+  `<p><b>Present, but on a minority of rows.</b></p>
+   <div class="tags">${sparse.map(c=>
+     `<span class="tag warn">${esc(flab(c.field))} &mdash; ${c.rows} of ${N}</span>`).join("")}</div>`;
+if(proxOff) gaps +=
+  `<p><b>Location was dropped from the score.</b> The firm owns nothing within reach of this market,
+   so distance to a holding could not separate one listing from another. It was removed from the
+   weighting rather than counted against every row &mdash; an absent signal abstains, it does not vote.</p>`;
+if(noEvid.length) gaps +=
+  `<p><b>No portfolio history for ${esc(andList(noEvid.map(e=>e.state)))}.</b> No cost, timing,
+   exit-price or rejection record there, so everything below is measured from this file alone.
+   Those listings still rank normally.</p>`;
+if(gaps){ document.getElementById("gaps-b").innerHTML = gaps;
+          document.getElementById("gaps").hidden = false; }
+
+/* ── masthead ─────────────────────────────────────────────── */
+const tierKeys = Object.keys(DATA.tierCounts||{});
+const t1       = DATA.tierCounts[tierKeys.find(k=>k.startsWith("1"))] ?? 0;
+const unranked = tierKeys.some(k=>/^unranked/i.test(k));
+
+document.title = "Land screen — " + DATA.source;
+document.getElementById("m-eyebrow").textContent = "Land acquisition screen · " + DATA.generated;
+document.getElementById("m-head").textContent = unranked
+  ? `${N} listings screened. Nothing in this file separates them.`
+  : `${N} listings screened. ${t1} reached the top tier${thin?", on an incomplete file":""}.`;
+document.getElementById("m-meta").innerHTML = [
+  ["Source", DATA.source],
+  ["Market", (DATA.markets||[]).join(", ") || "not named in this export"],
+  ["Compared against", DATA.holdingsUsed + " geocoded holdings"],
+  ["Return target", DATA.moic + "× on invested capital"],
+].map(([k,v])=>`<span><b>${k}</b> ${esc(v)}</span>`).join("");
+
+/* ── headline figures ─────────────────────────────────────── */
+const top3   = L.slice(0,3);
+const priced = top3.filter(x=>x.price!=null).length;
+const sized  = top3.filter(x=>x.acres!=null).length;
+
+document.getElementById("f-cap").textContent = priced
+  ? "$" + (DATA.capitalTop3/1e6).toFixed(1) + "M" : "—";
+document.getElementById("f-cap-l").textContent =
+  priced>=3 ? "to acquire all three, against a $3.5M average per asset"
+  : priced   ? `for the ${priced} of the top three that state an asking price`
+             : "none of the top three states an asking price";
+
+document.getElementById("f-acres").textContent =
+  sized ? acres(top3.reduce((s,x)=>s+(x.acres||0),0)) : "—";
+
+document.getElementById("f-tier1").textContent = unranked ? "—" : t1;
+document.getElementById("f-tier1-l").textContent = unranked
+  ? "no ranking — every listing scored the same"
+  : `of ${N} reached the top tier`;
+
+const topCounty = Object.entries(DATA.countyTop10||{}).sort((a,b)=>b[1]-a[1])[0];
+document.getElementById("f-county").textContent = topCounty
+  ? topCounty[1] + " of " + Math.min(10, N) : "—";
+document.getElementById("f-county-l").textContent = topCounty
+  ? `of the top ten sit in ${topCounty[0]} County`
+  : "no county named in this export";
+
+/* ── what the multiple means once time is in it ───────────── */
+const HLAB = {Underwritten:"the hold the firm underwrites",
+              ActualHist:"the hold its deals have actually run"};
+if((DATA.irr||[]).length){
+  document.getElementById("time-h").textContent = `What ${DATA.moic}× means once time is in it`;
+  document.getElementById("time").innerHTML = DATA.irr.map((r,i)=>
+    `<div><div class="v ${i===0?"hi":"lo"}">${r.pct==null?"—":r.pct.toFixed(1)+"%"}</div>
+     <div class="l">a year, if ${DATA.moic}× is reached in ${r.years} years &mdash; ${HLAB[r.label]||esc(r.label)}</div></div>`
+  ).join("");
+  document.getElementById("time-n").innerHTML =
+    `Measured holds ran ${A.hold_years_actual_low}&ndash;${A.hold_years_actual_high} years against the
+     ${A.hold_years_underwritten} years underwritten, and 21 properties bought 2011&ndash;15 are still held,
+     so the completed-deal sample is biased toward the ones that could exit. The firm&rsquo;s own
+     published multiples are 2.40&times; at 5 years, 1.71&times; at 10 and 1.61&times; at 15. Every
+     required-exit figure in this report is the ${DATA.moic}&times; number, not a time-adjusted one.`;
+  document.getElementById("timewrap").hidden = false;
+}
+
+/* The Coolidge water note is hand-written research about Pinal County, not
+   something the screener derived. Show it only where it applies. */
+if((DATA.countyAll||{}).Pinal) document.getElementById("pinal-note").hidden = false;
+
+/* ── one detail view, shared by every click target ────────── */
+const dlg   = document.getElementById("detail");
+const dbody = document.getElementById("dbody");
+let lastFocus = null;
+
+/* The arithmetic behind the pricing score, laid out so it can be argued with:
+   what it costs to hold, what the exit therefore has to fetch, and what the
+   market actually pays for that product. Every line is a column the screener
+   writes; nothing here is recomputed in the page. */
+function ledger(x){
+  if(x.reqExit==null && x.exitComp==null) return "";
+  const out = [];
+  const push = (k, val, none, tot) => out.push(
+    `<span class="k${tot?" tot":""}">${k}</span>` +
+    (val!=null ? `<span class="v${tot?" tot":""}">${usd(val)} /ac</span>`
+               : `<span class="none">${none}</span>`));
+
+  push("Asking price", x.askPerAcre, "no asking price in this export");
+  push("+ Entitlement", x.entPerAcre, "no figure on record for this land type");
+  push(`+ Carry, ${A.hold_years_actual} yr at ${(A.carry_rate_annual*100).toFixed(2)}% a year`,
+       x.carryPerAcre, "—");
+  out.push('<span class="rule"></span>');
+  push(`Exit must fetch, at ${DATA.moic}×`, x.reqExit, "—", true);
+  push("Market pays for that exit product", x.exitComp,
+       esc(x.compBasis || "no comparable exit parcels in this file"));
+
+  const hrow = x.headroom!=null
+    ? `<div class="hr"><span class="n" style="color:${hrc(x.headroom)}">${x.headroom.toFixed(2)}&times;</span>
+         <span class="t">${esc(x.verdict)}</span></div>`
+    : `<div class="hr"><span class="t">${esc(x.verdict||"No price or no comparable exit product — the multiple is untestable on this row.")}</span></div>`;
+
+  const basis = x.compBasis && x.exitComp!=null
+    ? `<p class="d-p" style="margin-top:10px;color:var(--ink-3)">Exit comp drawn from ${esc(x.compBasis)}. ${confTag(x)}</p>`
+    : (confTag(x) ? `<p class="d-p" style="margin-top:10px">${confTag(x)}</p>` : "");
+
+  // The cost basis is the sentence that says the required exit above is
+  // understated. It must sit next to the number, not in a footnote.
+  const cb = !x.costBasis ? ""
+    : /understated/.test(x.costBasis)
+      ? `<p class="d-p" style="margin-top:8px"><span class="tag warn">Cost basis</span> ${esc(x.costBasis)}.</p>`
+      : `<p class="d-p" style="margin-top:8px;color:var(--ink-3)">Cost basis: ${esc(x.costBasis)}.</p>`;
+
+  // Residential only: the same exit comp expressed per lot, against what the
+  // firm's own finished lots actually fetched.
+  const comps = (DATA.exitLotComps||[]).map(c=>`${usd(c[2])} (${esc(c[0])}, ${esc(c[1])})`).join(", ");
+  const lot = x.perLot==null ? "" :
+    `<p class="d-p" style="margin-top:8px">At ${A.lots_per_acre} lots to the acre that exit comp is
+     <b>${usd(x.perLot)} a lot</b>${comps?`. The firm&rsquo;s own finished-lot sales, from settlement
+     statements: ${comps}`:""}.</p>`;
+
+  return `<h4 class="d-sub">What the money has to do</h4>
+    <div class="led">${out.join("")}</div>${hrow}${basis}${cb}${lot}`;
+}
+
+function detailHTML(x){
+  const im = IMGS[String(x.rank)], v = V[x.addr];
+  const facts = [
+    ["Size", acres(x.acres)+" ac"], ["Asking price", money(x.price)],
+    ["Price per acre", usd(x.askPerAcre)], ["Land type", esc(x.type)],
+    ["City", esc(x.city)], ["County", esc(x.county)],
+    ["Days on market", x.dom!=null?Math.round(x.dom).toLocaleString():"—"],
+    ["Nearest owned land", x.dist!=null
+      ? x.dist.toFixed(1)+" mi"+(x.nearest?" · "+esc(x.nearest):"") : "—"],
+  ];
+  let checks = "";
+  if(v){
+    const rows = [
+      ["Flood", v.sfha ? `<span class="tag crit">Flood zone over part of the parcel (${esc(v.zones)})</span>`
+                       : `<span class="tag ok">None (${esc(v.zones)})</span>`],
+      ["Jurisdiction", v.place.indexOf("city")>-1
+        ? `<span class="tag ok">${esc(v.place)}</span>`
+        : `<span class="tag warn">Outside city limits — annexation needed for city water and sewer</span>`],
+      ["Road access", esc(v.roads)],
+      ["Ground", v.relief + " m of fall across the site"],
+    ];
+    checks = `<h4 class="d-sub">Site checks</h4><div class="d-checks">`
+           + rows.map(([k,val])=>`<span>${k}</span><div>${val}</div>`).join("") + `</div>`;
+  }
+  return `<div class="d-head">
+      <div><h3>${esc(x.addr)}</h3>
+        <div class="d-sup">Ranked ${x.rank} of ${DATA.screened} &middot; ${esc(x.city)}</div></div>
+      <span class="pill" style="background:${tcol(x.tier)}">${tname(x.tier)}</span>
+    </div>
+    <div class="d-grid">
+      ${im ? `<figure class="d-img"><img src="${im.src}" alt="Aerial view of ${esc(x.addr)}">
+              <figcaption>Aerial photography${im.captured?" &middot; "+im.captured:""}</figcaption></figure>`
+           : `<div class="d-noimg">No aerial photography held for this site</div>`}
+      <div>
+        <h4 class="d-sub">How it scored</h4>
+        <div class="bars">${bars(x)}</div>
+        <div class="d-facts">${facts.map(([k,val])=>`<div><span>${k}</span><b>${val}</b></div>`).join("")}</div>
+        <div class="d-coord"><span>Coordinates</span>${coord(x.lat,x.lng)}
+          <em>${x.lat==null||x.lng==null ? "not in this export" : "opens a map in a new tab"}</em></div>
+      </div>
+    </div>
+    ${x.read ? `<h4 class="d-sub">What this is, for a predevelopment investor</h4>
+                <p class="d-p">${esc(x.read)}</p>`:""}
+    ${ledger(x)}
+    ${checks}
+    ${x.distress && x.distress!=="none evident" ? `<h4 class="d-sub">Seller signals</h4><p class="d-p">${esc(x.distress)}</p>`:""}
+    ${x.cautions ? `<h4 class="d-sub">Worth checking</h4><p class="d-p">${esc(x.cautions)}</p>`:""}`;
+}
+function openDetail(rank, from){
+  const x = L.find(v=>v.rank===rank); if(!x) return;
+  lastFocus = from || document.activeElement;
+  dbody.innerHTML = detailHTML(x);
+  dbody.scrollTop = 0;
+  dlg.hidden = false; document.body.style.overflow = "hidden";
+  document.getElementById("dclose").focus();
+}
+function closeDetail(){
+  dlg.hidden = true; document.body.style.overflow = "";
+  if(lastFocus && lastFocus.focus) lastFocus.focus();
+}
+document.getElementById("dclose").onclick = closeDetail;
+dlg.addEventListener("click", e=>{ if(e.target===dlg) closeDetail(); });
+document.addEventListener("keydown", e=>{ if(e.key==="Escape" && !dlg.hidden) closeDetail(); });
+
+/* ── the three ────────────────────────────────────────────── */
+document.getElementById("top3").innerHTML = top3.map(x=>{
+  const v = V[x.addr] || {}, tags = [];
+  if (v.place && v.place.indexOf("city")>-1) tags.push(["ok","In "+v.place]);
+  else if (v.place) tags.push(["warn","Outside city limits"]);
+  if (v.sfha) tags.push(["crit","Flood zone on part of the parcel"]);
+  else if (v.zones) tags.push(["ok","No flood zone"]);
+  if (x.dom) tags.push(["","On the market "+Math.round(x.dom).toLocaleString()+" days"]);
+  // The headroom and its sample size, on the three the reader is most likely
+  // to act on. Untestable is a result, and says so rather than staying blank.
+  if (x.headroom!=null){
+    tags.push([x.headroom>=4?"warn":x.headroom>=1.3?"ok":x.headroom>=1?"warn":"crit",
+      `Exit headroom ${x.headroom.toFixed(2)}×`]);
+    if (x.conf==="low" && x.compN)
+      tags.push(["warn",`Only ${Math.round(x.compN)} comparable listing${Math.round(x.compN)===1?"":"s"} behind that`]);
+  } else tags.push(["warn","Exit headroom untestable — no price or no comparable exit product"]);
+  if (x.costBasis && /understated/.test(x.costBasis)) tags.push(["warn","No entitlement cost on record — required exit understated"]);
+  return `<button class="cand" data-rank="${x.rank}" type="button">
+    <span class="rk" style="background:${tcol(x.tier)}">${x.rank}</span>
+    <span class="cand-b">
+      <span class="cand-h">${esc(x.addr)}</span>
+      <span class="sub">${acres(x.acres)} acres &middot; ${esc(x.type)} &middot; ${money(x.price)} &middot; ${esc(x.city)}</span>
+      <span class="case">${esc(x.why)}</span>
+      <span class="tags">${tags.map(([c,t])=>`<span class="tag ${c}">${esc(t)}</span>`).join("")}</span>
+    </span></button>`;
+}).join("");
+
+/* ── shortlist cards ──────────────────────────────────────── */
+document.getElementById("cards").innerHTML = L.slice(0,8).map(x=>{
+  const im = IMGS[String(x.rank)];
+  return `<button class="card" data-rank="${x.rank}" type="button"
+      style="border-left-color:${band(x.comp.pricing??0)}">
+    ${im?`<img class="card-img" src="${im.src}" alt="">`:""}
+    <span class="card-b">
+      <span class="top"><span class="card-h">${esc(x.addr)}</span><span class="sc">${x.score.toFixed(0)}</span></span>
+      <span class="ln">${acres(x.acres)} ac &middot; ${money(x.price)} &middot; ${usd(x.askPerAcre)}/acre</span>
+      <span class="ln" style="color:${hrc(x.headroom)}">${x.headroom!=null
+        ? "exit headroom "+x.headroom.toFixed(2)+"&times;"+(x.conf==="low"&&x.compN?" &middot; low confidence":"")
+        : "exit headroom untestable"}</span>
+      <span class="bars">${bars(x)}</span>
+    </span></button>`;
+}).join("");
+
+/* ── site checks ──────────────────────────────────────────────────────
+   Only rendered when geo_federal actually ran. The section used to draw its
+   headings and a caption naming a specific parcel over an empty table on
+   every report that had no verification data — which is every report the
+   screener produces on its own. */
+const vrows = L.slice(0,6).map(x=>{
+  const v = V[x.addr]; if(!v) return "";
+  return `<tr data-rank="${x.rank}" tabindex="0">
+    <td>${esc(x.addr)}</td>
+    <td>${v.sfha?'<span class="tag crit">Part of it floods</span>'
+                :'<span class="tag ok">None</span>'}</td>
+    <td>${v.place.indexOf("city")>-1?'<span class="tag ok">'+esc(v.place)+'</span>'
+                :'<span class="tag warn">Outside city limits</span>'}</td>
+    <td>${esc(v.roads)}</td>
+    <td class="n">${v.relief} m</td></tr>`;
+}).filter(Boolean);
+if(vrows.length){
+  document.querySelector("#vtable tbody").innerHTML = vrows.join("");
+  document.getElementById("verified").hidden = false;
+}
+
+/* ── full table ───────────────────────────────────────────── */
+const tb=document.querySelector("#tbl tbody"), cnt=document.getElementById("count");
+const fT=document.getElementById("fTier"), fY=document.getElementById("fType"),
+      fC=document.getElementById("fCounty"), fX=document.getElementById("fText");
+[...new Set(L.map(x=>x.tier))].sort().forEach(t=>fT.add(new Option(tname(t),t)));
+[...new Set(L.map(x=>x.type))].filter(Boolean).sort().forEach(t=>fY.add(new Option(t,t)));
+[...new Set(L.map(x=>x.county))].filter(Boolean).sort().forEach(t=>fC.add(new Option(t,t)));
+let sortK="rank", sortAsc=true;
+function render(){
+  const q=fX.value.trim().toLowerCase();
+  let rows=L.filter(x=>
+    (!fT.value||x.tier===fT.value)&&(!fY.value||x.type===fY.value)&&
+    (!fC.value||x.county===fC.value)&&
+    (!q||x.addr.toLowerCase().includes(q)||(x.city||"").toLowerCase().includes(q)));
+  rows.sort((a,b)=>{
+    let u=a[sortK],v=b[sortK];
+    if(u==null)return 1; if(v==null)return -1;
+    if(typeof u==="string")return sortAsc?u.localeCompare(v):v.localeCompare(u);
+    return sortAsc?u-v:v-u;
+  });
+  cnt.textContent=rows.length+" of "+L.length+" shown";
+  tb.innerHTML=rows.map(x=>{
+    return `<tr data-rank="${x.rank}" tabindex="0"><td class="n">${x.rank}</td>
+      <td>${esc(x.addr)}</td><td>${esc(x.city)}</td><td>${esc(x.type)}</td>
+      <td class="n">${acres(x.acres)}</td><td class="n">${money(x.price)}</td>
+      <td class="n">${usd(x.askPerAcre)}</td>
+      <td class="n">${usd(x.reqExit)}</td>
+      <td class="n">${hrCell(x)}</td>
+      <td class="n">${x.dist!=null?x.dist.toFixed(1):"—"}</td>
+      <td class="n">${x.dom!=null?Math.round(x.dom).toLocaleString():"—"}</td>
+      <td class="n">${x.score.toFixed(0)}</td>
+      <td><span class="pill" style="background:${tcol(x.tier)}">${tname(x.tier)}</span></td></tr>`;
+  }).join("");
+}
+document.querySelectorAll("#tbl th").forEach(th=>{
+  th.tabIndex=0;
+  const go=()=>{const k=th.dataset.k; if(!k)return; sortAsc=(sortK===k)?!sortAsc:(k==="rank"); sortK=k; render();};
+  th.addEventListener("click",go);
+  th.addEventListener("keydown",e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();go();}});
+});
+[fT,fY,fC].forEach(el=>el.addEventListener("change",render));
+fX.addEventListener("input",render);
+render();
+
+/* anything carrying a rank opens the same detail view */
+document.addEventListener("click", e=>{
+  const n=e.target.closest("[data-rank]");
+  if(n && !n.closest("#detail")) openDetail(+n.dataset.rank, n);
+});
+document.addEventListener("keydown", e=>{
+  if(e.key!=="Enter") return;
+  const n=e.target.closest("tr[data-rank]");
+  if(n){ e.preventDefault(); openDetail(+n.dataset.rank, n); }
+});
+
+/* ── map ──────────────────────────────────────────────────────────────
+   Real geography, drawn from embedded Census vectors: county lines, city
+   outlines, and the highway network. Not a tiled basemap — the artifact
+   blocks external requests, so a streamed satellite layer is not available
+   here. Vectors give the same "where is this" reading without one.
+
+   The view fits the LISTINGS, not the whole portfolio. Fitting everything
+   put California, Texas and Colorado holdings in frame and squeezed every
+   Arizona listing into a corner.                                         */
+(function(){
+  const pts = L.filter(x=>x.lat&&x.lng);
+  const cap = document.getElementById("mapcap");
+  if(!pts.length){
+    // A thin export with no Latitude/Longitude columns used to leave an empty
+    // 1000x640 box behind a legend and a caption about aerial photography.
+    document.getElementById("mapwrap").hidden = true;
+    document.getElementById("nomap").hidden = false;
+    cap.hidden = true;
+    return;
+  }
+  if(Object.keys(IMGS).length) cap.insertAdjacentHTML("beforeend",
+    " Aerial photography is USDA NAIP, at roughly 30&nbsp;cm per pixel, for the highest-ranked listings.");
+
+  const svg   = document.getElementById("svgmap");
+  const W=1000, Hh=640, PAD=30;
+
+  /* bounds from listings alone, then holdings that fall inside */
+  const la=pts.map(p=>p.lat), lo=pts.map(p=>p.lng);
+  let y0=Math.min(...la), y1=Math.max(...la), x0=Math.min(...lo), x1=Math.max(...lo);
+  const my=(y1-y0)*0.07, mx=(x1-x0)*0.07;
+  y0-=my; y1+=my; x0-=mx; x1+=mx;
+  const owned = H.filter(h=>h.lat>=y0&&h.lat<=y1&&h.lng>=x0&&h.lng<=x1);
+
+  const kx=Math.cos(((y0+y1)/2)*Math.PI/180);
+  const sx=(x1-x0)*kx, sy=(y1-y0);
+  const s=Math.min((W-2*PAD)/sx,(Hh-2*PAD)/sy);
+  const ox=(W-sx*s)/2, oy=(Hh-sy*s)/2;
+  const X=v=>ox+(v-x0)*kx*s, Y=v=>Hh-oy-(v-y0)*s;
+  const inView=(lat,lng)=>lat>=y0-0.15&&lat<=y1+0.15&&lng>=x0-0.15&&lng<=x1+0.15;
+
+  const poly = r => r.map(p=>X(p[0]).toFixed(1)+","+Y(p[1]).toFixed(1)).join(" ");
+  const clip = r => r.some(p=>inView(p[1],p[0]));
+
+  let g = `<rect width="${W}" height="${Hh}" fill="var(--map-bg)"/>`;
+
+  BASE.counties.filter(c=>clip(c.r)).forEach(c=>{
+    g+=`<polygon points="${poly(c.r)}" fill="var(--map-land)" stroke="var(--map-county)" stroke-width="1.4"/>`;
+  });
+  BASE.places.filter(c=>clip(c.r)).forEach(c=>{
+    g+=`<polygon points="${poly(c.r)}" fill="var(--map-city)" stroke="var(--map-cityline)" stroke-width="0.8"/>`;
+  });
+  BASE.roads2.filter(c=>clip(c.r)).forEach(c=>{
+    g+=`<polyline points="${poly(c.r)}" fill="none" stroke="var(--map-road2)" stroke-width="1"/>`;
+  });
+  BASE.roads.filter(c=>clip(c.r)).forEach(c=>{
+    g+=`<polyline points="${poly(c.r)}" fill="none" stroke="var(--map-road)" stroke-width="2.2" stroke-linecap="round"/>`;
+  });
+
+  /* name the larger cities so the frame is locatable at a glance */
+  const seen=new Set();
+  BASE.places.filter(c=>clip(c.r)).forEach(c=>{
+    if(seen.has(c.n)||c.r.length<14) return;
+    seen.add(c.n);
+    const cx=c.r.reduce((t,p)=>t+p[0],0)/c.r.length, cy=c.r.reduce((t,p)=>t+p[1],0)/c.r.length;
+    g+=`<text x="${X(cx).toFixed(1)}" y="${Y(cy).toFixed(1)}" class="pl" text-anchor="middle">${esc(c.n)}</text>`;
+  });
+
+  owned.forEach(h=>{
+    const x=X(h.lng), y=Y(h.lat);
+    g+=`<rect class="own" x="${(x-5.5).toFixed(1)}" y="${(y-5.5).toFixed(1)}" width="11" height="11" `
+      +`transform="rotate(45 ${x.toFixed(1)} ${y.toFixed(1)})"><title>Land already owned</title></rect>`;
+  });
+
+  pts.slice().sort((a,b)=>tk(b.tier).localeCompare(tk(a.tier))).forEach(p=>{
+    const k=tk(p.tier), r=k==="1"?7:k==="2"?5.5:4.5;
+    g+=`<circle class="pin t${k}" data-rank="${p.rank}" cx="${X(p.lng).toFixed(1)}" `
+      +`cy="${Y(p.lat).toFixed(1)}" r="${r}" tabindex="0" role="button" `
+      +`aria-label="${esc(p.addr)}, ${tname(p.tier)}"><title>#${p.rank} ${esc(p.addr)}</title></circle>`;
+  });
+
+  svg.setAttribute("viewBox",`0 0 ${W} ${Hh}`);
+  svg.innerHTML = g;
+
+  /* pan and zoom */
+  let z=1, px=0, py=0, drag=null;
+  const view=()=>{
+    const w=W/z, h=Hh/z;
+    px=Math.max(0,Math.min(W-w,px)); py=Math.max(0,Math.min(Hh-h,py));
+    svg.setAttribute("viewBox",`${px} ${py} ${w} ${h}`);
+    svg.style.setProperty("--z",z);
+  };
+  const zoomAt=(f,cx,cy)=>{
+    const nz=Math.max(1,Math.min(14,z*f));
+    if(nz===z) return;
+    px=cx-(cx-px)*(z/nz); py=cy-(cy-py)*(z/nz); z=nz; view();
+  };
+  const at=e=>{
+    const r=svg.getBoundingClientRect();
+    return [px+(e.clientX-r.left)/r.width*(W/z), py+(e.clientY-r.top)/r.height*(Hh/z)];
+  };
+  svg.addEventListener("wheel",e=>{e.preventDefault();const[a,b]=at(e);zoomAt(e.deltaY<0?1.25:0.8,a,b);},{passive:false});
+
+  /* Pointer capture is taken only once the pointer has actually MOVED past a
+     threshold. Capturing on pointerdown retargets every later event to the
+     <svg>, so the click never resolved to the circle underneath and pins
+     could not be selected at all. Tracking movement also lets a drag that
+     ends over a pin avoid selecting it. */
+  let moved=false;
+  svg.addEventListener("pointerdown",e=>{
+    drag={x:e.clientX,y:e.clientY,px,py,id:e.pointerId}; moved=false;
+  });
+  svg.addEventListener("pointermove",e=>{
+    if(!drag) return;
+    const dx=e.clientX-drag.x, dy=e.clientY-drag.y;
+    if(!moved && Math.hypot(dx,dy) < 4) return;
+    if(!moved){ moved=true; svg.setPointerCapture(drag.id); svg.classList.add("grab"); }
+    const r=svg.getBoundingClientRect();
+    px=drag.px-dx/r.width*(W/z);
+    py=drag.py-dy/r.height*(Hh/z);
+    view();
+  });
+  ["pointerup","pointercancel"].forEach(ev=>svg.addEventListener(ev,e=>{
+    if(drag && moved){ try{svg.releasePointerCapture(drag.id);}catch(_){} }
+    drag=null; svg.classList.remove("grab");
+  }));
+
+  /* a pin opens the shared detail view */
+  svg.addEventListener("click",e=>{
+    if(moved) return;                       // that was a pan, not a selection
+    const n=e.target.closest(".pin");
+    if(n){ svg.querySelectorAll(".pin.sel").forEach(q=>q.classList.remove("sel"));
+           n.classList.add("sel"); openDetail(+n.dataset.rank, n); }
+  });
+  svg.addEventListener("keydown",e=>{
+    if(e.key!=="Enter"&&e.key!==" ") return;
+    const n=e.target.closest(".pin");
+    if(n){ e.preventDefault(); openDetail(+n.dataset.rank, n); }
+  });
+})();
+
+
+/* ── assumptions ──────────────────────────────────────────── */
+const LABEL={
+  moic_target_high:["Return target","3&times; on invested capital. Stated by the firm; no document sets it as policy"],
+  moic_target_low:["Lower bound","2.5&times;. Recent models come out 2.2&ndash;3.4&times;"],
+  entitlement_per_lot_anchors:["Entitlement cost","Measured per lot, and it falls with scale: $8,891/lot at 48 lots, $3,416 at 116, $2,000 at 220. From three Arizona budgets"],
+  carry_rate_annual:["Carry","1.78% of purchase a year, property tax only. A floor &mdash; insurance, management and maintenance have no figure on record"],
+  horizontal_per_acre_low:["Roads and utilities","$70,000&ndash;$99,000 an acre, and rising. Deliberately not costed here: the firm sells entitled land, not built-out land, and the evidence is Pinal County only"],
+  hold_years_underwritten:["Modelled hold","30&ndash;60 months across five recent models"],
+  hold_years_actual:["Observed hold","6&ndash;15 years across six completed deals &mdash; and 21 properties bought 2011&ndash;15 are still held"],
+  lots_per_acre:["Lot yield","3.5 an acre, residential only. Measured range 2.5&ndash;4.2; the two most recent deals are 3.33 and 3.50"],
+  min_peer_rows:["Comparables needed","8 before a price comparison is used"]
+};
+document.getElementById("assum").innerHTML=Object.entries(LABEL)
+  .filter(([k])=>k in DATA.assumptions)
+  .map(([k,[t,d]])=>`<dt>${t}</dt><dd>${d}</dd>`).join("");
+
+/* The weights the run ACTUALLY used, not the defaults. When the firm owns
+   nothing near the market the screener sets proximity to 0, and a page that
+   went on claiming "Proximity 35" would be describing a different run. */
+const W = DATA.weights || {};
+Object.entries({proximity:"Proximity",pricing:"Pricing",distress:"Distress",size_fit:"Size"})
+  .forEach(([k,lab])=>{
+    const el = document.getElementById("w-"+k);
+    if(el) el.textContent = W[k]!=null ? `${lab} ${W[k]}` : lab;
+  });
+if(W.proximity===0){
+  const n = document.getElementById("w-note");
+  n.innerHTML = `<b>Location scored nothing on this run.</b> The firm owns no geocoded land within
+    reach of this market, so the distance factor could not tell one listing from another. It was
+    taken out of the weighting rather than counted against every row: the remaining three were
+    rescaled to 100.`;
+  n.hidden = false;
+}
+
+/* ── where each field came from ───────────────────────────── */
+const csb = document.querySelector("#colsrc tbody");
+if(SRC.length){
+  csb.innerHTML = SRC.map(c=>{
+    const where = !c.rows
+      ? `<span class="tag crit">absent</span> nothing in this file supplies it`
+      : c.derived
+        ? `<span class="tag warn">derived</span> ${esc(c.derived)}, from <span class="num">${esc(c.source)}</span>`
+        : c.note
+          ? `<span class="tag warn">renamed</span> found under <span class="num">${esc(c.source)}</span>`
+          : `<span class="num">${esc(c.source)}</span>`;
+    return `<tr><td>${esc(flab(c.field))}</td>
+      <td style="white-space:normal">${where}</td>
+      <td class="n">${c.rows} of ${N}</td></tr>`;
+  }).join("");
+} else {
+  document.getElementById("colsrc-d").hidden = true;
+}
+
+/* ── what the portfolio can say about these markets ───────── */
+const EV = DATA.evidenceCoverage || [];
+if(EV.length){
+  document.getElementById("evid").innerHTML = EV.map(e=>
+    `<dt>${esc(e.state)}</dt><dd>${esc(e.evidence)}. ${e.holdings
+      ? `${e.holdings} geocoded holding${e.holdings===1?"":"s"} there`
+      : "No geocoded holdings there"}.</dd>`).join("");
+} else {
+  document.getElementById("evid-d").hidden = true;
+}
+
+/* ── footer ───────────────────────────────────────────────── */
+document.getElementById("foot").innerHTML =
+  `Screened ${esc(DATA.generated)} from <span class="num">${esc(DATA.source)}</span> &middot; `
+  + `${N} listings against ${DATA.holdingsUsed} geocoded holdings &middot; ranking by `
+  + `<span class="num">analysis/screening/fit_screen.py</span> at a ${DATA.moic}&times; target. `
+  + `Nothing was eliminated.<br>`
+  + `Boundaries and roads from the US Census`
+  + (vrows.length ? "; flood zones from the FEMA National Flood Hazard Layer" : "")
+  + (Object.keys(IMGS).length ? "; aerial photography from USDA NAIP" : "")
+  + `. Cost, hold-period and lot-yield figures are measured from the firm&rsquo;s own budgets and `
+  + `settlement statements &mdash; see <span class="num">docs/PORTFOLIO_STANDARD.md</span>.`;
+})();
+</script>
+
+</body>
+</html>

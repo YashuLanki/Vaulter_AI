@@ -1,0 +1,122 @@
+# ── Credentials & Secrets ─────────────────────────────────────────
+confidentials/*
+!confidentials/.env.template
+.env
+*.env
+outlook_token.json
+
+# Written into an applied update's package by release.py, read by
+# mcp_server._get_code_version() so version tracking survives .git being
+# excluded from every update package. Never hand-author or commit this --
+# it's a build-time artifact, stale the moment it's checked in.
+/VERSION
+
+# ── Data ──────────────────────────────────────────────────────────
+data/logs/*
+
+# CoStar exports and broker spreadsheets dropped here for screening.
+# Business data -- never commit it.
+data/drop/*
+
+# Defensive net for any ad hoc "*backup*" folder anyone creates directly
+# under data/. Kept from the ChromaDB era, where a ~55MB database backup
+# under a variant name once slipped through and got committed to git
+# history. The vector DB is gone, but the pattern still costs nothing and
+# the failure it prevents is expensive to undo.
+data/*backup*/
+
+# ── Processed Files (ingested documents) ──────────────────────────
+data/processed/*
+
+# ── Watched Folder (drop zone — not committed) ────────────────────
+data/watched_folder/*
+
+# ── Project Master (real file stays local) ────────────────────────
+data/project_master/*
+!data/project_master/.gitkeep
+
+# ── Confidential business documents (repo is deliberately PUBLIC) ──
+# This repo is public on purpose -- it's a portfolio piece. These docs
+# hold the firm's real deal names, prices, addresses, and counterparty
+# names, derived from its private document library. They stay local:
+# untracked 2026-07-29 after being confirmed publicly fetchable.
+# The evidence appendix collects the real figures that used to be
+# cited inline in CLAUDE.md / REBUILD_PLAN.md / fit_screen.py.
+docs/PORTFOLIO_STANDARD.md
+docs/COMPANY_PROFILE.md
+docs/jurisdictions/
+docs/EVIDENCE_APPENDIX.md
+
+# Per-agent audit logs: they record real property names, real export
+# filenames, and real findings from each run. The context.md files
+# (tracked) describe the agents; the logs stay local.
+docs/agents/*/memory.md
+
+# ── Corpus index (generated, machine-specific, and sensitive) ──────
+# corpus/index.py builds this SQLite index of the firm's SharePoint
+# library. It holds no file CONTENTS -- but it does hold ~493,000
+# file and folder NAMES, and those names alone disclose plenty:
+# entity names, deal names, counterparties, and live litigation
+# ("Hoffman v. Forshpan Documents"). It is also rebuildable in ~2
+# minutes via `python main.py index-corpus`, so there is nothing to
+# gain by committing it and a real disclosure risk if we do.
+data/corpus_index.db
+data/corpus_index.db-journal
+data/corpus_index.db-wal
+
+# ── Auto-update staging (local, transient -- code zips + org-wide ──
+# setting values in plain text; the latter can be real API keys, so
+# this must never be committed, not even by accident via `git add -A`)
+data/pending_update/*
+data/pending_settings/*
+
+# ── Keep folder structure via .gitkeep ────────────────────────────
+!data/logs/.gitkeep
+!data/processed/.gitkeep
+!data/watched_folder/.gitkeep
+
+# ── Python ────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# ── Virtual Environment ───────────────────────────────────────────
+.venv/
+venv/
+env/
+ENV/
+
+# ── Logs ──────────────────────────────────────────────────────────
+*.log
+
+# ── PyCharm ───────────────────────────────────────────────────────
+.idea/
+*.iml
+
+# ── VS Code ───────────────────────────────────────────────────────
+.vscode/
+
+# ── Claude Code (personal per-machine config stays local) ─────────
+.claude/settings.local.json
+
+# The confidential-name blocklist read by .claude/hooks/check_no_leaks.py.
+# The hook script itself is tracked (the mechanism is good portfolio
+# material); this list is the actual secret and must never be. See that
+# script's docstring.
+.claude/hooks/leak_patterns.txt
+
+# ── Windows ───────────────────────────────────────────────────────
+Thumbs.db
+desktop.ini
+$RECYCLE.BIN/
+
+# ── Mac ───────────────────────────────────────────────────────────
+.DS_Store
+.AppleDouble
+.LSOverride
