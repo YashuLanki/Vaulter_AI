@@ -1,4 +1,4 @@
-# Context: vaulter-dashboard-qa
+# Context: vaulter-report-checker
 
 **What this agent is for.** Checking that a generated screening HTML report is factually complete
 against the screen it was built from, and genuinely readable by a non-technical partner — before

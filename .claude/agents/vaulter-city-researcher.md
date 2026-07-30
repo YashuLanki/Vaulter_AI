@@ -1,5 +1,5 @@
 ---
-name: vaulter-jurisdiction-researcher
+name: vaulter-city-researcher
 description: Use to build or refresh a Tier B jurisdiction dossier — a city/county's capital improvement plan, comprehensive plan, utility service, school district, and development-trajectory signals. One agent per jurisdiction; safe to run many in parallel. Returns a dense, sourced, dated dossier.
 tools: WebSearch, WebFetch, Read, Write, Glob, Grep
 model: sonnet

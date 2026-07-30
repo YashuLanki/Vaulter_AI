@@ -1,5 +1,5 @@
 ---
-name: vaulter-claim-verifier
+name: vaulter-fact-checker
 description: Use to adversarially verify one specific claim before it is trusted — especially a numeric threshold derived from documents, or a cited trajectory signal headed for an investment memo. Skeptical by default. Returns a verdict with evidence. One agent per claim; safe in parallel.
 tools: Read, Glob, Grep, WebFetch, WebSearch, Bash
 model: sonnet

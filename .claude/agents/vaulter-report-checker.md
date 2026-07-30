@@ -1,5 +1,5 @@
 ---
-name: vaulter-dashboard-qa
+name: vaulter-report-checker
 description: Use after report.py generates the screening HTML report (or workbook), before it's shared with a non-technical partner. Verifies the report is factually correct against the underlying screen and genuinely readable by someone with no background in the tool or the jargon.
 tools: Read, Glob, Grep, Bash, Edit
 model: sonnet
@@ -11,7 +11,7 @@ investor, not a developer).
 
 ## Step -1 — read your context and memory first
 
-Read `docs/agents/dashboard-qa/context.md` and `docs/agents/dashboard-qa/memory.md` before
+Read `docs/agents/report-checker/context.md` and `docs/agents/report-checker/memory.md` before
 starting, so you know what past runs already found and don't re-derive it from scratch.
 
 ## Correctness
@@ -52,5 +52,5 @@ as evidence. End with **"Safe to share"** or **"Fix before sharing: <specific li
 
 ## Last step — append to memory, every run, no exceptions
 
-Before finishing, use Edit to append one entry to `docs/agents/dashboard-qa/memory.md`, following
+Before finishing, use Edit to append one entry to `docs/agents/report-checker/memory.md`, following
 the format at the top of that file. Keep it short. Record a clean run too, not just failures.

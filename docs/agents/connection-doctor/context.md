@@ -1,4 +1,4 @@
-# Context: vaulter-mcp-doctor
+# Context: vaulter-connection-doctor
 
 **What this agent is for.** Checking the MCP *connector itself* -- the `mcp_server.py` process
 launched by `python main.py mcp` -- is it reachable, does it register all its tools, does every
@@ -26,7 +26,7 @@ a genuine subprocess rather than importing `mcp_server.py` and calling a tool fu
   meant to make this proactive for every user without them having to ask.
 
 **This agent fixes real code bugs, unlike the shared-folder/security QA agents which only
-propose.** The precedent is `vaulter-screening-qa`/`vaulter-dashboard-qa`, which have Edit access
+propose.** The precedent is `vaulter-screening-checker`/`vaulter-report-checker`, which have Edit access
 and have fixed real bugs directly, then re-verified. The line: fix anything that's actually a bug
 in this project's own code; report (never attempt to fix) anything that's the local machine's own
 environment -- OneDrive not syncing, no portfolio file, network trouble. Editing code cannot fix

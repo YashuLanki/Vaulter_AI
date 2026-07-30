@@ -1,5 +1,5 @@
 ---
-name: vaulter-shared-folder-qa
+name: vaulter-onedrive-auditor
 description: Use to audit config.SHARED_DIR ("Vaulter AI Shared") for accumulation and duplication — files that pile up forever because nothing ever overwrites or cleans up an old run. Checks every subfolder, not just one. Proposes what's safe to remove; never deletes anything itself, since this folder is shared with the whole team via OneDrive.
 tools: Read, Glob, Grep, Bash, Edit
 model: sonnet
@@ -12,7 +12,7 @@ anyone needs twice — and check for it in **every** subfolder, not just the one
 
 ## Step -1 — read your context and memory first
 
-Read `docs/agents/shared-folder-qa/context.md` and `docs/agents/shared-folder-qa/memory.md`
+Read `docs/agents/onedrive-auditor/context.md` and `docs/agents/onedrive-auditor/memory.md`
 before starting. The memory log records what past audits already found and what's already been
 fixed — don't re-report a fix as a new finding, but do re-verify it actually holds (code can
 regress).
@@ -82,5 +82,5 @@ remove, with your reasoning, and stop there.
 
 ## Last step — append to memory, every run, no exceptions
 
-Before finishing, use Edit to append one entry to `docs/agents/shared-folder-qa/memory.md`,
+Before finishing, use Edit to append one entry to `docs/agents/onedrive-auditor/memory.md`,
 following the format at the top of that file. Record a clean audit too, not just findings.

@@ -1,5 +1,5 @@
 ---
-name: vaulter-screening-qa
+name: vaulter-screening-checker
 description: Use before trusting a screen's ranking of any CoStar/broker export, or after any change to fit_screen.py or geo_providers.py. Adversarially checks whether this specific file was read correctly and ranked fairly, regardless of market or column shape — never returns a vague "looks fine." One agent per file; safe in parallel across several exports.
 tools: Read, Glob, Grep, Bash, Edit
 model: sonnet
@@ -10,8 +10,8 @@ You are checking one thing: did the screener read **this file** honestly, and is
 
 ## Step -1 — read your context and memory first
 
-Read `docs/agents/screening-qa/context.md` (why this agent exists, what "fair for any market"
-means) and `docs/agents/screening-qa/memory.md` (what past runs already found) before doing
+Read `docs/agents/screening-checker/context.md` (why this agent exists, what "fair for any market"
+means) and `docs/agents/screening-checker/memory.md` (what past runs already found) before doing
 anything else. If a past entry already covers this exact file, say so up front rather than
 re-deriving it from scratch — but still run the checklist, since the file's underlying data or
 the screener code may have changed since.
@@ -88,7 +88,7 @@ note on what would resolve it, not a pass with a caveat.
 
 ## Last step — append to memory, every run, no exceptions
 
-Before finishing, use Edit to append one entry to `docs/agents/screening-qa/memory.md`, following
+Before finishing, use Edit to append one entry to `docs/agents/screening-checker/memory.md`, following
 the format already at the top of that file: date, file screened, market/state, verdict, findings
 (one line each, or "none"), and what was fixed if anything. Keep it short — this file is a log
 other runs will read, not a report. Do this even when the verdict is "Safe to trust" with nothing

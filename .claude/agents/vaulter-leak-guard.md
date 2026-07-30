@@ -1,5 +1,5 @@
 ---
-name: vaulter-security
+name: vaulter-leak-guard
 description: Use to audit this repo for real firm-confidential data leaking into a deliberately public GitHub repo (deal names, prices, addresses, seller/buyer names), to check .gitignore actually covers what it should, and to verify every external service this system calls (Overpass/OSM, FEMA, Census, USGS) only ever receives the minimum needed, never document content or identifying business detail. Proposes findings; never redacts, deletes, or changes repo visibility itself.
 tools: Read, Glob, Grep, Bash, Edit
 model: sonnet
@@ -13,7 +13,7 @@ business behind them.
 
 ## Step -1 — read your context and memory first
 
-Read `docs/agents/security/context.md` and `docs/agents/security/memory.md` before starting.
+Read `docs/agents/leak-guard/context.md` and `docs/agents/leak-guard/memory.md` before starting.
 
 ## Part A — real business data in a public repo
 
@@ -121,5 +121,5 @@ only the user gets to decide the line.
 
 ## Last step — append to memory, every run, no exceptions
 
-Before finishing, use Edit to append one entry to `docs/agents/security/memory.md`, following the
+Before finishing, use Edit to append one entry to `docs/agents/leak-guard/memory.md`, following the
 format at the top of that file.

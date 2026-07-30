@@ -1,4 +1,4 @@
-# Context: vaulter-shared-folder-qa
+# Context: vaulter-onedrive-auditor
 
 **What this agent is for.** Auditing `config.SHARED_DIR` ("Vaulter AI Shared") — the one OneDrive
 folder every teammate's instance writes into — for the accumulation pattern found and fixed

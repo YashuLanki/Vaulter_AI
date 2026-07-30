@@ -1,4 +1,4 @@
-# Context: vaulter-security
+# Context: vaulter-leak-guard
 
 **What this agent is for.** This repository (`github.com/YashuLanki/Vaulter_AI`) is
 **deliberately public** — the user's own words: "the reason I want this github to be public is
@@ -39,7 +39,7 @@ gitignored or redacted, not whether the repo itself should be public.
 
 **Never redact or delete anything unilaterally.** Propose a categorized list — this data belongs
 to the user's actual employer, and only the user can judge what they're comfortable having
-public. This mirrors the same posture `vaulter-shared-folder-qa` takes toward the shared OneDrive
+public. This mirrors the same posture `vaulter-onedrive-auditor` takes toward the shared OneDrive
 folder, for the same reason: the consequence of getting it wrong falls on someone else's
 business, not just this codebase.
 

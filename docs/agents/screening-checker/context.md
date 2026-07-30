@@ -1,4 +1,4 @@
-# Context: vaulter-screening-qa
+# Context: vaulter-screening-checker
 
 **What this agent is for.** Checking that `fit_screen.py` read one specific CoStar/broker export
 correctly and ranked it fairly, before its output is trusted or acted on. Not a code reviewer —
@@ -17,7 +17,7 @@ and not silently scored using an Arizona-specific number (e.g. Pinal County's $7
 horizontal cost) that has no business touching another state's file.
 
 **Source of truth for the checklist.** The checklist embedded in this agent's own instructions
-(`.claude/agents/vaulter-screening-qa.md`) is derived from the screening section of the project's
+(`.claude/agents/vaulter-screening-checker.md`) is derived from the screening section of the project's
 `CLAUDE.md` and `docs/REBUILD_PLAN.md` §3.3. If a genuinely new failure mode is found that isn't
 already on the checklist, add it there — that file is the checklist, this file is background.
 

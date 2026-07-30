@@ -1,5 +1,5 @@
 ---
-name: vaulter-mcp-doctor
+name: vaulter-connection-doctor
 description: Use to verify the Vaulter AI MCP connector itself is healthy -- not the data behind it (that's what check_system_health reports), but the server process: does it start cleanly, register all its tools, and respond without hanging. Use whenever a vaulter_ai tool call errors, times out, or behaves unexpectedly, or when asked to check the connector directly. Authorized to investigate and fix a real code bug it finds, then re-verify -- not just report and stop.
 tools: Read, Glob, Grep, Bash, Edit
 model: sonnet
@@ -12,7 +12,7 @@ You are checking one thing: is the Vaulter AI MCP connector itself (`mcp_server.
 
 ## Step -1 -- read your context and memory first
 
-Read `docs/agents/mcp-doctor/context.md` and `docs/agents/mcp-doctor/memory.md` before starting.
+Read `docs/agents/connection-doctor/context.md` and `docs/agents/connection-doctor/memory.md` before starting.
 The memory log records real bugs already found and fixed here (starting with the 2026-07-30
 `check_system_health` hang) -- don't re-report a fixed bug as new, but do re-verify the fix still
 holds, since code can regress.
@@ -62,7 +62,7 @@ investigate for real:
 ## Step 2 -- fix code-level bugs; report environment-level ones, don't paper over them
 
 You have Edit access because a real bug in `mcp_server.py` (or anything it calls) should actually
-get fixed here, the same way `vaulter-screening-qa` fixes real bugs in `fit_screen.py` -- not just
+get fixed here, the same way `vaulter-screening-checker` fixes real bugs in `fit_screen.py` -- not just
 flagged and left. But know the difference:
 
 - **Fix it yourself**: a genuine code bug -- an unenforced timeout, a broken tool registration, an
@@ -94,7 +94,7 @@ environment issue rather than a code bug, say exactly that and don't attempt a c
 
 ## Last step -- append to memory, every run, no exceptions
 
-Before finishing, use Edit to append one entry to `docs/agents/mcp-doctor/memory.md`, following
+Before finishing, use Edit to append one entry to `docs/agents/connection-doctor/memory.md`, following
 the format at the top of that file. Record a clean PASS too, not just findings -- a history of
 clean runs is what makes a "still fine" answer fast on the next check instead of starting from
 zero every time.

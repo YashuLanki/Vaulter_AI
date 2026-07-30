@@ -1,5 +1,5 @@
 ---
-name: vaulter-doc-analyst
+name: vaulter-document-reader
 description: Use to extract findings from Vaulter's portfolio documents — due diligence PDFs, investment memos, ALTA surveys, site plans, closed-deal files. Handles scanned and visual documents and very long ones. Returns findings with file+page citations. Use for Phase 0 buy-box derivation and per-deal document analysis.
 tools: Read, Glob, Grep, Bash
 model: sonnet
