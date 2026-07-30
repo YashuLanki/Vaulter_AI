@@ -148,6 +148,19 @@ the once-daily check for a staged code update or org setting, which used to be a
 scheduled job; that is the only piece of the scheduler that survived, and it lives here
 precisely so no thread is needed.
 
+That covers whether the *data behind* a healthy connector is in good shape. Whether the
+*connector itself* is reachable and fast is a different failure mode (found 2026-07-30:
+`check_system_health` itself hung 60-240+s on a stuck git subprocess — see
+`docs/agents/mcp-doctor/memory.md` for the full account and fix). `create_mcp_server()`'s own
+`instructions=` string tells Claude to invoke the `vaulter-mcp-doctor` subagent automatically,
+for any teammate, the moment any `vaulter_ai` tool call errors or hangs — no scheduled/background
+process involved, consistent with this file's "no background threads" rule; it fires only in
+reaction to a real tool-call failure inside an active conversation. `scripts/check_mcp_health.py`
+is the deterministic check it runs first — it drives a genuine `python main.py mcp` subprocess
+over real stdio rather than importing `mcp_server.py` and calling a tool function in-process,
+because the 2026-07-30 hang never reproduced through the in-process shortcut, only through the
+real transport.
+
 ### Auto-update (`scripts/release.py`, `scripts/apply_update.py`)
 Priority 4 in `docs/MULTI_USER_TRANSITION.md`. `scripts/release.py` (run by whoever ships a
 reviewed fix, never by staff) packages the current code — excluding `confidentials/`,
@@ -368,19 +381,21 @@ pattern without a name for it at the time. Generic version of this framework cal
 **Layer 1 — Skills (the instructions).** Markdown playbooks in `.claude/skills/*/SKILL.md`. Each
 one defines the objective, which tools or subagents to use, the expected output, and how to
 handle edge cases, in plain language — the same way you'd brief a colleague. `screening-run`,
-`vaulter-screening-pipeline`, `commit_git`, `cleanup`, `recap`, and `vaulter-rebuild` are all
-Layer 1. This is this project's "workflows/" — there is no separate directory by that name, and
-one should not be created; the skill *is* the workflow doc.
+`vaulter-screening-pipeline`, `commit_git`, `cleanup`, `recap`, `vaulter-rebuild`, and
+`mcp-health-check` are all Layer 1. This is this project's "workflows/" — there is no separate
+directory by that name, and one should not be created; the skill *is* the workflow doc.
 
 **Layer 2 — Agents (the decision-maker).** Claude's own role, whether the main session or a
 subagent in `.claude/agents/*.md`. Read the relevant skill, run tools/subagents in the correct
 sequence, handle failures, ask clarifying questions when needed — connect intent to execution
 without trying to do every step in one undifferentiated pass. `vaulter-screening-qa`,
 `vaulter-dashboard-qa`, `vaulter-shared-folder-qa`, `vaulter-doc-analyst`,
-`vaulter-claim-verifier`, and `vaulter-jurisdiction-researcher` are all Layer 2.
+`vaulter-claim-verifier`, `vaulter-jurisdiction-researcher`, `vaulter-security`, and
+`vaulter-mcp-doctor` are all Layer 2.
 
 **Layer 3 — Tools (the execution).** Deterministic Python: `analysis/screening/fit_screen.py`,
-`pipeline/proximity_tool.py`, `corpus/`, `scripts/`, and the `@mcp.tool()` functions in
+`pipeline/proximity_tool.py`, `corpus/`, `scripts/` (including `check_mcp_health.py`, a real-stdio-
+subprocess health check for the connector itself), and the `@mcp.tool()` functions in
 `mcp_server.py`. Consistent, testable, fast. Credentials live only in `confidentials/.env` — see
 "Conventions to preserve" above; this is this project's version of "never store secrets anywhere
 else."

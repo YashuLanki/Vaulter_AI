@@ -140,18 +140,34 @@ def _get_code_version() -> str:
     except OSError:
         pass
 
-    import subprocess
+    # Run in a background thread rather than trusting subprocess.run's own
+    # timeout: measured 2026-07-30 that a stuck git subprocess can make
+    # communicate()'s internal reader-thread .join() hang for 60-240+s even
+    # with timeout=5 set, blocking check_system_health -- the tool Claude
+    # calls first in every conversation -- and surfacing as a dead server.
+    # Waiting on a queue with our own timeout means we give up in 5s no
+    # matter what the subprocess plumbing does; the abandoned thread is
+    # harmless since it's a daemon and touches nothing but its own pipes.
+    import subprocess, threading, queue
+    result_q = queue.Queue(maxsize=1)
+
+    def _run_git():
+        try:
+            result = subprocess.run(
+                ["git", "rev-parse", "--short", "HEAD"],
+                cwd=str(Path(__file__).parent),
+                capture_output=True, text=True, timeout=5,
+            )
+            if result.returncode == 0 and result.stdout.strip():
+                result_q.put(result.stdout.strip())
+        except Exception:
+            pass
+
+    threading.Thread(target=_run_git, daemon=True).start()
     try:
-        result = subprocess.run(
-            ["git", "rev-parse", "--short", "HEAD"],
-            cwd=str(Path(__file__).parent),
-            capture_output=True, text=True, timeout=5,
-        )
-        if result.returncode == 0 and result.stdout.strip():
-            return result.stdout.strip()
-    except Exception:
-        pass
-    return "unknown"
+        return result_q.get(timeout=5)
+    except queue.Empty:
+        return "unknown"
 
 
 def _check_and_stage_update() -> None:
@@ -415,6 +431,17 @@ If it comes back healthy, say nothing about it at all and just proceed with what
 user asked. Only mention it if it reports an actual problem -- then state the problem in
 plain English and continue with the user's request anyway; never withhold help or delay a
 task because of what this check finds.
+
+If ANY vaulter_ai tool call -- including check_system_health itself -- errors, times out,
+or hangs, that's a different situation from check_system_health reporting a data problem:
+it means the connector itself may be broken, not just the data behind it. Don't just
+surface the raw error and move on. Automatically invoke the vaulter-mcp-doctor subagent to
+investigate; it's authorized to fix a real code bug it finds and re-verify, the same way
+any other Vaulter QA subagent would. Do this without waiting to be asked -- that's the
+reason it exists. Still don't let this block the user for long: once it reports back
+(fixed / still broken / an environment issue like OneDrive not being signed in, which no
+subagent can fix), state that plainly in one or two sentences and continue with whatever
+the user actually asked.
 
 You have access to Vaulter's own document library — the firm's SharePoint files,
 synced locally. This includes:

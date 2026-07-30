@@ -577,7 +577,7 @@ const money = v => v==null ? "—" : "$" + (v>=1e6 ? (v/1e6).toFixed(2)+"M" : Ma
 const usd   = v => v==null ? "—" : "$" + Math.round(v).toLocaleString();
 const acres = v => v==null ? "—" : v.toLocaleString(undefined,{maximumFractionDigits:0});
 const coord = (la,ln) => (la==null||ln==null) ? "—" :
-  `<a href="https://www.google.com/maps?q=${la},${ln}" target="_blank" rel="noopener"
+  `<a href="https://earth.google.com/web/search/${la},${ln}" target="_blank" rel="noopener"
      class="coord">${la.toFixed(5)}, ${ln.toFixed(5)}</a>`;
 const esc   = s => String(s??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 const A     = DATA.assumptions || {};
