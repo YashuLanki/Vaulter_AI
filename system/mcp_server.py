@@ -435,10 +435,15 @@ task because of what this check finds.
 If ANY vaulter_ai tool call -- including check_system_health itself -- errors, times out,
 or hangs, that's a different situation from check_system_health reporting a data problem:
 it means the connector itself may be broken, not just the data behind it. Don't just
-surface the raw error and move on. Automatically invoke the vaulter-connection-doctor subagent to
-investigate; it's authorized to fix a real code bug it finds and re-verify, the same way
-any other Vaulter QA subagent would. Do this without waiting to be asked -- that's the
-reason it exists. Still don't let this block the user for long: once it reports back
+surface the raw error and move on.
+
+If a vaulter-connection-doctor subagent is available to you, invoke it automatically, without
+waiting to be asked -- it's authorized to investigate, fix a real code bug it finds, and
+re-verify. If you have no such subagent (Claude Desktop does not load a project's subagents
+from disk -- only Claude Code does), do NOT pretend to call it. Instead say plainly what
+failed and offer the two things that resolve most connector problems: fully quit and reopen
+Claude Desktop, and if that doesn't help, double-click "Setup Vaulter AI" in the quick_start
+folder again. Still don't let this block the user for long: once you know the outcome
 (fixed / still broken / an environment issue like OneDrive not being signed in, which no
 subagent can fix), state that plainly in one or two sentences and continue with whatever
 the user actually asked.

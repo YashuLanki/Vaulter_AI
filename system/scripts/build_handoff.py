@@ -150,6 +150,41 @@ def _copy_system_files(dest_system: Path) -> int:
     return copied
 
 
+def _copy_claude_tooling(package_root: Path) -> int:
+    """
+    The QA subagents and skills, plus CLAUDE.md.
+
+    Honest caveat, so nobody expects more than this delivers: **Claude Desktop
+    does not load a project's subagents or skills from disk -- only Claude Code
+    does.** A teammate using Desktop + the MCP server gets the 21 tools and
+    nothing from here. These are shipped anyway because they cost a few
+    kilobytes, they're already public in the repo, and they make the package
+    complete if anyone ever opens it in Claude Code.
+
+    Deliberately partial: `.claude/hooks/` is NOT copied. It contains
+    leak_patterns.txt -- the literal list of confidential names the leak hook
+    exists to catch -- which is the single worst file in the project to ship.
+    `settings*.json` is skipped too (per-machine paths and personal config).
+    """
+    copied = 0
+    for sub in ("agents", "skills"):
+        src_dir = REPO_ROOT / ".claude" / sub
+        if not src_dir.is_dir():
+            continue
+        for src in src_dir.rglob("*"):
+            if not src.is_file() or src.suffix.lower() != ".md":
+                continue
+            target = package_root / ".claude" / sub / src.relative_to(src_dir)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(src, target)
+            copied += 1
+    guide = REPO_ROOT / "CLAUDE.md"
+    if guide.exists():
+        shutil.copy2(guide, package_root / "CLAUDE.md")
+        copied += 1
+    return copied
+
+
 def _verify_no_secrets(package_root: Path) -> list:
     """Walk the real built output and report anything that must not ship."""
     offenders = []
@@ -194,6 +229,11 @@ def main() -> int:
     (dest_quick / "Start Here.txt").write_text(START_HERE_TEXT, encoding="utf-8")
     print("  quick_start/  Start Here.txt")
 
+    # 3b. QA subagents, skills and the project guide -- see the docstring above
+    #     for why this is partial and what it does NOT do for a Desktop user.
+    n = _copy_claude_tooling(package_root)
+    print(f"  .claude/      {n} subagent/skill files + CLAUDE.md")
+
     # 4. Prove it, don't assume it.
     offenders = _verify_no_secrets(package_root)
     if offenders:
@@ -215,8 +255,9 @@ def main() -> int:
     size_mb = zip_path.stat().st_size / 1e6
     print(f"\nFolder: {package_root}")
     print(f"Zip:    {zip_path}  ({size_mb:.1f} MB)")
-    print("\nSend the .zip. Opening it shows two folders -- quick_start (the one "
-          "they open) and system (the program).")
+    print("\nSend the .zip. Opening it shows quick_start (the only folder they need "
+          "to open) and system (the program), plus CLAUDE.md and a hidden .claude/ "
+          "that only matter if someone opens this in Claude Code.")
     return 0
 
 
