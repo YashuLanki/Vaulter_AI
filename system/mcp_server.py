@@ -473,11 +473,24 @@ For screening inbound listings from a CoStar export or broker spreadsheet,
 use screen_listings. It RANKS every listing by fit against the firm's existing
 portfolio and eliminates nothing — there is no pass/fail, and a weak listing
 sinks to the bottom with a stated reason rather than disappearing. It makes no
-API calls and costs nothing. There are three ways to give it a CoStar file:
-(1) it's already on this machine or in the library — pass property_name to
-narrow the search if you know it; (2) attach/paste the file directly into the
-conversation and pass its base64 content as file_content_b64; (3) if neither
-applies, screen_listings will explain how to supply the file.
+API calls and costs nothing. There are three ways to give it a CoStar file,
+and they are NOT equally cheap — prefer them in this order:
+
+(1) BY FILENAME, strongly preferred. The file is already in the CoStar drop
+folder or the document library; just pass source_file (plus property_name to
+narrow a library search). Costs nothing — the file never travels through the
+conversation. If the user has the file but hasn't put it anywhere, call
+open_costar_folder, which opens the drop folder for them, and ask them to
+drop it in and tell you the name. That short exchange is far cheaper than (2).
+
+(2) BY PASTED CONTENT, only when (1) genuinely isn't available — e.g. the user
+attached the file here and has no easy way to save it. Base64 content passed
+as file_content_b64 is enormous: a real 216-row export measured ~43,000 tokens
+JUST to hand the file over, before any analysis. Do not reach for this by
+default merely because a file was attached, and never loop it over several
+files without saying what it will cost and offering the drop folder instead.
+
+(3) Neither — screen_listings explains how to supply the file.
 
 Do the qualitative read yourself, here in the conversation, on the top few it
 returns — that is what used to be a paid API call and is now just you.
@@ -1352,7 +1365,11 @@ for every listing."""
         Args:
             source_file:      Filename of the CoStar export (default: CostarExport.xlsx)
             property_name:    Optional name to narrow the file search
-            file_content_b64: Optional base64 file content if pasted into the conversation
+            file_content_b64: Base64 file content — LAST RESORT, not the default for an
+                               attached file. Measured ~43,000 tokens to pass one real
+                               216-row export this way, versus zero by filename. Put the
+                               file in the drop folder (open_costar_folder) and pass
+                               source_file instead whenever that's at all possible.
             moic_target:      Target multiple on invested capital (default 3.0; the
                                firm targets 2.5-3x on predevelopment value-add)
             show_top:         How many ranked listings to list back (default 15)
