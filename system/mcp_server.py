@@ -371,10 +371,13 @@ def _resolve_costar_source(source_file: str, property_name: str = "", file_conte
       (c) else return None.
     """
     import base64
-    from config import DROP_DIR, LEGACY_WATCH_DIR, LEGACY_PROCESSED_DIR
+    from config import (DROP_DIR, COSTAR_DROP_DIR,
+                        LEGACY_WATCH_DIR, LEGACY_PROCESSED_DIR)
 
     if file_content_b64:
         try:
+            # Pasted content lands in the LOCAL folder deliberately: one
+            # person's paste shouldn't appear in the team's shared folder.
             DROP_DIR.mkdir(parents=True, exist_ok=True)
             dest = DROP_DIR / source_file
             dest.write_bytes(base64.b64decode(file_content_b64))
@@ -385,10 +388,20 @@ def _resolve_costar_source(source_file: str, property_name: str = "", file_conte
 
     target_lower = source_file.lower()
 
-    if DROP_DIR.exists():
-        for candidate in DROP_DIR.rglob("*"):
-            if candidate.is_file() and candidate.name.lower() == target_lower:
-                return candidate
+    # Local first so a machine that already used data/drop is unchanged, then
+    # the team's shared "CoStar Drop" -- the one people can actually find, and
+    # the one open_costar_folder opens.
+    for drop in (DROP_DIR, COSTAR_DROP_DIR):
+        try:
+            if not drop.exists():
+                continue
+            for candidate in drop.rglob("*"):
+                if candidate.is_file() and candidate.name.lower() == target_lower:
+                    return candidate
+        except OSError as e:
+            # An unreachable shared folder is a reason to try the next
+            # location, not to fail the whole lookup.
+            log.warning(f"[MCP] Could not read {drop}: {e}")
 
     # The document library. Uses the index rather than walking: the library
     # holds ~500k files across a OneDrive placeholder filesystem, so an rglob
@@ -1093,19 +1106,44 @@ for every listing."""
         Open File Explorer to the folder where CoStar exports and broker
         spreadsheets get dropped for screening.
 
-        Use this when the user wants to add a listing export to screen, or asks
-        where to put one.
+        Use this when the user wants to add a listing export to screen, asks
+        where to put one, or has a file they'd otherwise attach to the
+        conversation -- opening this folder and screening by filename costs
+        nothing, where pasting the file's contents costs tens of thousands of
+        tokens on a real export.
+
+        Opens the TEAM's shared "CoStar Drop" folder in OneDrive: it's easy to
+        find beside the other Vaulter AI folders, and anything dropped there is
+        screenable by every teammate without re-sending it.
         """
-        from config import DROP_DIR
+        from config import COSTAR_DROP_DIR, DROP_DIR
         try:
-            DROP_DIR.mkdir(parents=True, exist_ok=True)
-            _open_in_file_manager(DROP_DIR)
-            files = sorted(f for f in DROP_DIR.iterdir() if f.is_file())
-            if files:
-                file_list = "\n".join(f"  - {f.name}" for f in files)
-                return f"Opened the CoStar drop folder.\n\nFiles ready to screen:\n{file_list}"
-            return ("Opened the CoStar drop folder — it's empty. Drop a CoStar export or "
-                    "broker spreadsheet here, then ask me to screen it by filename.")
+            COSTAR_DROP_DIR.mkdir(parents=True, exist_ok=True)
+            _open_in_file_manager(COSTAR_DROP_DIR)
+
+            # Both are searched when screening, so list both -- otherwise a file
+            # sitting in the old local folder looks like it isn't there.
+            shared = sorted(f for f in COSTAR_DROP_DIR.iterdir() if f.is_file())
+            local = []
+            if DROP_DIR.exists() and DROP_DIR.resolve() != COSTAR_DROP_DIR.resolve():
+                local = sorted(f for f in DROP_DIR.iterdir() if f.is_file())
+
+            if not shared and not local:
+                return ("Opened the team's CoStar Drop folder in OneDrive — it's empty.\n\n"
+                        "Drop a CoStar export or broker spreadsheet in, then tell me its "
+                        "filename and I'll screen it. (Dropping the file here is free; "
+                        "attaching it to this conversation instead costs a lot, since the "
+                        "whole file has to be sent through the chat.)")
+
+            out = ["Opened the team's CoStar Drop folder in OneDrive."]
+            if shared:
+                out.append("\nReady to screen (shared with the team):")
+                out += [f"  - {f.name}" for f in shared]
+            if local:
+                out.append("\nAlso screenable, on this machine only:")
+                out += [f"  - {f.name}" for f in local]
+            out.append("\nTell me a filename and I'll screen it.")
+            return "\n".join(out)
         except Exception as e:
             return f"Could not open folder: {e}"
 

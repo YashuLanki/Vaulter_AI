@@ -260,6 +260,25 @@ PROPERTY_SUMMARIES_DIR.mkdir(parents=True, exist_ok=True)
 SMARTSHEET_PORTFOLIO_DIR = SHARED_DIR / "Smartsheet Portfolio"
 SMARTSHEET_PORTFOLIO_DIR.mkdir(parents=True, exist_ok=True)
 
+# Where CoStar exports and broker spreadsheets get dropped for screening.
+#
+# SHARED as of 2026-08-03, and for a measured reason. The local drop folder
+# (DROP_DIR below) sits at <install>/system/data/drop -- somewhere no
+# non-technical person will ever navigate to. The observed consequence: a
+# teammate attached exports to the Claude conversation instead, so Claude
+# base64-encoded them and passed them through as file_content_b64, which cost
+# ~43,000 tokens for one real 216-row export purely to hand the file over. A
+# folder people can actually find is the fix for that.
+#
+# In OneDrive beside every other Vaulter AI folder, so "everything this system
+# touches lives in Vaulter AI Shared" stays true and there is one place to
+# look. Shared also means one person's export is screenable by the whole team
+# without re-sending it. DROP_DIR still works and is still searched first --
+# see _resolve_costar_source -- so nothing breaks on a machine that was
+# already using it.
+COSTAR_DROP_DIR = SHARED_DIR / "CoStar Drop"
+COSTAR_DROP_DIR.mkdir(parents=True, exist_ok=True)
+
 # Priority 4 (docs/MULTI_USER_TRANSITION.md) — auto-update. UPDATES_DIR is
 # where release.py (run by whoever ships a reviewed fix) publishes a new
 # version's code package + version marker; every instance's scheduler

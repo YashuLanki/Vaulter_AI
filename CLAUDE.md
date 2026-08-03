@@ -396,10 +396,23 @@ TIGERweb) are cached per rounded bounding box in the shared folder; aerial photo
 opt-in via `include_imagery` because it costs a couple of minutes.
 
 A CoStar file reaches `screen_listings` one of three ways (see
-`mcp_server.py::_resolve_costar_source`): dropped into `system/data/drop/` (a plain folder —
-nothing watches it) or already filed in the document library, searched by filename and
-optionally narrowed by `property_name`; pasted directly into the Claude conversation as
-`file_content_b64`; or neither — in which case the tool explains how to supply one. The
+`mcp_server.py::_resolve_costar_source`): by filename, searched in
+`config.COSTAR_DROP_DIR` (`Vaulter AI Shared/CoStar Drop`) and the local
+`system/data/drop/` — both plain folders, nothing watches either — then in the document
+library, optionally narrowed by `property_name`; pasted directly into the Claude
+conversation as `file_content_b64`; or neither — in which case the tool explains how to
+supply one. The
+
+**These are not equally cheap, and the tool descriptions now say so.** Measured 2026-08-03
+on the real exports: passing a 216-row file as `file_content_b64` costs **~43,000 tokens
+purely to transfer it**, before a single listing is read; by filename it costs nothing,
+because the file never enters the conversation. This was found in live use — a teammate
+attached exports to the chat and Claude dutifully base64'd each one in a loop. The shared
+`CoStar Drop` folder exists because the local one sat at `<install>/system/data/drop`,
+where no non-technical person will ever navigate; `open_costar_folder` opens the shared
+one. Local is still searched first so an existing machine is unchanged, and a pasted file
+still lands locally — one person's paste shouldn't appear in the team's folder.
+
 pre-rebuild `system/data/watched_folder/` and `system/data/processed/` trees are still searched last, so
 an export already sitting on an existing machine doesn't become invisible after an update.
 

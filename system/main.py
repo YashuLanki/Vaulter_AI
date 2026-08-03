@@ -107,17 +107,22 @@ def cmd_search(query: str):
 def cmd_screen(source: str, moic: float = 3.0):
     """Rank a CoStar export by fit against the existing portfolio. No API calls."""
     from pathlib import Path as _P
-    from config import DROP_DIR
+    from config import DROP_DIR, COSTAR_DROP_DIR
     from analysis.screening.fit_screen import screen
 
     path = _P(source)
     if not path.exists():
-        candidate = DROP_DIR / source
-        if candidate.exists():
-            path = candidate
+        # Local first (unchanged for an existing machine), then the team's
+        # shared CoStar Drop folder -- same order the MCP tool uses.
+        for candidate in (DROP_DIR / source, COSTAR_DROP_DIR / source):
+            if candidate.exists():
+                path = candidate
+                break
         else:
             print(f"No such file: {source}")
-            print(f"Drop CoStar exports into: {DROP_DIR}")
+            print(f"Drop CoStar exports into either:")
+            print(f"  {COSTAR_DROP_DIR}   (shared with the team)")
+            print(f"  {DROP_DIR}   (this machine only)")
             return
 
     r = screen(path, moic=moic)
