@@ -20,7 +20,11 @@ exists to prevent.
   shared summary before reading anything, and writes/updates one after a real read — built
   2026-07-30 so the first question about a property is the only one that ever pays the full
   reading cost; every later question, from any user, reads the summary instead. You don't need
-  to check for that summary yourself before delegating — it's the agent's own first step.
+  to check for that summary yourself before delegating — it's the agent's own first step. For a
+  large candidate set (rule of thumb ~15+ files, or anything with a 20MB+ document) it names the
+  size and pauses for a go-ahead before reading, since different teammates have different usage
+  limits on their own accounts that this system can't see — pass that decision to whoever's
+  asking rather than deciding it for them.
 - **Build or refresh a jurisdiction dossier** (a city/county's CIP, comprehensive plan, utility
   service, school district, development-trajectory signals) → `vaulter-city-researcher`.
   One agent per jurisdiction; a batch of jurisdictions runs in parallel safely.

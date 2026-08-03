@@ -36,6 +36,22 @@ one file per property, filename `<property-slug>.md` — lowercase, spaces to hy
 3. Either way, tell the caller whether you answered from the existing summary, a partial refresh,
    or a full fresh read. That distinction matters for how much to trust the answer's freshness.
 
+## Step 0.5 — size up the job before committing to it
+
+Different teammates have different usage limits on their own Claude account — invisible to you,
+and not something you can check. What you *can* see is how big the read is about to be, and
+whoever asked deserves that information before you spend it on their behalf, not after.
+
+Once you know a real read is needed (no summary, or a refresh covering more than a file or two),
+use `search_documents`/`browse_documents` to see the full candidate set **before opening
+anything** — you already get file counts and sizes from those. If it's a small, ordinary job
+(a handful of files, nothing outsized), just proceed; don't make a production out of routine
+work. But if it's a large job — a rule of thumb: more than ~15 candidate files, or any single
+file north of ~20MB (often a scanned DD binder or an old multi-hundred-page report) — say so
+explicitly before reading a single one: name the count and rough size, and ask whether to
+proceed now or come back to it later. Someone with more headroom on their own account may prefer
+to be the one who pays that cost, and they can't make that call if they never see it coming.
+
 ## Citation is mandatory
 
 Every finding gets `— <filename>, p.<page>`. No citation means don't report it. If you can't
