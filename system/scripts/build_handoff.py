@@ -43,6 +43,7 @@ for everyone else.
 
 import os
 import shutil
+import subprocess
 import sys
 import zipfile
 from pathlib import Path
@@ -246,6 +247,36 @@ def main() -> int:
     #     for why this is partial and what it does NOT do for a Desktop user.
     n = _copy_claude_tooling(package_root)
     print(f"  .claude/      {n} subagent/skill files + CLAUDE.md")
+
+    # 3b. Stamp the version, exactly as release.py does for update packages.
+    #
+    # Without this the install has no .git and no VERSION, so
+    # _get_code_version() returns "unknown" -- and since
+    # _check_and_stage_update only compares remote != current, "unknown"
+    # differs from every real version. A brand-new teammate would be
+    # prompted to apply an update on their first day, before they had
+    # done anything. Stamping the commit the package was built from makes
+    # that comparison meaningful from the start.
+    version = "unknown"
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "--short", "HEAD"],
+            cwd=str(REPO_ROOT), capture_output=True, text=True,
+            encoding="utf-8", errors="replace", timeout=10,
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            version = result.stdout.strip()
+    except (OSError, subprocess.SubprocessError) as e:
+        # Narrow on purpose. A bare `except Exception` here already hid a real
+        # bug once -- subprocess wasn't imported, the NameError was swallowed,
+        # and every package silently shipped VERSION="unknown" while looking
+        # like it had worked.
+        print(f"      (could not read the git version: {e})")
+    (dest_system / "VERSION").write_text(version, encoding="utf-8")
+    print(f"  system/VERSION  {version}")
+    if version == "unknown":
+        print("      ⚠ no version stamp — a fresh install will be prompted to "
+              "apply an update on first use")
 
     # 4. Prove it, don't assume it.
     offenders = _verify_no_secrets(package_root)
