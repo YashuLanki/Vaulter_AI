@@ -77,6 +77,21 @@ fallback, but *only* if that path already has a real `.env` and the project fold
 Two OneDrive paths are derived from a single detected account root and must not be
 confused: `SHARED_DIR` (`Vaulter AI Shared`) is this system's own output, written to;
 `CORPUS_DIR` (`Vaulter LLC - shaw`) is the firm's document library, read-only.
+
+**`SHARED_DIR` now lives INSIDE `CORPUS_DIR` (2026-08-03), and the carve-out is what
+makes that safe.** The library is a synced SharePoint library every teammate already has
+on disk, so a shared folder placed there reaches everyone automatically — no folder to
+share, and no OneDrive "Add shortcut to My files" click, which was the last manual step
+in onboarding and the one most likely to be skipped. `corpus/index.py` skips
+`Vaulter AI Shared` by name in `_SKIP_DIR_NAMES`, so nothing in it is ever indexed and
+screening workbooks can never surface in a document search. **It sits inside the library
+on disk but is not part of the document corpus** — this system's own space, walled off.
+Verified on a real rebuild: 493,514 firm documents indexed, zero of our files among them.
+Do not remove that skip entry without moving the folder back out. `_detect_shared_dir`
+uses the in-library location only if it already exists and never creates it there — one
+person sets it up deliberately rather than every install writing into the firm's document
+store. So "read-only" still holds for the document corpus itself; the exception is this
+one explicitly carved-out folder.
 `CORPUS_DIR` is deliberately never `mkdir`'d — if it's missing, that means OneDrive isn't
 syncing the library, which `check_system_health` needs to report rather than paper over
 with an empty folder.
