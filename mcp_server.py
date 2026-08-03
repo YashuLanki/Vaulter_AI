@@ -591,12 +591,22 @@ for every listing."""
             pfile = find_project_file()
             if pfile:
                 mtime = _dt.datetime.fromtimestamp(pfile.stat().st_mtime)
-                lines.append(f"Portfolio file: {pfile.name} (dated {mtime:%Y-%m-%d})")
+                # Name which copy won. With two possible locations a stale local
+                # file silently beating a fresh team one is exactly the confusion
+                # worth spending a few words to prevent.
+                from config import SMARTSHEET_PORTFOLIO_DIR
+                origin = ("shared with the team"
+                          if pfile.parent == SMARTSHEET_PORTFOLIO_DIR
+                          else "this machine only")
+                lines.append(f"Portfolio file: {pfile.name} (dated {mtime:%Y-%m-%d}, {origin})")
             else:
                 lines.append("Portfolio file: none found")
                 issues.append(
-                    "No Project Master file found in data/project_master/ -- property "
-                    "lookups are using only the built-in fallback list."
+                    "No Project Master file has been published to the team's shared "
+                    "'Smartsheet Portfolio' folder, and this machine has no local copy -- "
+                    "so property lookups are using only the built-in fallback list. "
+                    "Whoever maintains the Smartsheet export should drop it in that "
+                    "shared folder once, which fixes it for everyone."
                 )
         except Exception as e:
             lines.append(f"Portfolio file: could not check ({e})")

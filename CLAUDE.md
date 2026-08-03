@@ -117,11 +117,28 @@ and uses the CoStar export's own coordinates; the refusal does not apply because
 guessed. Both produce the same format, so a candidate and an owned property compare directly.
 
 ### The portfolio (`portfolio.py`)
-Reads the Smartsheet Project Master export from `data/project_master/`. CSV and .xlsx
-only — the PDF/OCR parsing path was dropped in the rebuild. Note only .xlsx can represent
-a sold deal (strikethrough via `cell.font.strike`); a CSV export yields every row active
-and an empty sold list. `find_project_file()` explicitly skips `property_coordinates.csv`,
-which lives in the same folder but belongs to `pipeline/property_coordinates.py`.
+Reads the Smartsheet Project Master export. CSV and .xlsx only — the PDF/OCR parsing path
+was dropped in the rebuild. Note only .xlsx can represent a sold deal (strikethrough via
+`cell.font.strike`); a CSV export yields every row active and an empty sold list.
+
+**Two locations, local first (2026-08-03).** `_portfolio_dirs()` checks this machine's own
+`data/project_master/` and then `config.SMARTSHEET_PORTFOLIO_DIR`
+(`Vaulter AI Shared/Smartsheet Portfolio`). The shared folder exists because a fresh install
+had **no** portfolio data at all: `scripts/build_handoff.py` deliberately ships no firm data,
+so a new teammate got "Portfolio: unavailable", cities falling back to state names, and
+`run_proximity_for_property` refusing every property by name — verified live, not theorised.
+Publishing the export to the shared folder once fixes all three for everyone. Local wins so
+an existing machine's behaviour is unchanged and a deliberately-placed local file always
+beats the team copy; `check_system_health` names which copy it used, because a stale local
+file silently beating a fresh team one is the obvious way this goes wrong. The same
+local-then-shared lookup covers `property_coordinates.csv` and `builtin_properties.json` —
+but `coords_path()` returns the *local* path when neither exists, so a caller writing a new
+table never writes into the folder the whole team reads.
+
+`find_project_file()` explicitly skips `property_coordinates.csv` **and**
+`builtin_properties.json` — both live alongside the Project Master and neither is one. The
+second exclusion was a latent bug: an export whose filename lacked "project"/"master" could
+lose the tie-break to `builtin_properties.json` and be silently ignored.
 
 ### MCP server (`mcp_server.py`)
 The production entry point. `create_mcp_server()` registers all `@mcp.tool()`-decorated

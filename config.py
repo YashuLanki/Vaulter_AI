@@ -242,6 +242,24 @@ SCREENING_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 PROPERTY_SUMMARIES_DIR = SHARED_DIR / "property_summaries"
 PROPERTY_SUMMARIES_DIR.mkdir(parents=True, exist_ok=True)
 
+# The firm's own portfolio data: the Smartsheet Project Master export, the
+# hand-verified coordinates table, and the property-details fallback list.
+#
+# SHARED as of 2026-08-03, and for a measured reason. The handoff package
+# (scripts/build_handoff.py) deliberately ships no firm data, so a brand-new
+# teammate's install had none of this -- `python main.py stats` on a fresh
+# machine reported "Portfolio: unavailable", every property question came back
+# empty, and proximity-by-name refused for every property, until someone
+# hand-delivered them files. Dropping the Smartsheet export here once makes it
+# work for the whole team, through the same OneDrive folder they already trust
+# with screening and proximity output.
+#
+# Local copies under DATA_DIR/project_master still win (see portfolio.py's
+# _portfolio_dirs) -- this is the fallback that makes a fresh install useful,
+# not a replacement for a file someone deliberately put on their own machine.
+SMARTSHEET_PORTFOLIO_DIR = SHARED_DIR / "Smartsheet Portfolio"
+SMARTSHEET_PORTFOLIO_DIR.mkdir(parents=True, exist_ok=True)
+
 # Priority 4 (docs/MULTI_USER_TRANSITION.md) — auto-update. UPDATES_DIR is
 # where release.py (run by whoever ships a reviewed fix) publishes a new
 # version's code package + version marker; every instance's scheduler

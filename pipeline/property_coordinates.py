@@ -56,7 +56,27 @@ PRECISION_LEVELS = ("parcel", "intersection", "city")
 
 
 def coords_path(data_dir: Path) -> Path:
-    return data_dir / "project_master" / COORDS_FILENAME
+    """
+    The coordinates table: this machine's own copy if it has one, otherwise the
+    team's shared "Smartsheet Portfolio" folder (added 2026-08-03, same reason
+    as the Project Master -- a fresh install shipped with no coordinates at all,
+    so run_proximity_for_property refused every single property by name).
+
+    Falls back to the LOCAL path when neither exists, deliberately: a caller
+    writing a new table should write it to their own machine, not silently
+    into the folder the whole team reads.
+    """
+    local = data_dir / "project_master" / COORDS_FILENAME
+    if local.exists():
+        return local
+    try:
+        from config import SMARTSHEET_PORTFOLIO_DIR
+        shared = SMARTSHEET_PORTFOLIO_DIR / COORDS_FILENAME
+        if shared.exists():
+            return shared
+    except Exception:
+        pass  # unreachable shared folder just means "use the local path"
+    return local
 
 
 def load_coordinates(data_dir: Path) -> dict:

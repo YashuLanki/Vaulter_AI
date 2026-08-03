@@ -27,7 +27,7 @@ import csv
 import logging
 from pathlib import Path
 
-from config import DATA_DIR
+from config import DATA_DIR, SMARTSHEET_PORTFOLIO_DIR
 
 log = logging.getLogger("vaulter.portfolio")
 
@@ -40,6 +40,28 @@ PROJECT_MASTER_DIR = DATA_DIR / "project_master"
 # "Project Name" column, and the portfolio MCP tools failed with
 # "Could not extract any properties from property_coordinates.csv".
 COORDS_FILENAME = "property_coordinates.csv"
+
+# Also lives alongside the Project Master and is also not one. Excluded by name
+# for the same reason as COORDS_FILENAME above: without this, a Project Master
+# whose filename doesn't happen to contain "project" and "master" could lose the
+# tie-break below to builtin_properties.json and be silently ignored.
+BUILTIN_PROPERTIES_FILENAME = "builtin_properties.json"
+
+
+def _portfolio_dirs() -> list:
+    """
+    Everywhere the firm's portfolio data can live, in priority order.
+
+    Local first, so a machine that already has a file keeps behaving exactly as
+    it did and a file someone deliberately dropped on their own machine always
+    beats the team copy. The shared "Smartsheet Portfolio" folder second --
+    that's what makes a fresh install useful at all, since the handoff package
+    ships no firm data by design.
+    """
+    dirs = [PROJECT_MASTER_DIR]
+    if SMARTSHEET_PORTFOLIO_DIR not in dirs:
+        dirs.append(SMARTSHEET_PORTFOLIO_DIR)
+    return dirs
 
 
 # ─── Known properties ─────────────────────────────────────────────────────────
@@ -60,19 +82,32 @@ COORDS_FILENAME = "property_coordinates.csv"
 # cities just fall back to the state name, exactly what already happened for
 # any property that wasn't in the hardcoded list.
 
-BUILTIN_PROPERTIES_FILE = PROJECT_MASTER_DIR / "builtin_properties.json"
+BUILTIN_PROPERTIES_FILE = PROJECT_MASTER_DIR / BUILTIN_PROPERTIES_FILENAME
+
+
+def _find_portfolio_file(filename: str):
+    """First match across _portfolio_dirs(), or None."""
+    for directory in _portfolio_dirs():
+        candidate = directory / filename
+        try:
+            if candidate.exists():
+                return candidate
+        except OSError:
+            continue  # an unreachable shared folder is not an error here
+    return None
 
 
 def _load_builtin_properties() -> list[dict]:
-    if not BUILTIN_PROPERTIES_FILE.exists():
-        log.info(f"No {BUILTIN_PROPERTIES_FILE.name} -- city overrides and sold-property "
+    found = _find_portfolio_file(BUILTIN_PROPERTIES_FILENAME)
+    if found is None:
+        log.info(f"No {BUILTIN_PROPERTIES_FILENAME} -- city overrides and sold-property "
                  f"details unavailable (cities will show as the state name)")
         return []
     try:
         import json
-        return json.loads(BUILTIN_PROPERTIES_FILE.read_text(encoding="utf-8"))
+        return json.loads(found.read_text(encoding="utf-8"))
     except Exception as e:
-        log.warning(f"Could not read {BUILTIN_PROPERTIES_FILE.name}: {e}")
+        log.warning(f"Could not read {found}: {e}")
         return []
 
 
@@ -83,30 +118,46 @@ CITY_OVERRIDES = {p["name"]: p["city"] for p in BUILTIN_PROPERTIES}
 # ─── Finding and parsing the export ───────────────────────────────────────────
 
 def find_project_file() -> Path | None:
-    """The Project Master export in data/project_master/, or None."""
-    PROJECT_MASTER_DIR.mkdir(parents=True, exist_ok=True)
-    files = [
-        f for f in PROJECT_MASTER_DIR.iterdir()
-        if f.is_file() and not f.name.startswith(".") and f.name != COORDS_FILENAME
-    ]
-    if not files:
-        return None
-    if len(files) > 1:
-        # Prefer a file that actually looks like the Project Master rather
-        # than whatever iterdir happens to return first.
-        named = [f for f in files if "project" in f.stem.lower() and "master" in f.stem.lower()]
-        if named:
-            files = named
-        else:
-            log.warning(f"Multiple files in project_master/ — using: {files[0].name}")
-    return files[0]
+    """
+    The Project Master export -- the local copy if there is one, otherwise the
+    team's shared "Smartsheet Portfolio" folder. None if neither has one.
+    """
+    for directory in _portfolio_dirs():
+        try:
+            directory.mkdir(parents=True, exist_ok=True)
+            files = [
+                f for f in directory.iterdir()
+                if f.is_file() and not f.name.startswith(".")
+                and f.name not in (COORDS_FILENAME, BUILTIN_PROPERTIES_FILENAME)
+            ]
+        except OSError as e:
+            # An unreachable shared folder (OneDrive signed out, offline) is a
+            # reason to try the next location, not to fail the whole lookup.
+            log.warning(f"Could not read {directory}: {e}")
+            continue
+        if not files:
+            continue
+        if len(files) > 1:
+            # Prefer a file that actually looks like the Project Master rather
+            # than whatever iterdir happens to return first.
+            named = [f for f in files if "project" in f.stem.lower() and "master" in f.stem.lower()]
+            if named:
+                files = named
+            else:
+                log.warning(f"Multiple files in {directory} — using: {files[0].name}")
+        return files[0]
+    return None
 
 
 def _missing_file_error() -> FileNotFoundError:
     return FileNotFoundError(
-        f"\nNo Project Master file found in {PROJECT_MASTER_DIR}\n"
-        "Export the Vaulter Project Master from Smartsheet and drop it into:\n"
-        f"  {PROJECT_MASTER_DIR}\n"
+        "\nNo Project Master file found. Looked in both:\n"
+        f"  {SMARTSHEET_PORTFOLIO_DIR}   (shared with the team)\n"
+        f"  {PROJECT_MASTER_DIR}   (this machine only)\n\n"
+        "Usually this means nobody has published the export to the shared\n"
+        "folder yet. Export the Vaulter Project Master from Smartsheet and\n"
+        "drop it into the shared folder above -- that makes it work for the\n"
+        "whole team at once, not just this machine.\n"
         "Supported formats: CSV, Excel (.xlsx). Export .xlsx if you need\n"
         "sold/struck-through deals separated from active ones.\n"
     )
