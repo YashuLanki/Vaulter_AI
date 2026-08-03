@@ -35,6 +35,13 @@ data/watched_folder/*
 data/project_master/*
 !data/project_master/.gitkeep
 
+# Local stand-in for the shared team OneDrive folder (proximity_output,
+# screening_output, property_summaries, updates, org_settings), used only
+# when config.py can't find OneDrive on this machine. Same real firm data
+# as the OneDrive version -- data/ is otherwise fully gitignored, but this
+# one didn't have its own explicit line, so it wasn't actually covered.
+data/shared_fallback_not_synced/*
+
 # ── Confidential business documents (repo is deliberately PUBLIC) ──
 # This repo is public on purpose -- it's a portfolio piece. These docs
 # hold the firm's real deal names, prices, addresses, and counterparty
