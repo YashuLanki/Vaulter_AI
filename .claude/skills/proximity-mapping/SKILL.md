@@ -7,7 +7,7 @@ argument-hint: <property-name | listing-rank> [radius]
 # Proximity desk — lead playbook
 
 You are the orchestrator for everything proximity. The deterministic core is
-`pipeline/proximity_tool.py` (one Overpass query, all POI categories at once, classified
+`system/pipeline/proximity_tool.py` (one Overpass query, all POI categories at once, classified
 locally, CSV output to the shared folder). Your job is running it correctly, distrusting the
 right things, and dispatching workers when a result matters enough to verify.
 

@@ -19,13 +19,13 @@ through their own Claude Desktop app via an MCP server — no separate UI.
 
 | Part | Description |
 |------|-------------|
-| **Document library** (`corpus/`) | Searches ~493,000 files in the firm's OneDrive-synced SharePoint library by name and folder path, and reads any one of them on request — PDF (with OCR for scanned pages), Word, Excel, CSV, text |
-| **Portfolio** (`portfolio.py`) | The active property list, read from the Smartsheet Project Master export |
-| **CoStar screener** (`analysis/screening/fit_screen.py`) | Ranks any market's listings by proximity to existing holdings, size-in-context, MOIC-based pricing, and distress signals. Free, instant, eliminates nothing. |
-| **Screening report** (`analysis/screening/report.py`) | One self-contained HTML file next to the workbook — the decision, then the map and shortlist, then every listing and every assumption. Opens straight from OneDrive |
-| **Ground truth** (`analysis/screening/geo_federal.py`) | FEMA flood over the parcel's *area*, Census TIGER roads, incorporated-place status, terrain relief. Federal open data, keyless, national |
-| **Proximity** (`pipeline/proximity_tool.py`) | What's within a radius of a listing or an owned property — one OpenStreetMap query, all categories, exported side by side so a candidate and a holding compare directly |
-| **MCP server** (`mcp_server.py`) | Exposes all of the above as tools each person's own Claude Desktop can call |
+| **Document library** (`system/corpus/`) | Searches ~493,000 files in the firm's OneDrive-synced SharePoint library by name and folder path, and reads any one of them on request — PDF (with OCR for scanned pages), Word, Excel, CSV, text |
+| **Portfolio** (`system/portfolio.py`) | The active property list, read from the Smartsheet Project Master export |
+| **CoStar screener** (`system/analysis/screening/fit_screen.py`) | Ranks any market's listings by proximity to existing holdings, size-in-context, MOIC-based pricing, and distress signals. Free, instant, eliminates nothing. |
+| **Screening report** (`system/analysis/screening/report.py`) | One self-contained HTML file next to the workbook — the decision, then the map and shortlist, then every listing and every assumption. Opens straight from OneDrive |
+| **Ground truth** (`system/analysis/screening/geo_federal.py`) | FEMA flood over the parcel's *area*, Census TIGER roads, incorporated-place status, terrain relief. Federal open data, keyless, national |
+| **Proximity** (`system/pipeline/proximity_tool.py`) | What's within a radius of a listing or an owned property — one OpenStreetMap query, all categories, exported side by side so a candidate and a holding compare directly |
+| **MCP server** (`system/mcp_server.py`) | Exposes all of the above as tools each person's own Claude Desktop can call |
 
 ### How document search works — read this before using it
 
@@ -50,15 +50,15 @@ has no records on this*. The MCP tools tell Claude this explicitly.
 
 ---
 
-## CoStar Listing Screener (`analysis/screening/fit_screen.py`)
+## CoStar Listing Screener (`system/analysis/screening/fit_screen.py`)
 
 Ranks inbound CoStar exports and broker spreadsheets by **fit against Vaulter's
 existing portfolio** — not against absolute thresholds. Free, instant, no API
 calls, and it works on any market (AZ, TX, CO, UT, ...).
 
 ```bash
-python main.py screen CostarExport.xlsx        # 3x MOIC target (default)
-python main.py screen CostarExport.xlsx 2.5    # 2.5x MOIC target
+python system/main.py screen CostarExport.xlsx        # 3x MOIC target (default)
+python system/main.py screen CostarExport.xlsx 2.5    # 2.5x MOIC target
 ```
 
 ...or ask Claude Desktop to screen it, via the `screen_listings` tool.
@@ -169,8 +169,8 @@ by the measured record.
 ### Checking it still works
 
 ```bash
-python scripts/check_screener.py                              # 68 assertions
-python scripts/check_screener.py "data/drop/CostarExport (2).xlsx"   # against a thin export
+python system/scripts/check_screener.py                              # 68 assertions
+python system/scripts/check_screener.py "system/data/drop/CostarExport (2).xlsx"   # against a thin export
 ```
 
 The only automated safety net in the repo. Run it after any change to
@@ -178,7 +178,7 @@ The only automated safety net in the repo. Run it after any change to
 
 ### Supplying a file
 
-1. Drop it into `data/drop/` (ask Claude to `open_costar_folder`)
+1. Drop it into `system/data/drop/` (ask Claude to `open_costar_folder`)
 2. Attach or paste it into the Claude conversation — it's passed as `file_content_b64`
 3. If it's already filed in the document library, it'll be found by name
 
@@ -225,26 +225,26 @@ Vaulter_AI/
 ├── mcp_server.py              # MCP server — no background threads
 ├── requirements.txt
 │
-├── corpus/                    # The firm's document library (read-only)
+├── system/corpus/                    # The firm's document library (read-only)
 │   ├── index.py               # SQLite name index, search, and the scope guard
 │   └── extract.py             # PDF/Word/Excel/CSV/text -> plain text
 │
-├── analysis/screening/        # CoStar Listing Screener
+├── system/analysis/screening/        # CoStar Listing Screener
 │   ├── fit_screen.py              # THE LIVE SCREENER — portfolio-fit ranking
 │   ├── geo_federal.py             # Ground truth (FEMA flood over the parcel area, Census roads)
 │   ├── geo_providers.py           # Keyless geodata + the Overpass mirror/cache layer
 │   ├── report.py                  # Builds the self-contained HTML report
 │   └── report_template.html
 │
-├── pipeline/
+├── system/pipeline/
 │   ├── proximity_tool.py       # Proximity export — one OpenStreetMap query, all categories
 │   └── property_coordinates.py # Hand-verified coordinates per property, read off deeds
 │
-├── core/safe_io.py            # Atomic writes, file locking, conflict merging
-├── scripts/                   # release, apply_update, push_org_setting, setup_wizard,
+├── system/core/safe_io.py            # Atomic writes, file locking, conflict merging
+├── system/scripts/                   # release, apply_update, push_org_setting, setup_wizard,
 │                              #   check_screener (the screener's test harness)
 ├── quick_start/               # Double-clickable setup launchers
-├── confidentials/             # Secrets — never committed to git
+├── system/confidentials/             # Secrets — never committed to git
 │
 ├── docs/
 │   ├── PORTFOLIO_STANDARD.md  # The measured evidence base — every figure, with its source
@@ -253,7 +253,7 @@ Vaulter_AI/
 │   ├── MULTI_USER_TRANSITION.md  # Historical — why the old design had its problems
 │   └── jurisdictions/         # Per-city dossiers (comp plans, CIPs, water/sewer)
 │
-└── data/
+└── system/data/
     ├── drop/                  # Drop CoStar exports here (nothing watches it)
     ├── project_master/        # Smartsheet Project Master export
     ├── pending_update/        # A staged code update, waiting for you to say yes
@@ -268,7 +268,7 @@ in code, in `ASSUMPTIONS`, each one citing the document it came from — so the
 record and the running configuration can be checked against each other but can't
 silently drift apart.
 
-Screening output does **not** live under `data/` — it goes to the shared team
+Screening output does **not** live under `system/data/` — it goes to the shared team
 OneDrive so one person's run is visible to everyone. See Security Notes.
 
 ---
@@ -321,7 +321,7 @@ this project.
 
 ### 4. Drop the Project Master into place
 Export the Vaulter Project Master from Smartsheet (**CSV or Excel** — PDF
-exports are no longer supported) and drag it into the `data/project_master/`
+exports are no longer supported) and drag it into the `system/data/project_master/`
 folder. Export **.xlsx** if you need sold deals separated from active ones: a
 CSV can't carry the strikethrough formatting that marks a deal sold, so every
 row comes through as active.
@@ -333,7 +333,7 @@ Claude Desktop (or Claude Code), not the claude.ai website, since a web app
 can't launch a process on your own computer.
 
 *Later on,* when documents have been added to the library, ask Claude to rebuild
-the index (or run `python main.py index-corpus`). Newly filed documents are
+the index (or run `python system/main.py index-corpus`). Newly filed documents are
 invisible to search until then; the health check warns you once the index is
 more than 30 days old.
 
@@ -361,13 +361,13 @@ pip install -r requirements.txt
 ```bash
 brew install tesseract poppler
 ```
-`config.py` auto-detects both by searching your PATH and a few common
+`system/config.py` auto-detects both by searching your PATH and a few common
 install locations — there's no path to hand-edit anymore. If it can't find
 either, it prints a plain-English warning at startup explaining what's
 missing.
 
 #### Set up credentials
-Copy `confidentials/.env.template` to `confidentials/.env` and fill in:
+Copy `system/confidentials/.env.template` to `system/confidentials/.env` and fill in:
 ```
 (nothing required)
 ```
@@ -375,7 +375,7 @@ There are no API keys. A blank `.env` is a working setup — the file only exist
 for machines where OneDrive put a folder somewhere unexpected. No Outlook app
 registration, no Anthropic key, no Google key, no per-person sign-in.
 
-`confidentials/` is always relative to the project folder, on every OS.
+`system/confidentials/` is always relative to the project folder, on every OS.
 
 If OneDrive put the document library somewhere unexpected, set
 `VAULTER_CORPUS_DIR` (and `VAULTER_SHARED_DIR` for the team output folder).
@@ -383,7 +383,7 @@ Both auto-detect `OneDrive - Vaulter LLC` otherwise.
 
 #### Build the document index
 ```bash
-python main.py index-corpus
+python system/main.py index-corpus
 ```
 Reads filenames only. Takes a couple of minutes over ~493,000 files.
 
@@ -413,13 +413,13 @@ Day to day, nobody runs commands — everything happens by asking Claude Desktop
 These are for setup and troubleshooting:
 
 ```bash
-python main.py mcp                    # start the MCP server (Claude Desktop runs this)
-python main.py index-corpus           # (re)build the document-library index
-python main.py search "closing memo"    # search the library by filename/path
-python main.py screen CostarExport.xlsx      # rank an export by portfolio fit
-python main.py screen CostarExport.xlsx 2.5  # ...at a 2.5x MOIC target instead of 3x
-python main.py properties             # list the portfolio from the Project Master
-python main.py stats                  # what this instance has available
+python system/main.py mcp                    # start the MCP server (Claude Desktop runs this)
+python system/main.py index-corpus           # (re)build the document-library index
+python system/main.py search "closing memo"    # search the library by filename/path
+python system/main.py screen CostarExport.xlsx      # rank an export by portfolio fit
+python system/main.py screen CostarExport.xlsx 2.5  # ...at a 2.5x MOIC target instead of 3x
+python system/main.py properties             # list the portfolio from the Project Master
+python system/main.py stats                  # what this instance has available
 ```
 
 ---
@@ -455,7 +455,7 @@ Staff machines are on `general` and need no configuration for this.
   Documents, and Teams chat files. Every path is resolved and re-checked against
   that boundary (`corpus.resolve_in_corpus`), so `../Documents` and absolute
   paths elsewhere on disk both fail. The system never writes to the library
-- The local index (`data/corpus_index.db`) holds **filenames, sizes, and dates
+- The local index (`system/data/corpus_index.db`) holds **filenames, sizes, and dates
   only** — never file contents
 - Because the library is a shared SharePoint site, everyone with access sees the
   same documents. Unlike the old email pipeline, there is no per-person private
@@ -468,7 +468,7 @@ Staff machines are on `general` and need no configuration for this.
   person's run is visible to the whole team. Nothing there is private to a
   person, and nothing is read back as shared *state* — each file has a single
   writer
-- The `confidentials/` folder is gitignored — never commit it
+- The `system/confidentials/` folder is gitignored — never commit it
 - Anthropic's Team plan does not train on your content by default
 
 ---

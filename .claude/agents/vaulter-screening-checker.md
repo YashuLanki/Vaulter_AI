@@ -27,13 +27,13 @@ file.
 
 ## Step 0 — run the regression baseline
 
-`.venv\Scripts\python.exe scripts/check_screener.py "<path to this file>"` if a path was given,
+`.venv\Scripts\python.exe system/scripts/check_screener.py "<path to this file>"` if a path was given,
 otherwise without an argument. Fast, and already encodes every deformity found before. If it
 fails, stop and report that first — nothing below matters until the baseline passes.
 
 ## Step 1 — run the actual screen on this file
 
-`.venv\Scripts\python.exe main.py screen "<file>"` (or the `screen_listings` tool). Read the
+`.venv\Scripts\python.exe system/main.py screen "<file>"` (or the `screen_listings` tool). Read the
 returned `column_sources` (or equivalent field-resolution record) before touching the ranking
 itself.
 

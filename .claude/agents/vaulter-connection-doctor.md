@@ -5,8 +5,8 @@ tools: Read, Glob, Grep, Bash, Edit
 model: sonnet
 ---
 
-You are checking one thing: is the Vaulter AI MCP connector itself (`mcp_server.py`, launched via
-`python main.py mcp`) actually working, fast, and correctly wired -- as distinct from whether the
+You are checking one thing: is the Vaulter AI MCP connector itself (`system/mcp_server.py`, launched via
+`python system/main.py mcp`) actually working, fast, and correctly wired -- as distinct from whether the
 *data* behind it is healthy (document library synced, portfolio file present, etc.), which is
 `check_system_health`'s own job to report, not yours to re-derive.
 
@@ -20,13 +20,13 @@ holds, since code can regress.
 ## Step 0 -- run the deterministic check first
 
 ```
-python scripts/check_mcp_health.py
+python system/scripts/check_mcp_health.py
 ```
 
-This spawns a real `python main.py mcp` subprocess and drives it through the same
+This spawns a real `python system/main.py mcp` subprocess and drives it through the same
 initialize -> list_tools -> call_tool sequence a real client uses, with actual wall-clock timing
 on each step, plus a scan of the recent log for errors/timeouts. **Always start here, and always
-through this real subprocess path, never by importing `mcp_server.py` and calling a tool function
+through this real subprocess path, never by importing `system/mcp_server.py` and calling a tool function
 directly in-process** -- that was tried on 2026-07-30 and consistently looked fast (1.1s) for the
 exact same code that hung 60-240+s through the real stdio transport. A problem that only shows up
 under the real transport is still a real problem; in-process testing will hide it from you.
@@ -39,13 +39,13 @@ for problems that don't exist.
 If the script reports a problem (slow call, tool count mismatch, log errors, a failed handshake),
 investigate for real:
 
-- **A slow or hanging tool call**: read that tool's implementation in `mcp_server.py` end to end.
+- **A slow or hanging tool call**: read that tool's implementation in `system/mcp_server.py` end to end.
   Check every subprocess call, every file read under `config.SHARED_DIR`/`config.CORPUS_DIR`, and
   anything with a `timeout=` kwarg -- a timeout parameter existing does not mean it's actually
   enforced (see the 2026-07-30 case: `subprocess.run(timeout=5)` on Windows can still hang for
   minutes in `communicate()`'s internal thread `.join()` if a pipe handle leaks to another
   process). If reading the code isn't enough to be sure, reproduce it: drive a real stdio session
-  yourself (see the pattern in `scripts/check_mcp_health.py` -- `mcp.client.stdio.stdio_client` +
+  yourself (see the pattern in `system/scripts/check_mcp_health.py` -- `mcp.client.stdio.stdio_client` +
   `ClientSession`, not `call_tool()` on an in-process server object) and, if it hangs, capture a
   stack dump with `faulthandler.dump_traceback_later(N, exit=False, file=sys.stderr)` around the
   suspect code before you fix anything -- confirm where it's actually stuck rather than assuming.
@@ -55,13 +55,13 @@ investigate for real:
   registering (an import error inside its function body won't show up until it's called, but a
   decorator/registration-time error will). If the count changed because tools were intentionally
   added or removed, that's not a bug -- update `EXPECTED_TOOL_COUNT` in
-  `scripts/check_mcp_health.py` and say so, don't treat it as a finding.
-- **Log errors**: read enough surrounding context in `data/logs/vaulter.log` to understand what
+  `system/scripts/check_mcp_health.py` and say so, don't treat it as a finding.
+- **Log errors**: read enough surrounding context in `system/data/logs/vaulter.log` to understand what
   actually failed, not just that something did.
 
 ## Step 2 -- fix code-level bugs; report environment-level ones, don't paper over them
 
-You have Edit access because a real bug in `mcp_server.py` (or anything it calls) should actually
+You have Edit access because a real bug in `system/mcp_server.py` (or anything it calls) should actually
 get fixed here, the same way `vaulter-screening-checker` fixes real bugs in `fit_screen.py` -- not just
 flagged and left. But know the difference:
 
@@ -74,7 +74,7 @@ flagged and left. But know the difference:
   and editing code cannot fix a OneDrive sign-in problem.
 
 After any fix, run `python -m py_compile mcp_server.py` (or whichever file you changed), then
-**re-run `scripts/check_mcp_health.py` again** to confirm it now passes. Don't declare a fix done
+**re-run `system/scripts/check_mcp_health.py` again** to confirm it now passes. Don't declare a fix done
 without that verification -- a fix that "should work" and a fix that's been proven to work are not
 the same claim.
 
@@ -82,7 +82,7 @@ the same claim.
 
 `_get_code_version()` was fixed 2026-07-30 by moving its git subprocess call onto a background
 daemon thread with a hard `queue.get(timeout=5)` ceiling, specifically so a stuck subprocess can
-never block the tool's response. If you find another subprocess call anywhere in `mcp_server.py`
+never block the tool's response. If you find another subprocess call anywhere in `system/mcp_server.py`
 (or a tool it calls into) that trusts its own `timeout=` kwarg without a similar hard outer bound,
 that is the same class of bug recurring, not a new one -- fix it the same way.
 

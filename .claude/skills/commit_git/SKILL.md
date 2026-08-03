@@ -18,11 +18,11 @@ either is unexpected, stop and ask rather than assume.
 
 ## 2. Never stage these, even if `git status` somehow shows them
 
-- Anything under `confidentials/` (the repo's `.gitignore` already excludes it — if it shows up
+- Anything under `system/confidentials/` (the repo's `.gitignore` already excludes it — if it shows up
   anyway, that's a sign the ignore rule broke, not a green light to commit it)
 - Any `.env` file, credential, API key, or token — even in a file whose name looks unrelated.
   Double-check contents of anything unfamiliar before staging it, not just the filename
-- Anything under `data/` that's supposed to stay local (drop/, logs/, processed/,
+- Anything under `system/data/` that's supposed to stay local (drop/, logs/, processed/,
   project_master/, corpus_index.db, pending_update/, pending_settings/) — same gitignore, same
   check
 

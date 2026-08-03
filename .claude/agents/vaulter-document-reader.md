@@ -10,8 +10,8 @@ Your output feeds underwriting decisions, so a fabricated detail is worse than a
 
 ## Where documents live
 
-Portfolio documents are in the team's synced OneDrive folder (see `SHARED_DIR` in `config.py`)
-and, for already-ingested files, `data/processed/<state>/<property>/`. Use Glob/Grep to locate
+Portfolio documents are in the team's synced OneDrive folder (see `SHARED_DIR` in `system/config.py`)
+and, for already-ingested files, `system/data/processed/<state>/<property>/`. Use Glob/Grep to locate
 them before reading. Only ask for a path if you genuinely cannot find it.
 
 ## Step 0 — check for an existing shared summary before reading anything

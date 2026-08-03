@@ -25,9 +25,9 @@ list their contents as candidates.
 | **`config.CORPUS_DIR`** (`OneDrive - Vaulter LLC/Vaulter LLC - shaw`) | **The firm's actual documents.** ~493,000 real business records — deeds, title policies, closing memos. A deletion here is unrecoverable business data loss, and it syncs to everyone. This system is read-only there, always. |
 | **`config.SHARED_DIR`** (`Vaulter AI Shared`) | Team-shared screening output. Deleting propagates to every colleague via OneDrive. |
 | Anything else under `OneDrive - *` | Same reasoning. Cleanup operates on the **repo**, never on synced folders. |
-| `confidentials/` | Live credentials. `.env.template` may be *edited*, never deleted. |
+| `system/confidentials/` | Live credentials. `.env.template` may be *edited*, never deleted. |
 | `.git/` | Obvious. |
-| `data/project_master/` | The live portfolio source, and `property_coordinates.csv` (hand-verified from deeds — see [[portfolio-coordinates-system]]). |
+| `system/data/project_master/` | The live portfolio source, and `property_coordinates.csv` (hand-verified from deeds — see [[portfolio-coordinates-system]]). |
 | `.venv/` | Not cruft, just big. Out of scope. |
 
 If you catch yourself building a path by joining onto `CORPUS_DIR` or `SHARED_DIR` during a
@@ -43,11 +43,11 @@ Before proposing removal, state which of these you checked:
 
 1. **Static references** — `Grep` for the symbol/filename across `*.py`, `*.md`, `*.json`,
    `*.bat`, `*.command`. Use the ripgrep-backed Grep tool, not `grep -r .` — the latter crawls
-   `.venv/` and `data/` and will hang.
-2. **Lazy imports** — `mcp_server.py` imports almost everything *inside functions*
+   `.venv/` and `system/data/` and will hang.
+2. **Lazy imports** — `system/mcp_server.py` imports almost everything *inside functions*
    (`from portfolio import load_properties` mid-body). A scan of top-of-file imports proves
    nothing here.
-3. **String dispatch** — `main.py` routes on `args[0] == "index-corpus"`. The function is never
+3. **String dispatch** — `system/main.py` routes on `args[0] == "index-corpus"`. The function is never
    referenced by name anywhere.
 4. **Decorator registration** — every `@mcp.tool()` function is called by the MCP framework, never
    by this codebase. **A "no callers" check flags all 20 of them. None are dead.**
@@ -64,11 +64,11 @@ way. Never delete on suspicion.
 These have all bitten, or would. Do not propose them without a fresh reason:
 
 - **`geo_providers.py`** — looks superseded by `geo_federal.py`, and is not imported by anything
-  in `analysis/`. It is live: `pipeline/proximity_tool.py` uses it for POI category search, which
+  in `system/analysis/`. It is live: `system/pipeline/proximity_tool.py` uses it for POI category search, which
   has no federal equivalent. A reachability script that only follows `from x import y` where `y`
   is a *name* will miss `from analysis.screening import geo_providers` and report it dead.
-- **`LEGACY_WATCH_DIR` / `LEGACY_PROCESSED_DIR`** (`config.py`) and `data/watched_folder/`,
-  `data/processed/` — the pipelines that wrote them are gone, but `_resolve_costar_source` still
+- **`LEGACY_WATCH_DIR` / `LEGACY_PROCESSED_DIR`** (`system/config.py`) and `system/data/watched_folder/`,
+  `system/data/processed/` — the pipelines that wrote them are gone, but `_resolve_costar_source` still
   *reads* them so an export already sitting on someone's machine doesn't vanish after an update.
   Deliberate fallback, not residue.
 - **Empty `__init__.py`** — makes the package importable. Empty is correct.
@@ -97,16 +97,16 @@ find . -name "*.pyc" -not -path "./.venv/*" | head
 for d in */; do [ -z "$(ls -A "$d" 2>/dev/null | grep -v __pycache__)" ] && echo "empty: $d"; done
 
 # Untracked data left by removed subsystems, with sizes
-for d in data/*/; do echo "$(du -sh "$d" 2>/dev/null | cut -f1)  $(find "$d" -type f | wc -l) files  $d"; done
+for d in system/data/*/; do echo "$(du -sh "$d" 2>/dev/null | cut -f1)  $(find "$d" -type f | wc -l) files  $d"; done
 
 # Stray IDE/editor folders nested where they don't belong
 find . -name ".idea" -o -name ".DS_Store" -not -path "./.venv/*"
 ```
 
 Then, for code and docs:
-- Declared dependencies in `requirements.txt` that nothing imports (check the real import name —
+- Declared dependencies in `system/requirements.txt` that nothing imports (check the real import name —
   `python-dotenv` imports as `dotenv`, `Pillow` as `PIL`).
-- Constants in `config.py` no module reads.
+- Constants in `system/config.py` no module reads.
 - Imports orphaned by your own edits.
 - Doc sections describing deleted subsystems.
 
@@ -134,12 +134,12 @@ veto individual rows, not just the whole batch.
 - Untracked files/dirs: plain delete, but say clearly in the proposal that these are **not**
   in git and so are gone for good. Untracked data (logs, caches, a 98 MB vector DB) is the one
   place a mistake actually costs something.
-- Never `git clean -fdx` — it would take `confidentials/` and `data/project_master/` with it.
+- Never `git clean -fdx` — it would take `system/confidentials/` and `system/data/project_master/` with it.
 
 ### 5. Remove the orphans your deletion created
 
 Deleting a module usually strands things: its imports elsewhere, its config constants, its
-`requirements.txt` entries, its mentions in `CLAUDE.md` / `README.md` / skills. A cleanup that
+`system/requirements.txt` entries, its mentions in `CLAUDE.md` / `README.md` / skills. A cleanup that
 leaves a doc describing a deleted module hasn't finished.
 
 Clean up **your own** orphans only. Pre-existing dead code you noticed but didn't create is a

@@ -10,7 +10,7 @@ with the architecture and code the user actually wants to showcase.
 **The hard part, stated plainly.** This isn't a clean split between "docs" (sensitive) and "code"
 (safe). Real business specifics — deal names, dollar figures tied to actual transactions, seller/
 buyer/entity names, specific addresses — were woven directly into comments in `fit_screen.py`,
-`config.py`'s `ASSUMPTIONS` block, and `CLAUDE.md` itself, because those comments explain *why* a
+`system/config.py`'s `ASSUMPTIONS` block, and `CLAUDE.md` itself, because those comments explain *why* a
 design decision was made by citing the real measured example that drove it (a named deal, its
 acreage, and its floodplain share, for instance). Untracking a whole file is easy; a file that
 mixes real business specifics with genuinely reusable architecture explanation needs closer
@@ -23,8 +23,8 @@ status is intentional — the open question is specifically *which files/section
 gitignored or redacted, not whether the repo itself should be public.
 
 **What "safe to be public" actually means here:**
-- The **code, architecture, agents, and skills** — `fit_screen.py`'s logic, `config.py`'s
-  structure, the QA subagent design, `mcp_server.py` — these are exactly what a job-seeking
+- The **code, architecture, agents, and skills** — `fit_screen.py`'s logic, `system/config.py`'s
+  structure, the QA subagent design, `system/mcp_server.py` — these are exactly what a job-seeking
   portfolio repo should show. Don't flag well-written code as a leak risk just because it's
   substantial.
 - **Real firm-specific data** — actual deal names, actual dollar figures tied to a real closed

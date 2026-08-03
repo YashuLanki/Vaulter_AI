@@ -26,6 +26,6 @@ already on the checklist, add it there — that file is the checklist, this file
 - `docs/REBUILD_PLAN.md` §3, §3.3 — why the screener was rebuilt, the header-row/column-resolution
   fixes and what broke before them
 - `docs/PORTFOLIO_STANDARD.md` §8 — what evidence does and doesn't exist per state
-- `scripts/check_screener.py` — the automated regression suite this agent runs as step 0
+- `system/scripts/check_screener.py` — the automated regression suite this agent runs as step 0
 
 See `memory.md` in this same folder for the log of what past runs actually found.

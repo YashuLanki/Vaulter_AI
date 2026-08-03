@@ -1,6 +1,6 @@
 # ── Credentials & Secrets ─────────────────────────────────────────
-confidentials/*
-!confidentials/.env.template
+system/confidentials/*
+!system/confidentials/.env.template
 .env
 *.env
 outlook_token.json
@@ -9,43 +9,43 @@ outlook_token.json
 # mcp_server._get_code_version() so version tracking survives .git being
 # excluded from every update package. Never hand-author or commit this --
 # it's a build-time artifact, stale the moment it's checked in.
-/VERSION
+system/VERSION
 
 # ── Data ──────────────────────────────────────────────────────────
-data/logs/*
+system/data/logs/*
 
 # CoStar exports and broker spreadsheets dropped here for screening.
 # Business data -- never commit it.
-data/drop/*
+system/data/drop/*
 
 # Defensive net for any ad hoc "*backup*" folder anyone creates directly
 # under data/. Kept from the ChromaDB era, where a ~55MB database backup
 # under a variant name once slipped through and got committed to git
 # history. The vector DB is gone, but the pattern still costs nothing and
 # the failure it prevents is expensive to undo.
-data/*backup*/
+system/data/*backup*/
 
 # ── Processed Files (ingested documents) ──────────────────────────
-data/processed/*
+system/data/processed/*
 
 # ── Watched Folder (drop zone — not committed) ────────────────────
-data/watched_folder/*
+system/data/watched_folder/*
 
 # ── Project Master (real file stays local) ────────────────────────
-data/project_master/*
-!data/project_master/.gitkeep
+system/data/project_master/*
+!system/data/project_master/.gitkeep
 
 # Local stand-in for the shared team OneDrive folder (proximity_output,
 # screening_output, property_summaries, updates, org_settings), used only
 # when config.py can't find OneDrive on this machine. Same real firm data
 # as the OneDrive version -- data/ is otherwise fully gitignored, but this
 # one didn't have its own explicit line, so it wasn't actually covered.
-data/shared_fallback_not_synced/*
+system/data/shared_fallback_not_synced/*
 
 # Built by scripts/build_handoff.py -- the send-ready copy of the project
 # for a new teammate, plus its zip. A build artifact, rebuilt on demand;
 # never commit it (it also contains a copy of every source file).
-data/handoff/*
+system/data/handoff/*
 
 # ── Confidential business documents (repo is deliberately PUBLIC) ──
 # This repo is public on purpose -- it's a portfolio piece. These docs
@@ -72,20 +72,20 @@ docs/agents/*/memory.md
 # ("Hoffman v. Forshpan Documents"). It is also rebuildable in ~2
 # minutes via `python main.py index-corpus`, so there is nothing to
 # gain by committing it and a real disclosure risk if we do.
-data/corpus_index.db
-data/corpus_index.db-journal
-data/corpus_index.db-wal
+system/data/corpus_index.db
+system/data/corpus_index.db-journal
+system/data/corpus_index.db-wal
 
 # ── Auto-update staging (local, transient -- code zips + org-wide ──
 # setting values in plain text; the latter can be real API keys, so
 # this must never be committed, not even by accident via `git add -A`)
-data/pending_update/*
-data/pending_settings/*
+system/data/pending_update/*
+system/data/pending_settings/*
 
 # ── Keep folder structure via .gitkeep ────────────────────────────
-!data/logs/.gitkeep
-!data/processed/.gitkeep
-!data/watched_folder/.gitkeep
+!system/data/logs/.gitkeep
+!system/data/processed/.gitkeep
+!system/data/watched_folder/.gitkeep
 
 # ── Python ────────────────────────────────────────────────────────
 __pycache__/

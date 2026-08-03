@@ -57,7 +57,13 @@ for _stream in (sys.stdout, sys.stderr):
     except Exception:
         pass
 
+# The repo now has the same shape as the package it produces (2026-08-03):
+# quick_start/ and system/ side by side. So PROJECT_ROOT is system/ -- the
+# half that ships -- and REPO_ROOT is its parent, which also holds
+# quick_start/ and the dev-only files (docs/, .claude/, CLAUDE.md, .git/)
+# that are simply outside the shipped tree and need no exclusion rule now.
 PROJECT_ROOT = Path(__file__).parent.parent.resolve()
+REPO_ROOT = PROJECT_ROOT.parent
 OUTPUT_ROOT = PROJECT_ROOT / "data" / "handoff"
 PACKAGE_NAME = "Vaulter AI"
 
@@ -181,7 +187,7 @@ def main() -> int:
     print("  system/confidentials/.env.template")
 
     # 3. The only folder the recipient ever opens.
-    for launcher in sorted((PROJECT_ROOT / "quick_start").iterdir()):
+    for launcher in sorted((REPO_ROOT / "quick_start").iterdir()):
         if launcher.is_file():
             shutil.copy2(launcher, dest_quick / launcher.name)
             print(f"  quick_start/  {launcher.name}")

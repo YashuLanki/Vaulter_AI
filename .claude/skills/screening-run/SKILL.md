@@ -12,10 +12,10 @@ works on any market.
 ## Run it
 
 ```powershell
-.venv\Scripts\python.exe main.py screen <FILENAME> [MOIC]
+.venv\Scripts\python.exe system/main.py screen <FILENAME> [MOIC]
 ```
 
-`<FILENAME>` resolves against `data/drop/` if it isn't a full path. `MOIC` defaults to 3.0;
+`<FILENAME>` resolves against `system/data/drop/` if it isn't a full path. `MOIC` defaults to 3.0;
 the firm targets 2.5–3x on predevelopment value-add, so 2.5 is the other sensible value.
 
 Or call the `screen_listings` MCP tool, which does the same thing and also accepts a
@@ -23,8 +23,8 @@ base64-pasted file.
 
 ## Locating the file
 
-`data/drop/` first, then the document library via `corpus.search`, then the pre-rebuild
-`data/watched_folder/` and `data/processed/` trees if they still exist. If the exact name
+`system/data/drop/` first, then the document library via `corpus.search`, then the pre-rebuild
+`system/data/watched_folder/` and `system/data/processed/` trees if they still exist. If the exact name
 doesn't resolve, try a shorter substring (e.g. `Costar`) before giving up. `open_costar_folder`
 opens the drop folder for the user.
 
@@ -74,7 +74,7 @@ owns; this says what is actually there. Run it on a shortlist candidate, not on 
 
 | Mistake | Instead |
 |---|---|
-| Looking for `run_full_screening` or a phase module | They're deleted. `main.py screen` or `screen_listings`. |
+| Looking for `run_full_screening` or a phase module | They're deleted. `system/main.py screen` or `screen_listings`. |
 | Treating a low Fit_Score as "rejected" | It's a ranking, not a filter. Say why it ranked low. |
 | Quoting a 3x MOIC without the hold period | Give the IRR at both 4yr and 14yr |
 | Presenting scores as the firm's ratified standard | Flag the draft status every time |

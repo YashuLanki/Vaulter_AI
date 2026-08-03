@@ -75,9 +75,9 @@ What's left is the part that was always the real asset:
 
 ## 2. What was built ✅
 
-### 2.1 `corpus/` — document access, replacing the whole ingest stack
+### 2.1 `system/corpus/` — document access, replacing the whole ingest stack
 
-The old path was: copy a document into `data/watched_folder/` → extract → chunk → embed →
+The old path was: copy a document into `system/data/watched_folder/` → extract → chunk → embed →
 store vectors in ChromaDB → retrieve via `rag_engine`. That was a local duplicate of documents
 the filesystem already had, and it existed to work around small context windows.
 
@@ -85,8 +85,8 @@ The new path is: find the file by name, read it, hand the text to Claude.
 
 | Deleted | Lines | Replaced by |
 |---|---|---|
-| `ingestion/` (watcher, extractor, chunker, embedder, registry) | 1,538 | `corpus/index.py` + `corpus/extract.py` (~700) |
-| `analysis/rag_engine.py` | 388 | — |
+| `ingestion/` (watcher, extractor, chunker, embedder, registry) | 1,538 | `system/corpus/index.py` + `system/corpus/extract.py` (~700) |
+| `system/analysis/rag_engine.py` | 388 | — |
 | ChromaDB, sentence-transformers, watchdog, numpy | — | SQLite (standard library) |
 
 **Two constraints shaped the design, both discovered by measurement, not assumption:**
@@ -124,7 +124,7 @@ whole-phrase hit beats both. The phrase bonus is not cosmetic — without it, `E
 returned *Example Ranch 80* files first, because `10` matches inside any date like `20260107`.
 Adjacent numbered parcels are exactly the case that has to come out right.
 
-### 2.2 `portfolio.py` — the Project Master reader
+### 2.2 `system/portfolio.py` — the Project Master reader
 
 Pulled out of `property_scraper.py`, which mixed reading the portfolio with scraping news
 headlines in one 1,024-line module. The reader survives at ~270 lines; the scraping is gone.
@@ -133,7 +133,7 @@ Dropped in the move: the PDF/OCR parsing path (~250 lines, including rendered-pi
 detection), which existed for scanned Smartsheet exports. The export is a clean CSV now.
 
 **A live bug was fixed here.** When `property_coordinates.csv` was added to
-`data/project_master/`, `find_project_file()` — which just took `files[0]` — started picking it,
+`system/data/project_master/`, `find_project_file()` — which just took `files[0]` — started picking it,
 and `get_portfolio_list` / `get_properties_by_stage` had been failing outright with
 *"Could not extract any properties from property_coordinates.csv."*
 
@@ -141,15 +141,15 @@ and `get_portfolio_list` / `get_properties_by_stage` had been failing outright w
 
 | Deleted | Lines | Why |
 |---|---|---|
-| `pipeline/web_scraper.py` + `WEB_SOURCES` | 309 | CBRE/Marcus & Millichap/GlobeSt is national brokerage news. What moves raw land value is on next month's planning commission agenda — see §5. |
-| `pipeline/property_scraper.py` (scraping half) | ~750 | Google News headlines per property |
-| `pipeline/email_reader.py` + `outlook_auth.py` | 874 | Email dropped |
-| `pipeline/property_matcher.py` | 217 | Only ever used by the two above |
-| `pipeline/scheduler.py` + the MCP scheduler thread | ~330 | Nothing left to schedule |
-| `pipeline/CLAUDE.md` | 160 | Stale duplicate of the root file, describing modules that no longer existed |
-| `.env.example` | 60 | Duplicate of `confidentials/.env.template` |
+| `system/pipeline/web_scraper.py` + `WEB_SOURCES` | 309 | CBRE/Marcus & Millichap/GlobeSt is national brokerage news. What moves raw land value is on next month's planning commission agenda — see §5. |
+| `system/pipeline/property_scraper.py` (scraping half) | ~750 | Google News headlines per property |
+| `system/pipeline/email_reader.py` + `outlook_auth.py` | 874 | Email dropped |
+| `system/pipeline/property_matcher.py` | 217 | Only ever used by the two above |
+| `system/pipeline/scheduler.py` + the MCP scheduler thread | ~330 | Nothing left to schedule |
+| `system/pipeline/CLAUDE.md` | 160 | Stale duplicate of the root file, describing modules that no longer existed |
+| `.env.example` | 60 | Duplicate of `system/confidentials/.env.template` |
 
-`mcp_server.py` now starts **no background threads at all**. The "scheduler thread must never
+`system/mcp_server.py` now starts **no background threads at all**. The "scheduler thread must never
 die" constraint is gone with the thread. The one job worth keeping — the daily check for a
 published update — moved into `check_system_health`, which Claude already calls once per
 conversation. Same cadence in practice, no thread.
@@ -174,20 +174,20 @@ auto-update and org-settings path — §4 of `MULTI_USER_TRANSITION.md`'s Priori
 `verify_listings` (federal ground truth on the top-ranked listings, the surviving half of the
 old Phase 4); `run_proximity_for_listing` and `compare_proximity_to_portfolio` (proximity on a
 *candidate* rather than only on land the firm already owns). `open_general_files` did not come
-back. The authoritative list is whatever carries `@mcp.tool()` in `mcp_server.py` — count it
+back. The authoritative list is whatever carries `@mcp.tool()` in `system/mcp_server.py` — count it
 there rather than trusting a number in a document, this one included.
 
 ### 2.5 Zero API keys required
 
 `GOOGLE_MAPS_API_KEY`, `GOOGLE_PLACES_API_KEY`, `ANTHROPIC_API_KEY` and all three `OUTLOOK_*`
-values are gone from `config.py` and from `confidentials/.env.template`. What replaced them:
+values are gone from `system/config.py` and from `system/confidentials/.env.template`. What replaced them:
 ground truth is federal open data (FEMA flood, Census TIGER, USGS elevation, NAIP imagery),
 proximity is OpenStreetMap/Overpass, ranking is arithmetic, and the qualitative read happens
 in the Claude conversation that asked for it — already paid for.
 
-**No keys at all remain.** A completely blank `confidentials/.env` is a working setup; the
+**No keys at all remain.** A completely blank `system/confidentials/.env` is a working setup; the
 file only exists for machines where OneDrive put a folder somewhere unexpected, and for the
-one machine that tracks the `canary` release channel. `config.py` keeps a short comment block
+one machine that tracks the `canary` release channel. `system/config.py` keeps a short comment block
 naming each removed key and what replaced it, so the next person to reach for one finds the
 free equivalent before they find a billing page.
 
@@ -197,7 +197,7 @@ Onboarding a new teammate is now: run the wizard, let it index. Nothing to sign 
 
 ## 3. Screening — rebuilt 2026-07-28 ✅
 
-`analysis/screening/fit_screen.py` replaced Phases 1–2 as the live screener. It ranks by
+`system/analysis/screening/fit_screen.py` replaced Phases 1–2 as the live screener. It ranks by
 **fit against the existing portfolio** instead of against absolute thresholds, costs nothing,
 and eliminates nothing.
 
@@ -296,7 +296,7 @@ floor exists to prevent.
 
 About 2,500 lines: `pipeline.py`, `phase1_rules.py`, `phase2_ranking.py`,
 `phase3_deep_analysis.py`, `phase4_verification.py`, `workbook_builder.py`, `scoring_config.py`,
-`market_utils.py`, `dashboard_server.py`, and the screening-local `config.py`. Once
+`market_utils.py`, `dashboard_server.py`, and the screening-local `system/config.py`. Once
 `screen_listings` moved to `fit_screen`, every one of them was reachable from nothing.
 
 Two pieces were kept rather than deleted:
@@ -320,7 +320,7 @@ needs neither, and a colleague can open it straight from OneDrive.
 
 ### 3.3 The export shape is discovered, not assumed — 2026-07-28 ✅
 
-Every recent bug surfaced on the same file: `data/drop/CostarExport (2).xlsx`, a thin 24-column
+Every recent bug surfaced on the same file: `system/data/drop/CostarExport (2).xlsx`, a thin 24-column
 Tucson template with no coordinates, no days-on-market, and a parcel size on 5 rows out of 50.
 Not a malformed file — just a different CoStar template than the 216-row Phoenix export
 everything had been built against.
@@ -345,9 +345,9 @@ every downstream number wrong and nothing saying so. A `Lot Size` column holding
 for half-acre pads passed the old plausibility ceiling and read as 29,000 acres. Both now
 resolve to nothing and those rows abstain, which is the correct output.
 
-`scripts/check_screener.py` is the only automated safety net in the repo and now runs **68
+`system/scripts/check_screener.py` is the only automated safety net in the repo and now runs **68
 assertions** against deformed market shapes (it was 41 before this work). It also accepts an
-export path — `python scripts/check_screener.py "data/drop/CostarExport (2).xlsx"` runs it
+export path — `python system/scripts/check_screener.py "system/data/drop/CostarExport (2).xlsx"` runs it
 against the thin template, 58 assertions with 2 skipped for data that file genuinely does not
 carry. Until 2026-07-29 it crashed on that file before the third check, which is precisely why
 the last several rounds of bugs got as far as they did.
@@ -357,7 +357,7 @@ the last several rounds of bugs got as far as they did.
 `run_mcp_server()` imports pandas (and `corpus`) **before** `mcp.run()` starts the event loop.
 Do not make it lazy again.
 
-Every tool in `mcp_server.py` imports lazily, which keeps CLI startup quick. Under stdio that
+Every tool in `system/mcp_server.py` imports lazily, which keeps CLI startup quick. Under stdio that
 meant numpy's C extension was first loaded *inside* a running asyncio loop, on the first tool
 call, and on Windows that stalls for minutes — a stack dump caught the main thread parked in
 `numpy/_core/multiarray.py` at `create_module`. The same import takes 0.2s in a plain process.
@@ -372,7 +372,7 @@ Fixed in commit `ffcb43f`.
 
 **Status: closed. Read this before proposing the plan below.**
 
-The original plan was: get the buy box out of `analysis/screening/config.py` and
+The original plan was: get the buy box out of `system/analysis/screening/config.py` and
 `scoring_config.py`, into a document a partner could read, and then have the code read that
 document back. The first half happened. **The second half was deliberately not built, and
 should not be.**
@@ -410,7 +410,7 @@ nobody has read yet just moves the unratified guess to a new number.
 <details>
 <summary><strong>The original §4 plan, kept for the reasoning rather than the instruction</strong></summary>
 
-The buy box then lived in `analysis/screening/config.py` (hard rules) and `scoring_config.py`
+The buy box then lived in `system/analysis/screening/config.py` (hard rules) and `scoring_config.py`
 (weights). Nobody but a developer could read it, challenge it, or update it.
 
 Split it in two, because **the halves fail differently:**
@@ -462,7 +462,7 @@ matters more.
 
 ### 5.0 First, the proximity half — and the wrong answer it was giving ✅
 
-`pipeline/proximity_tool.py` is the today half, and it works: one Overpass query returns every
+`system/pipeline/proximity_tool.py` is the today half, and it works: one Overpass query returns every
 POI category at once within a radius, classified locally, exported as CSV + XLSX to the shared
 folder. It has two entry points — by portfolio property name, and by rank from a screen — and
 both produce the same format so a candidate and an owned property compare directly.
@@ -574,7 +574,7 @@ needs a human calling the county.
 ## 6. Current structure
 
 *Verified against the tree on 2026-07-29. The earlier version of this section claimed 18 tools,
-two optional API keys, and `analysis/screening/` as "the 4-phase pipeline — untouched." All
+two optional API keys, and `system/analysis/screening/` as "the 4-phase pipeline — untouched." All
 three were wrong; the pipeline had been deleted three commits earlier.*
 
 ```
@@ -584,34 +584,34 @@ mcp_server.py           21 @mcp.tool() functions, no background threads,
                         pandas preloaded before the event loop (§3.4)
 portfolio.py            Project Master reader (CSV/.xlsx; only .xlsx marks sold)
 
-corpus/
+system/corpus/
 ├── index.py            SQLite name index, search ranking, resolve_in_corpus() scope guard
 └── extract.py          PDF (OCR), Word, Excel, CSV, text — one file at a time, never in bulk
 
-analysis/screening/
+system/analysis/screening/
 ├── fit_screen.py       THE LIVE SCREENER — portfolio-fit ranking, ASSUMPTIONS at the top
 ├── geo_federal.py      ground truth: FEMA flood over the parcel AREA, Census TIGER, USGS
 ├── geo_providers.py    keyless geodata + the Overpass mirror/cache layer
 ├── report.py           builds the self-contained HTML report
 └── report_template.html
 
-pipeline/
+system/pipeline/
 ├── proximity_tool.py       one Overpass query, all POI categories, CSV + XLSX to the shared folder
 └── property_coordinates.py hand-verified coordinates, 44 of 49 properties, from deeds
 
-core/safe_io.py         atomic writes, locking, conflict-copy merge
-scripts/                release, apply_update, push_org_setting, setup_wizard, check_screener
+system/core/safe_io.py         atomic writes, locking, conflict-copy merge
+system/scripts/                release, apply_update, push_org_setting, setup_wizard, check_screener
 quick_start/            two double-clickable setup launchers (.bat / .command)
 docs/                   this file, PORTFOLIO_STANDARD, COMPANY_PROFILE,
                         MULTI_USER_TRANSITION, jurisdictions/
-data/                   drop/, project_master/, pending_update/, pending_settings/,
+system/data/                   drop/, project_master/, pending_update/, pending_settings/,
                         corpus_index.db, logs/
 ```
 
-Gone since the last revision of this section: `analysis/screening/pipeline.py`,
+Gone since the last revision of this section: `system/analysis/screening/pipeline.py`,
 `phase1_rules.py`, `phase2_ranking.py`, `phase3_deep_analysis.py`, `phase4_verification.py`,
 `workbook_builder.py`, `scoring_config.py`, `market_utils.py`, `dashboard_server.py`, the
-screening-local `config.py`, and `analysis/screening/dashboard/vaulter_dashboard.html`.
+screening-local `system/config.py`, and `system/analysis/screening/dashboard/vaulter_dashboard.html`.
 See §3.2.
 
 ---

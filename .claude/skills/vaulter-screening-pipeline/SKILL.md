@@ -13,7 +13,7 @@ reviewing the screener kept turning up one more issue, then another, with no end
 
 ## Steps
 
-1. **Run the screen.** Follow `screening-run` — resolve the file, run `main.py screen` (or
+1. **Run the screen.** Follow `screening-run` — resolve the file, run `system/main.py screen` (or
    `screen_listings`), get the ranked output and `column_sources`.
 2. **Screening QA gate — mandatory, every time.** Delegate to `vaulter-screening-checker` with the
    file path. Do not skip this because the file "looks like a normal export" — every past bug

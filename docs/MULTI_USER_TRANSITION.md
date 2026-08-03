@@ -26,7 +26,7 @@ Where each part stands:
 | Part | Status today |
 |---|---|
 | **A** — loose ends A1/A2/A3 | 🛑 **Moot.** All three lived in `ingestion/`, which was deleted. A1's OCR memory spike matters as a *lesson* — see below. |
-| **B** — Theme 1 onboarding | ✅ **Addressed.** `scripts/setup_wizard.py` + `quick_start/`. Untested on anyone else's machine. |
+| **B** — Theme 1 onboarding | ✅ **Addressed.** `system/scripts/setup_wizard.py` + `quick_start/`. Untested on anyone else's machine. |
 | **B** — Theme 2 silent failure | ✅ **Built.** `check_system_health`, called once per conversation, silent when healthy. |
 | **B** — Theme 3 shared folder | ⚠️ **Reduced, not eliminated.** See Part C below. |
 | **B** — Theme 4 versions/data | ✅ **Built.** Auto-update path, Priority 4. |
@@ -86,7 +86,7 @@ Three small loose ends remain. None are urgent; all are quick.
 > **🛑 2026-07-29: all three are moot** — A1 and A2 lived in `ingestion/`, A3 in the embedder,
 > and none of those files exist. **A1's lesson is not moot and has been promoted to a hard rule
 > in `CLAUDE.md`:** *never scan a PDF without a timeout.* The OCR fallback described below
-> reached **6.5 GB** before it was killed. `corpus/extract.py` inherited the per-page rendering
+> reached **6.5 GB** before it was killed. `system/corpus/extract.py` inherited the per-page rendering
 > fix along with the warning.
 
 ### A1. OCR memory spike on mixed PDFs *(regression introduced this session)*
@@ -110,7 +110,7 @@ already-known state, or a restart.
 
 ### A3. Search quietly degrades after an upgrade unless `reindex` is run
 Switching to real semantic search means a database created before the upgrade needs a one-time
-`python main.py reindex`, or search silently returns weaker results. This is wired up and
+`python system/main.py reindex`, or search silently returns weaker results. This is wired up and
 documented, but it's manual and the failure is invisible.
 **Fix:** detect the mismatch and surface a plain-English prompt (and fold it into the health
 check in Part D).
@@ -135,8 +135,8 @@ Two specific landmines:
   (including an exact version number in one, and Apple-Silicon-only paths on Mac). Any
   deviation silently breaks scanned-document reading.
 
-*For implementers: `config.py` (`SECRETS_DIR`, `TESSERACT_PATH`, `POPPLER_PATH`), `README.md`
-setup section, `requirements.txt` (dependencies are largely unpinned; the author's committed
+*For implementers: `system/config.py` (`SECRETS_DIR`, `TESSERACT_PATH`, `POPPLER_PATH`), `README.md`
+setup section, `system/requirements.txt` (dependencies are largely unpinned; the author's committed
 environment is on a bleeding-edge Python that may not have prebuilt packages on staff
 machines).*
 
@@ -177,7 +177,7 @@ It turns out to apply to all portfolio documents, not only the Project Master fi
 > **2026-07-29 status — the whole of Part C dissolved, and not by being fixed.**
 >
 > C1's fix did land where it was scoped to land: in `safe_io.py`, so it would cover every
-> caller rather than one. `core/safe_io.py` gained `locked_json_update()` (which refuses to
+> caller rather than one. `system/core/safe_io.py` gained `locked_json_update()` (which refuses to
 > overwrite a file it could not read, rather than treating a torn mid-sync read as "empty") and
 > `merge_conflict_copies()` for C2.
 >
@@ -268,11 +268,11 @@ present and valid, not just that a placeholder exists.
   a visible failure state. Fix: retry, and skip a single unavailable entry (or show a clear
   per-market error) rather than blanking or hanging the whole view.
 
-*For implementers: `safe_io.py` (`load_json`/`locked_json_update`), `analysis/screening/
+*For implementers: `safe_io.py` (`load_json`/`locked_json_update`), `system/analysis/screening/
 pipeline.py` (`_update_manifest`, `_find_cached_result`, `run_full_screening`),
-`analysis/screening/phase3_deep_analysis.py` and `analysis/screening/phase4_verification.py`
+`system/analysis/screening/phase3_deep_analysis.py` and `system/analysis/screening/phase4_verification.py`
 (their own `locked_json_update` cache read/write call sites -- same root cause as C1),
-`analysis/screening/workbook_builder.py` (non-atomic save), `analysis/screening/
+`system/analysis/screening/workbook_builder.py` (non-atomic save), `system/analysis/screening/
 dashboard_server.py` and `dashboard/vaulter_dashboard.html`'s `fetchAndParseWorkbook`/
 `onMarketChange`.*
 
@@ -327,7 +327,7 @@ it at conversation start before relying on it as the primary safety net.*
 
 ### Priority 2 — Shared-folder safety *(protects real money and data)*
 
-> **🛑 Closed, by the problem going away.** C1 and C2 were implemented in `core/safe_io.py`;
+> **🛑 Closed, by the problem going away.** C1 and C2 were implemented in `system/core/safe_io.py`;
 > C3–C5 were overtaken. There is no shared read-modify-write state left in the project — see
 > the note at the head of Part C. "Protects real money" no longer applies either: nothing in
 > the screening path costs money.
@@ -338,10 +338,10 @@ then C4/C5. C1 alone removes the only data-loss risk in the whole shared-folder 
 ### Priority 3 — Easy onboarding *(unblocks the actual rollout)*
 
 > **✅ Built 2026-07, and this section is still the specification it was built to.**
-> `scripts/setup_wizard.py`, launched by `quick_start/Setup Vaulter AI.bat` / `.command`, does
+> `system/scripts/setup_wizard.py`, launched by `quick_start/Setup Vaulter AI.bat` / `.command`, does
 > the whole list below: creates the environment, installs dependencies, detects Tesseract and
 > Poppler by searching rather than hardcoding (and says in plain English what is missing and
-> how to install it per-user), copies `confidentials/.env.template` into place, **merges** its
+> how to install it per-user), copies `system/confidentials/.env.template` into place, **merges** its
 > entry into whatever `claude_desktop_config.json` already exists without touching another MCP
 > server, and finishes by building the document index. It reports each step rather than
 > assuming success, and is safe to run twice.
@@ -355,7 +355,7 @@ then C4/C5. C1 alone removes the only data-loss risk in the whole shared-folder 
 >   paste. The advice below about baking org-wide keys into the installer is therefore moot —
 >   there are no keys.
 > - **The Windows secrets trap was fixed by accepting both locations, as Part E recommended.**
->   `SECRETS_DIR` is the project's own `confidentials/` on every OS; Windows also checks the
+>   `SECRETS_DIR` is the project's own `system/confidentials/` on every OS; Windows also checks the
 >   legacy `C:\Users\<name>\Vaulter AI\confidentials` — but *only* if that path has a real
 >   `.env` and the project folder does not, so the one pre-existing setup keeps working without
 >   being switched out from under it.
@@ -408,10 +408,10 @@ Python/OCR setup — read the existing JSON if present, add/update only the Vaul
 
 > **✅ Built 2026-07, and it works differently from the sketch below in one important way.**
 >
-> `scripts/release.py` (run by whoever ships a reviewed fix, never by staff) packages the
-> current code — excluding `confidentials/`, `data/`, any virtualenv and `.git` — into a zip and
+> `system/scripts/release.py` (run by whoever ships a reviewed fix, never by staff) packages the
+> current code — excluding `system/confidentials/`, `system/data/`, any virtualenv and `.git` — into a zip and
 > publishes it with a version marker to the shared OneDrive folder. **Staged rollout is real:**
-> `python scripts/release.py` publishes to the `canary` channel only; `--promote` copies that
+> `python system/scripts/release.py` publishes to the `canary` channel only; `--promote` copies that
 > same already-published version's marker to `general` once it is confirmed healthy. Each
 > instance reads its own `VAULTER_UPDATE_CHANNEL` from `.env`, defaulting to `general`.
 >
@@ -432,8 +432,8 @@ Python/OCR setup — read the existing JSON if present, add/update only the Vaul
 > terminal. The one step that cannot be automated at all: fully quitting and reopening Claude
 > Desktop afterward, since an MCP server cannot restart its own parent application.
 >
-> **One invariant for whoever touches this next:** `scripts/apply_update.py`'s
-> `PRESERVED_DIR_NAMES` must always match `scripts/release.py`'s `EXCLUDED_DIR_NAMES` exactly.
+> **One invariant for whoever touches this next:** `system/scripts/apply_update.py`'s
+> `PRESERVED_DIR_NAMES` must always match `system/scripts/release.py`'s `EXCLUDED_DIR_NAMES` exactly.
 > The apply step trusts that anything under those paths was never in the package to begin with,
 > so it never deletes or overwrites them.
 >
@@ -441,7 +441,7 @@ Python/OCR setup — read the existing JSON if present, add/update only the Vaul
 > — `manifest.json` carried a `MANIFEST_FORMAT_VERSION` and readers ignored entries stamped
 > higher than they understood. Then the manifest itself was deleted along with the paid caching
 > it existed for (see Part C). There is no shared read-modify-write state left to version.
-> `scripts/push_org_setting.py` distributes org-wide settings by the same publish-and-stage
+> `system/scripts/push_org_setting.py` distributes org-wide settings by the same publish-and-stage
 > route as code, applied via `apply_pending_settings`.
 
 Stamp a version on the code and on the shared results record so newer and older copies can't
@@ -557,7 +557,7 @@ This is the "what could go wrong with the fix itself" analysis.
 >
 > The one durable warning below is worth keeping regardless: **do NOT share one ChromaDB across
 > machines over OneDrive.** A synced SQLite-backed store will corrupt. Applies to
-> `data/corpus_index.db` today just as much as it applied to ChromaDB then — each person's
+> `system/data/corpus_index.db` today just as much as it applied to ChromaDB then — each person's
 > index is local, and it must stay local.
 
 **Goal:** record the weekly Monday meeting, and let anyone later ask Claude what was said —
@@ -667,7 +667,7 @@ as a small standalone piece of work, with **Step 3 automation** grouped alongsid
 > **✅ 2026-07-29: right conclusion, and the implementation turned out to be much smaller than
 > the section anticipated.** Portfolio documents are indeed shared team data read from the
 > firm's existing OneDrive repository — but *nothing is ingested*. `CORPUS_DIR` points straight
-> at `OneDrive - Vaulter LLC/Vaulter LLC - shaw` and `corpus/` reads it in place. No watcher, no
+> at `OneDrive - Vaulter LLC/Vaulter LLC - shaw` and `system/corpus/` reads it in place. No watcher, no
 > per-person copy, no local database of contents.
 >
 > **The "open question to resolve" at the end of this section — how to map the real folder tree
@@ -696,7 +696,7 @@ state — and supersedes the narrower "just the Project Master" framing original
 |---|---|---|
 | **Portfolio documents** (due diligence PDFs, financials, and the Project Master itself — everything currently dropped into `watched_folder`) | The company's **existing** OneDrive document repository — already in place today, already the team's real source for these documents | Every person's own **local, private** ChromaDB. Everyone ingests the same shared source independently. |
 | **Email and anything derived from it** (attachments, etc.) | Private per person (their own Outlook) | That person's local database **only** — never shared, never visible to a colleague's instance. No change from today. |
-| **Screening results** (combined workbook + analysis) | Generated by whoever runs `screen_listings` | Written back to the shared OneDrive (already the existing, working design — see `SCREENING_OUTPUT_DIR` in `config.py`) so the whole team benefits from one run instead of each person re-running it. |
+| **Screening results** (combined workbook + analysis) | Generated by whoever runs `screen_listings` | Written back to the shared OneDrive (already the existing, working design — see `SCREENING_OUTPUT_DIR` in `system/config.py`) so the whole team benefits from one run instead of each person re-running it. |
 
 The privacy boundary is unchanged and remains load-bearing: each staff member runs a complete,
 independent local instance (own ChromaDB, own Outlook auth), so email never touches anyone
@@ -704,7 +704,7 @@ else's machine. What changes is that portfolio *documents* — like screening ou
 does — are recognized as shared team data, not personal state, and get treated that way.
 
 ### What this means concretely
-- **`data/watched_folder/` was only ever a local test stand-in**, not a production design. In
+- **`system/data/watched_folder/` was only ever a local test stand-in**, not a production design. In
   production, the thing each person's watcher watches for new portfolio documents should be
   the shared OneDrive folder (the same one the team already uses today for "portfolio, money,
   etc."), not a folder that only exists on one machine.
@@ -724,7 +724,7 @@ Before any implementation, this needs a real look at the actual existing OneDriv
 structure, not an assumption:
 - If it already happens to follow (or can trivially be read as) `<State>/<Property>` —
   the fix is close to a pure config change: point the watcher at that path instead of the
-  local `WATCH_DIR`, using the same OneDrive-detection pattern `config.py` already has for
+  local `WATCH_DIR`, using the same OneDrive-detection pattern `system/config.py` already has for
   `SHARED_DIR`/screening output.
 - If it's organized some other way (by deal name, by year, flat, by document type) — the
   watcher's folder-parsing logic (`_resolve_from_path`) needs to adapt to however it's actually
@@ -734,7 +734,7 @@ structure, not an assumption:
 
 *For implementers: don't guess at this — the first real step of implementing Part G is looking
 at the actual existing OneDrive folder tree and deciding which of the above (or some blend)
-applies, before touching `config.py` or `ingestion/watcher.py`.*
+applies, before touching `system/config.py` or `ingestion/watcher.py`.*
 
 ### Why this is comparatively low-risk on the concurrency front
 Unlike the Part C hazards (which are about many people reading/writing the *same shared JSON
@@ -763,40 +763,40 @@ lands.
 > screening `pipeline.py` / `phase3_deep_analysis.py` / `phase4_verification.py` /
 > `workbook_builder.py` / `dashboard_server.py` / dashboard HTML.
 >
-> Where to look instead: `corpus/index.py` and `corpus/extract.py` replace the whole ingest and
-> retrieval stack; `portfolio.py` replaces `property_scraper.py`'s reader half;
-> `analysis/screening/fit_screen.py` replaces the four phases; `analysis/screening/report.py`
-> replaces the dashboard; `analysis/screening/geo_federal.py` carries forward Phase 4's ground
-> truth. `scripts/check_screener.py` — which did not exist when this was written — is now the
+> Where to look instead: `system/corpus/index.py` and `system/corpus/extract.py` replace the whole ingest and
+> retrieval stack; `system/portfolio.py` replaces `property_scraper.py`'s reader half;
+> `system/analysis/screening/fit_screen.py` replaces the four phases; `system/analysis/screening/report.py`
+> replaces the dashboard; `system/analysis/screening/geo_federal.py` carries forward Phase 4's ground
+> truth. `system/scripts/check_screener.py` — which did not exist when this was written — is now the
 > only automated safety net in the repo.
 
-- `config.py` — paths, shared-folder detection, OCR tool paths, the scraping on/off flag.
+- `system/config.py` — paths, shared-folder detection, OCR tool paths, the scraping on/off flag.
   *(Still exists. The scraping flag does not — there is no scraper. No API keys either.)*
 - `safe_io.py` — the shared file read/write layer (atomic writes, same-machine lock). The
   same-machine-only limitation is the root of the Part C hazards and is documented in its
   header.
-- `analysis/screening/pipeline.py` — the shared manifest/cache logic and the cost-saving
+- `system/analysis/screening/pipeline.py` — the shared manifest/cache logic and the cost-saving
   cache check.
-- `analysis/screening/phase3_deep_analysis.py`, `phase4_verification.py` — per-listing and
+- `system/analysis/screening/phase3_deep_analysis.py`, `phase4_verification.py` — per-listing and
   per-finalist shared caches; the Claude calls that cost money.
-- `analysis/screening/workbook_builder.py` — writes the result spreadsheets (non-atomically).
-- `analysis/screening/dashboard_server.py` + dashboard HTML — the shared results viewer.
+- `system/analysis/screening/workbook_builder.py` — writes the result spreadsheets (non-atomically).
+- `system/analysis/screening/dashboard_server.py` + dashboard HTML — the shared results viewer.
 - `ingestion/extractor.py` — PDF/Excel text extraction (A1 OCR item).
 - `ingestion/watcher.py` — the folder watcher and property/state caches (A2 item); its
   `_resolve_from_path` is what would need to change (or be replaced) for Part G depending on
   the real OneDrive folder's structure.
 - `ingestion/embedder.py` — semantic embeddings and the reindex path (A3 item).
-- `pipeline/property_scraper.py` — loads the Project Master; contains the frozen built-in
+- `system/pipeline/property_scraper.py` — loads the Project Master; contains the frozen built-in
   fallback list.
-- `pipeline/property_matcher.py` — matches document/email content to a property by name rather
+- `system/pipeline/property_matcher.py` — matches document/email content to a property by name rather
   than by folder path; the fallback approach for Part G if the existing OneDrive folder isn't
   organized by State/Property.
-- `pipeline/outlook_auth.py` — Outlook/Graph sign-in flow (also the auth foundation for the
+- `system/pipeline/outlook_auth.py` — Outlook/Graph sign-in flow (also the auth foundation for the
   Part F Option-B automatic transcript fetch).
-- `pipeline/scheduler.py` — the background scheduler (where the Part F Option-B transcript poll
+- `system/pipeline/scheduler.py` — the background scheduler (where the Part F Option-B transcript poll
   would live).
-- `analysis/rag_engine.py` — the retrieval layer all search tools call; a meeting-search tool
+- `system/analysis/rag_engine.py` — the retrieval layer all search tools call; a meeting-search tool
   (Part F) would go through here with a `type="meeting"` filter.
-- `mcp_server.py` — registers all the tools; hosts the scheduler and watcher (a new
+- `system/mcp_server.py` — registers all the tools; hosts the scheduler and watcher (a new
   `search_meetings` / meeting-retrieval tool from Part F would be registered here).
-- `README.md`, `requirements.txt` — onboarding docs and dependencies.
+- `README.md`, `system/requirements.txt` — onboarding docs and dependencies.

@@ -18,7 +18,7 @@ Read `docs/agents/leak-guard/context.md` and `docs/agents/leak-guard/memory.md` 
 ## Part A — real business data in a public repo
 
 Go file by file through what's actually tracked (`git ls-files`), not just `docs/`. Real business
-specifics show up inside code comments too (`analysis/screening/fit_screen.py`'s `ASSUMPTIONS`
+specifics show up inside code comments too (`system/analysis/screening/fit_screen.py`'s `ASSUMPTIONS`
 block and its surrounding comments, `CLAUDE.md`'s design-rationale prose), not only in the docs
 folder.
 
@@ -42,8 +42,8 @@ judge whether that's generic enough to leave or should be redacted).
 
 ## Part B — .gitignore coverage
 
-Confirm `.gitignore` still excludes `confidentials/*`, `.env`, and every `data/` subfolder with
-real business content (`data/project_master/`, `data/drop/`, `data/logs/`) — these should already
+Confirm `.gitignore` still excludes `system/confidentials/*`, `.env`, and every `system/data/` subfolder with
+real business content (`system/data/project_master/`, `system/data/drop/`, `system/data/logs/`) — these should already
 be covered; verify, don't assume. Then, based on Part A's findings, propose what else should move
 from tracked to gitignored (`git rm --cached`, not a local delete — the user's own copy of a
 redacted doc should stay).
@@ -64,9 +64,9 @@ what it sends.
 
 - `corpus.resolve_in_corpus()` is actually called on every path that touches `CORPUS_DIR` — grep
   for anywhere a path is built by string-joining onto `CORPUS_DIR` directly instead.
-- `scripts/release.py`'s `EXCLUDED_DIR_NAMES` and `scripts/apply_update.py`'s
+- `system/scripts/release.py`'s `EXCLUDED_DIR_NAMES` and `system/scripts/apply_update.py`'s
   `PRESERVED_DIR_NAMES` still match exactly (documented invariant — a future edit to one without
-  the other would let confidentials/data slip into a shipped update package).
+  the other would let system/confidentials/data slip into a shipped update package).
 - No new API key or paid third-party service was added that would receive document content,
   contradicting the project's stated zero-API-key architecture.
 
@@ -82,7 +82,7 @@ marker, downloads the zip, and on a human "yes" overwrites every project file *a
 `pip install -r requirements.txt` from the new package. **There is no hash and no signature at
 either end** (verified 2026-07-29 — grep both scripts for `hashlib|sha256|signature|verify`).
 Everyone on the team can write to that folder by design. So one compromised teammate account =
-arbitrary code execution on every instance, including a poisoned `requirements.txt`. Check whether
+arbitrary code execution on every instance, including a poisoned `system/requirements.txt`. Check whether
 this is still true; if a fix has landed, verify it actually verifies (a hash stored in the same
 writable folder as the zip only stops corruption and lazy tampering — an attacker who can write
 both just updates both. Real tamper-resistance needs a signature whose private key never lives in
@@ -94,7 +94,7 @@ correspondence *written by third parties*. A document containing instructions ai
 is a real vector. Check that tool descriptions frame document text as data, never as instructions,
 and that nothing auto-reads documents in bulk without a human choosing the file.
 
-**E3 — dependency supply chain.** `requirements.txt` is largely unpinned, so a compromised release
+**E3 — dependency supply chain.** `system/requirements.txt` is largely unpinned, so a compromised release
 of any dependency lands on next install. Flag whether pinning or hash-pinning is worth the
 maintenance cost; do not silently pin without asking.
 

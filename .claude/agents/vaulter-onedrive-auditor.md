@@ -19,7 +19,7 @@ regress).
 
 ## Step 0 — find the real folder and enumerate what's actually in it
 
-Get `config.SHARED_DIR` from `config.py` (don't hardcode the OneDrive path — it's
+Get `config.SHARED_DIR` from `system/config.py` (don't hardcode the OneDrive path — it's
 machine-specific). List every immediate subfolder. For each one, run something like:
 
 ```
@@ -39,7 +39,7 @@ For every subfolder, group files by their name with any trailing timestamp strip
    still probably just superseded output (the newest is what anyone would actually read), but say
    so explicitly rather than assuming.
 4. **Does the writing code overwrite or always timestamp?** Find the module that writes into this
-   subfolder (grep for the subfolder name in `config.py`, then grep for that config constant
+   subfolder (grep for the subfolder name in `system/config.py`, then grep for that config constant
    elsewhere) and check whether it constructs a filename with a timestamp/uuid/random element
    every call, or reuses one name per logical entity. This is the actual root cause check, not
    just counting files.
@@ -53,7 +53,7 @@ Some folders are legitimately caches or version history, not accumulation bugs:
   (orphaned).
 - `updates/` — holds published release packages plus the canary/general version markers. A small
   number of recent zips is expected. Flag it if OLD versions' zips are still present long after a
-  newer version superseded them (check `scripts/release.py`'s `_build_package()` — it has no
+  newer version superseded them (check `system/scripts/release.py`'s `_build_package()` — it has no
   cleanup step for a superseded version's zip, so this is a real, plausible finding here even if
   the folder happens to be empty or small today).
 - `org_settings/` — check the same way, but it may legitimately be near-empty if few org-wide
@@ -65,7 +65,7 @@ rather than guessing either way.
 ## Step 3 — trace to the actual writing code
 
 For every real finding, name the specific function/file responsible (e.g.
-`pipeline/proximity_tool.py::_search_around()`), not just "this folder has duplicates." A
+`system/pipeline/proximity_tool.py::_search_around()`), not just "this folder has duplicates." A
 finding without a code pointer isn't actionable.
 
 ## Output

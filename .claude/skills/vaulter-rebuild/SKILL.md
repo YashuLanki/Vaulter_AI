@@ -20,7 +20,7 @@ Don't re-apply the old gate, and don't propose reviving those modules.
 
 ## What's built vs. what's left
 
-**Built** (REBUILD_PLAN §§1–2): the `corpus/` document layer, `portfolio.py`, the slimmed MCP
+**Built** (REBUILD_PLAN §§1–2): the `system/corpus/` document layer, `system/portfolio.py`, the slimmed MCP
 tool surface, the keyless geo swap, zero required API keys.
 
 **Left** (§§4–7): the buy-box standard as a readable document (Phase 0), Tier A/B/C area

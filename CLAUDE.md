@@ -7,8 +7,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 Vaulter AI Property Intelligence System — a Python system for a real estate investment
 company that gives each team member searchable access to the firm's document library and
 runs a 4-phase CoStar listing screening pipeline, entirely through their own local MCP
-server connected to their own Claude Desktop (no separate UI). `main.py` is the single CLI
-entry point; `mcp_server.py` is what actually runs in production, serving MCP tools over
+server connected to their own Claude Desktop (no separate UI). `system/main.py` is the single CLI
+entry point; `system/mcp_server.py` is what actually runs in production, serving MCP tools over
 stdio on the main thread with **no background threads**.
 
 **Rebuilt 2026-07.** The system used to ingest PDFs/emails/web data into a per-user
@@ -23,33 +23,53 @@ was ruled out. Email ingestion was dropped deliberately, to be rebuilt later.
 ```bash
 # Setup
 python -m venv .venv && .venv\Scripts\activate      # Windows
-pip install -r requirements.txt
-python scripts/setup_wizard.py           # guided setup, ends by building the index
+pip install -r system/requirements.txt
+python system/scripts/setup_wizard.py           # guided setup, ends by building the index
 
 # Everyday
-python main.py mcp                       # start the MCP server (what Claude Desktop runs)
-python main.py index-corpus              # (re)build the document-library index (~2 min)
-python main.py search "closing memo"     # search the library by filename/path
-python main.py screen CostarExport.xlsx  # rank a CoStar export by portfolio fit (free)
-python main.py screen export.xlsx 2.5    # ...at a 2.5x MOIC target instead of the 3x default
-python main.py properties                # list the portfolio from the Project Master
-python main.py stats                     # what this instance has available
+python system/main.py mcp                       # start the MCP server (what Claude Desktop runs)
+python system/main.py index-corpus              # (re)build the document-library index (~2 min)
+python system/main.py search "closing memo"     # search the library by filename/path
+python system/main.py screen CostarExport.xlsx  # rank a CoStar export by portfolio fit (free)
+python system/main.py screen export.xlsx 2.5    # ...at a 2.5x MOIC target instead of the 3x default
+python system/main.py properties                # list the portfolio from the Project Master
+python system/main.py stats                     # what this instance has available
 ```
 
 There is no lint/test framework configured (no pytest, no linter config).
 `.claude/hooks/check_python_syntax.py` runs `py_compile` on every `.py` Claude edits —
 that hook is the only automated safety net in the repo.
 
+## Repository layout
+
+Reorganized 2026-08-03 so the repo has the same shape as the folder a teammate receives —
+previously opening the project showed 17 items with nothing indicating where to start:
+
+```
+vaulter_ai/
+  quick_start/   the double-click installer (the only folder a teammate opens)
+  system/        everything the program runs on -- also the only half that ships
+  docs/          internal engineering notes; never packaged, never shipped
+  .claude/       agents, skills, hooks (developer tooling)
+  CLAUDE.md  HISTORY.md  .gitignore
+```
+
+`system/` is the boundary that matters: `scripts/build_handoff.py` and `scripts/release.py` both
+package from it, so anything outside it is automatically excluded from what teammates receive.
+That is load-bearing, not cosmetic — see the auto-update section for the confidentiality hole it
+closed. `config.py` derives `BASE_DIR` from its own location, so `system/data/` and
+`system/confidentials/` live beside it; paths in `.gitignore` are anchored accordingly.
+
 ## Architecture
 
-### Cross-cutting: `config.py`
+### Cross-cutting: `system/config.py`
 Every path, credential, and tunable constant lives here — this is the only file that
 needs to change to port the project to a new machine. It cross-platform-detects Windows
-vs Mac, loads `confidentials/.env` via `python-dotenv`, and creates all `data/` subfolders
+vs Mac, loads `system/confidentials/.env` via `python-dotenv`, and creates all `system/data/` subfolders
 on import. Nothing else in the codebase should hardcode a path or read `os.environ`
 directly for these values.
 
-`SECRETS_DIR` is the project's own `confidentials/` folder on every OS. Windows also checks
+`SECRETS_DIR` is the project's own `system/confidentials/` folder on every OS. Windows also checks
 one legacy hardcoded location (`C:\Users\<USERNAME>\Vaulter AI\confidentials`) as a
 fallback, but *only* if that path already has a real `.env` and the project folder doesn't
 — so the one pre-existing setup keeps working without being switched out from under it.
@@ -61,9 +81,9 @@ confused: `SHARED_DIR` (`Vaulter AI Shared`) is this system's own output, writte
 syncing the library, which `check_system_health` needs to report rather than paper over
 with an empty folder.
 
-### Data access: the firm's document library (`corpus/`)
+### Data access: the firm's document library (`system/corpus/`)
 The firm's SharePoint library is synced to disk by OneDrive at `config.CORPUS_DIR`
-(`OneDrive - Vaulter LLC/Vaulter LLC - shaw`). `corpus/` reads it; nothing writes to it.
+(`OneDrive - Vaulter LLC/Vaulter LLC - shaw`). `system/corpus/` reads it; nothing writes to it.
 Two properties govern every decision in that package:
 
 **Scope is the privacy boundary.** `CORPUS_DIR` is the shaw library specifically, never
@@ -76,9 +96,9 @@ path by string-joining onto `CORPUS_DIR` yourself.
 **Search matches names, not contents — and this is load-bearing, not a shortcut.** The
 library is ~493,000 files synced as OneDrive Files On-Demand *placeholders*: filenames
 are local, file bytes are not, and opening one downloads it. Grepping the corpus would
-download the entire library. So `corpus/index.py` caches names/sizes/mtimes in a SQLite
-index (`data/corpus_index.db`, built by `main.py index-corpus`) and searches that;
-`corpus/extract.py` reads content only for one file at a time, deliberately chosen.
+download the entire library. So `system/corpus/index.py` caches names/sizes/mtimes in a SQLite
+index (`system/data/corpus_index.db`, built by `system/main.py index-corpus`) and searches that;
+`system/corpus/extract.py` reads content only for one file at a time, deliberately chosen.
 If you add a retrieval feature, do not "improve" this into full-text search over the
 library without solving hydration first.
 
@@ -104,7 +124,7 @@ lazy: properties nobody asks about never get a file here, so this never becomes 
 the whole corpus. Each summary stamps the newest source file's mtime it was built from, so a
 later check can tell whether new documents have shown up since and the summary might be stale.
 
-### Proximity (`pipeline/proximity_tool.py`)
+### Proximity (`system/pipeline/proximity_tool.py`)
 One Overpass query returns every POI category at once within a radius, classified locally, and
 exports CSV + XLSX to the shared folder. It is the only remaining OpenStreetMap consumer —
 POI category search has no federal equivalent, so `geo_federal` cannot replace it.
@@ -116,15 +136,15 @@ it fails silently. **By coordinate** (`run_proximity_for_listing`) takes a rank 
 and uses the CoStar export's own coordinates; the refusal does not apply because nothing is being
 guessed. Both produce the same format, so a candidate and an owned property compare directly.
 
-### The portfolio (`portfolio.py`)
+### The portfolio (`system/portfolio.py`)
 Reads the Smartsheet Project Master export. CSV and .xlsx only — the PDF/OCR parsing path
 was dropped in the rebuild. Note only .xlsx can represent a sold deal (strikethrough via
 `cell.font.strike`); a CSV export yields every row active and an empty sold list.
 
 **Two locations, local first (2026-08-03).** `_portfolio_dirs()` checks this machine's own
-`data/project_master/` and then `config.SMARTSHEET_PORTFOLIO_DIR`
+`system/data/project_master/` and then `config.SMARTSHEET_PORTFOLIO_DIR`
 (`Vaulter AI Shared/Smartsheet Portfolio`). The shared folder exists because a fresh install
-had **no** portfolio data at all: `scripts/build_handoff.py` deliberately ships no firm data,
+had **no** portfolio data at all: `system/scripts/build_handoff.py` deliberately ships no firm data,
 so a new teammate got "Portfolio: unavailable", cities falling back to state names, and
 `run_proximity_for_property` refusing every property by name — verified live, not theorised.
 Publishing the export to the shared folder once fixes all three for everyone. Local wins so
@@ -140,7 +160,7 @@ table never writes into the folder the whole team reads.
 second exclusion was a latent bug: an export whose filename lacked "project"/"master" could
 lose the tie-break to `builtin_properties.json` and be silently ignored.
 
-### MCP server (`mcp_server.py`)
+### MCP server (`system/mcp_server.py`)
 The production entry point. `create_mcp_server()` registers all `@mcp.tool()`-decorated
 functions; `run_mcp_server()` calls `mcp.run(transport="stdio")` and nothing else — there
 are **no background threads**. The PDF watcher and APScheduler thread were removed in the
@@ -185,18 +205,41 @@ That covers whether the *data behind* a healthy connector is in good shape. Whet
 `instructions=` string tells Claude to invoke the `vaulter-connection-doctor` subagent automatically,
 for any teammate, the moment any `vaulter_ai` tool call errors or hangs — no scheduled/background
 process involved, consistent with this file's "no background threads" rule; it fires only in
-reaction to a real tool-call failure inside an active conversation. `scripts/check_mcp_health.py`
-is the deterministic check it runs first — it drives a genuine `python main.py mcp` subprocess
-over real stdio rather than importing `mcp_server.py` and calling a tool function in-process,
+reaction to a real tool-call failure inside an active conversation. `system/scripts/check_mcp_health.py`
+is the deterministic check it runs first — it drives a genuine `python system/main.py mcp` subprocess
+over real stdio rather than importing `system/mcp_server.py` and calling a tool function in-process,
 because the 2026-07-30 hang never reproduced through the in-process shortcut, only through the
 real transport.
 
-### Auto-update (`scripts/release.py`, `scripts/apply_update.py`)
-Priority 4 in `docs/MULTI_USER_TRANSITION.md`. `scripts/release.py` (run by whoever ships a
-reviewed fix, never by staff) packages the current code — excluding `confidentials/`,
-`data/`, any virtualenv, and `.git` — into a zip, and publishes it plus a version marker
-to `config.UPDATES_DIR` (shared OneDrive). Staged rollout: `python scripts/release.py` publishes
-to the `canary` channel only; `python scripts/release.py --promote` copies that same already-published
+### Auto-update (`system/scripts/release.py`, `system/scripts/apply_update.py`)
+
+**What the `system/` split means here (2026-08-03).** Both scripts resolve `PROJECT_ROOT` as
+`Path(__file__).parent.parent`, which is now `system/` — so a package contains `system/`'s
+contents and is applied back into `system/`. Symmetric, so shipping a new MCP tool or any code
+change still reaches every teammate normally. Two consequences worth knowing:
+
+* **It closed a real confidentiality hole.** `_iter_package_files()` walks the *filesystem*, not
+  `git ls-files`, and `EXCLUDED_DIR_NAMES` never listed `docs` or `.claude`. While `PROJECT_ROOT`
+  was the repo root, every update package would therefore have included the gitignored-but-
+  present `docs/PORTFOLIO_STANDARD.md`, `docs/COMPANY_PROFILE.md`, `docs/EVIDENCE_APPENDIX.md`,
+  `docs/jurisdictions/`, `docs/agents/*/memory.md` **and `.claude/hooks/leak_patterns.txt`** —
+  the real-name blocklist itself — and pushed them to every teammate's machine. Verified against
+  `git show` of the pre-move script, and verified harmless in practice: `UPDATES_DIR` was empty,
+  so no release was ever actually published. Structural fix, not a rule change — those folders
+  now simply sit outside the tree being walked. **Don't "simplify" `PROJECT_ROOT` back up a
+  level.**
+* **`quick_start/` is no longer shipped by updates**, since it lives beside `system/` rather than
+  inside it. Launcher changes therefore only reach *new* installs (via `build_handoff.py`), not
+  existing ones. Low impact — the launchers matter at install time — but it is a real gap: if a
+  launcher fix ever needs to reach installed teammates, release/apply need an explicit
+  `quick_start/` path, which is asymmetric work on both scripts and was deliberately not done
+  during the restructure.
+
+Priority 4 in `docs/MULTI_USER_TRANSITION.md`. `system/scripts/release.py` (run by whoever ships a
+reviewed fix, never by staff) packages the current code — excluding `system/confidentials/`,
+`system/data/`, any virtualenv, and `.git` — into a zip, and publishes it plus a version marker
+to `config.UPDATES_DIR` (shared OneDrive). Staged rollout: `python system/scripts/release.py` publishes
+to the `canary` channel only; `python system/scripts/release.py --promote` copies that same already-published
 version's marker to the `general` channel once it's confirmed healthy. Each instance's
 scheduler (`mcp_server.py::_check_and_stage_update`, daily at 5am) reads its own
 `config.VAULTER_UPDATE_CHANNEL` (`.env`, defaults to `general`) and, if a newer version is
@@ -206,11 +249,11 @@ to ask the user whether to apply it now.
 
 **Applying stays entirely inside the Claude Desktop conversation — no terminal, ever.**
 Once the user says yes, Claude calls the `apply_pending_update` MCP tool, which calls
-straight into `scripts/apply_update.py::apply_pending_update()`: syncs the new version's files into
-place, then re-runs `pip install -r requirements.txt` with the same interpreter already
+straight into `system/scripts/apply_update.py::apply_pending_update()`: syncs the new version's files into
+place, then re-runs `pip install -r system/requirements.txt` with the same interpreter already
 running the project (so a fix that adds/changes a dependency doesn't leave the app broken
-for want of an uninstalled package), then clears the staging area. `scripts/apply_update.py`'s own
-`python scripts/apply_update.py` CLI entry point (with a y/N prompt) still exists as a manual/
+for want of an uninstalled package), then clears the staging area. `system/scripts/apply_update.py`'s own
+`python system/scripts/apply_update.py` CLI entry point (with a y/N prompt) still exists as a manual/
 troubleshooting fallback, but is not the expected path. Either way, this first version of
 the mechanism is deliberately confirm-then-apply, not fully automatic with zero human
 involvement, given the "could break every instance at once" blast radius a bug in auto-apply
@@ -218,11 +261,11 @@ would have — the human decision just happens in chat instead of a terminal. Th
 step that can't be automated at all: fully quitting and reopening Claude Desktop afterward,
 since an MCP server can't restart its own parent application.
 
-`scripts/apply_update.py`'s `PRESERVED_DIR_NAMES` must always match `scripts/release.py`'s
+`system/scripts/apply_update.py`'s `PRESERVED_DIR_NAMES` must always match `system/scripts/release.py`'s
 `EXCLUDED_DIR_NAMES` exactly — the apply step trusts that anything under those paths was
 never in the package to begin with, so it never deletes or overwrites them.
 
-`analysis/screening/pipeline.py`'s shared `manifest.json` entries are now stamped with a
+`system/analysis/screening/pipeline.py`'s shared `manifest.json` entries are now stamped with a
 `format_version` (`MANIFEST_FORMAT_VERSION`); `_find_cached_result` ignores any entry with a
 *higher* format version than this code understands (falls through to a fresh screen) instead
 of risking a misread — this is what lets an old and new version of the code share the same
@@ -230,10 +273,10 @@ manifest.json without corrupting each other mid-rollout. Bump `MANIFEST_FORMAT_V
 for a genuinely breaking shape change, not a purely additive one (old readers already ignore
 fields they don't look for).
 
-### CoStar Listing Screener (`analysis/screening/`)
+### CoStar Listing Screener (`system/analysis/screening/`)
 
 **`fit_screen.py` is the live screener** and is what the `screen_listings` MCP tool and
-`python main.py screen` both call. It ranks a CoStar export by **fit against the existing
+`python system/main.py screen` both call. It ranks a CoStar export by **fit against the existing
 portfolio** rather than against absolute thresholds, makes **no API calls**, and
 **eliminates nothing**.
 
@@ -320,7 +363,7 @@ ranks or weights selection factors. They need a senior partner's judgment, not a
 (Real names and figures behind every genericized citation in this file live in
 `docs/EVIDENCE_APPENDIX.md`, local-only — this repo is deliberately public.)
 
-`scripts/check_screener.py` runs **68 assertions** across deformed market shapes. Run it after
+`system/scripts/check_screener.py` runs **68 assertions** across deformed market shapes. Run it after
 any change to `fit_screen.py`. Note it covers the screener only — **`geo_providers.py` has no
 automated coverage at all**, and that is where the worst measured bug of 2026-07-29 lived (see
 the proximity note below).
@@ -328,7 +371,7 @@ the proximity note below).
 #### What was removed with it
 `pipeline.py`, `phase1_rules.py`, `phase2_ranking.py`, `phase3_deep_analysis.py`,
 `phase4_verification.py`, `workbook_builder.py`, `scoring_config.py`, `market_utils.py` and the
-screening-local `config.py` are all deleted — about 2,500 lines. They were reachable from
+screening-local `system/config.py` are all deleted — about 2,500 lines. They were reachable from
 nothing once `screen_listings` moved to `fit_screen`. Phase 4's ground truth lives on in
 `geo_federal.py`, which checks flood over the parcel's **area** rather than its centre point;
 that difference caught a real wrong answer. Phase 3's qualitative pass belongs in the
@@ -353,26 +396,26 @@ TIGERweb) are cached per rounded bounding box in the shared folder; aerial photo
 opt-in via `include_imagery` because it costs a couple of minutes.
 
 A CoStar file reaches `screen_listings` one of three ways (see
-`mcp_server.py::_resolve_costar_source`): dropped into `data/drop/` (a plain folder —
+`mcp_server.py::_resolve_costar_source`): dropped into `system/data/drop/` (a plain folder —
 nothing watches it) or already filed in the document library, searched by filename and
 optionally narrowed by `property_name`; pasted directly into the Claude conversation as
 `file_content_b64`; or neither — in which case the tool explains how to supply one. The
-pre-rebuild `data/watched_folder/` and `data/processed/` trees are still searched last, so
+pre-rebuild `system/data/watched_folder/` and `system/data/processed/` trees are still searched last, so
 an export already sitting on an existing machine doesn't become invisible after an update.
 
 ## Conventions to preserve
 
-- **Secrets never touch `config.py` or git.** All credentials go through
-  `confidentials/.env` (gitignored) and are read once in `config.py` via `os.getenv`;
+- **Secrets never touch `system/config.py` or git.** All credentials go through
+  `system/confidentials/.env` (gitignored) and are read once in `system/config.py` via `os.getenv`;
   every other module imports the resulting constant from `config`.
-- **`main.py` (non-MCP mode) logs to both file and stdout; MCP mode logs to file only** —
+- **`system/main.py` (non-MCP mode) logs to both file and stdout; MCP mode logs to file only** —
   stdout is reserved for the MCP stdio transport, and any stray print/log to stdout there
   will break the connection to that instance's own Claude Desktop.
 - **There are no API keys, and that is worth defending.** Document search is local,
   ranking is arithmetic, ground truth is federal open data, proximity is OpenStreetMap, and
   the qualitative read happens in the Claude conversation that asked for it — already paid
   for. `ANTHROPIC_API_KEY` and `GOOGLE_PLACES_API_KEY` were both removed after their last
-  readers went; a blank `confidentials/.env` is a working setup. Adding a key back means
+  readers went; a blank `system/confidentials/.env` is a working setup. Adding a key back means
   adding a dependency on someone's billing, so look for the free equivalent first — every
   one of the removed keys had one.
 - **A per-call provider failure is not the same as a finding.** `geo_providers` reports
@@ -391,7 +434,7 @@ an export already sitting on an existing machine doesn't become invisible after 
   `run_mcp_server()`; a stack dump found it, reasoning never would have. (2) When a tool
   crashes, Claude Desktop tells the user *"the server isn't responding"* — so a crash and a
   hang are indistinguishable from the outside, and every tool must degrade rather than raise.
-- **`mcp_server.py` runs no background threads.** The watcher and scheduler threads (and
+- **`system/mcp_server.py` runs no background threads.** The watcher and scheduler threads (and
   the "the scheduler thread must never die" rule that existed to contain them) were removed
   in the rebuild. Don't reintroduce one — use an OS scheduled task on one designated machine.
 - **Never widen the corpus scope.** Every corpus path goes through
@@ -424,10 +467,10 @@ without trying to do every step in one undifferentiated pass. `vaulter-screening
 `vaulter-fact-checker`, `vaulter-city-researcher`, `vaulter-leak-guard`,
 `vaulter-connection-doctor`, and `vaulter-setup-tester` are all Layer 2.
 
-**Layer 3 — Tools (the execution).** Deterministic Python: `analysis/screening/fit_screen.py`,
-`pipeline/proximity_tool.py`, `corpus/`, `scripts/` (including `check_mcp_health.py`, a real-stdio-
+**Layer 3 — Tools (the execution).** Deterministic Python: `system/analysis/screening/fit_screen.py`,
+`system/pipeline/proximity_tool.py`, `system/corpus/`, `system/scripts/` (including `check_mcp_health.py`, a real-stdio-
 subprocess health check for the connector itself), and the `@mcp.tool()` functions in
-`mcp_server.py`. Consistent, testable, fast. Credentials live only in `confidentials/.env` — see
+`system/mcp_server.py`. Consistent, testable, fast. Credentials live only in `system/confidentials/.env` — see
 "Conventions to preserve" above; this is this project's version of "never store secrets anywhere
 else."
 
@@ -444,8 +487,8 @@ asking.
 | Proximity mapping | `proximity-mapping` | onedrive-auditor (output hygiene), fact-checker (memo-bound claims) | `proximity_tool.py`, `geo_providers.py`, `geo_federal.py` |
 | Connector health | `mcp-health-check` (+ auto-dispatch from the server's own MCP instructions) | connection-doctor | `check_mcp_health.py` |
 | Install & onboarding | agent-led | setup-tester | `setup_wizard.py`, `release.py`/`apply_update.py` |
-| Documents & research | `document-research` | document-reader, city-researcher, fact-checker | `corpus/` |
-| OneDrive shared folder | agent-led | onedrive-auditor | `config.py` path layer |
+| Documents & research | `document-research` | document-reader, city-researcher, fact-checker | `system/corpus/` |
+| OneDrive shared folder | agent-led | onedrive-auditor | `system/config.py` path layer |
 | Security | agent-led + hook | leak-guard | `.claude/hooks/check_no_leaks.py` (the hook is the only layer that can actually *block*) |
 
 `vaulter-fact-checker` deliberately serves three desks — it's a shared verification worker, one
@@ -459,10 +502,10 @@ did before it existed.
 
 **How to operate:**
 1. **Look for an existing skill, subagent, or tool first.** Check `.claude/skills/`,
-   `.claude/agents/`, and `analysis/`/`pipeline/`/`scripts/` before writing new logic. The QA
+   `.claude/agents/`, and `system/analysis/`/`system/pipeline/`/`system/scripts/` before writing new logic. The QA
    subagents exist because nothing did this checking before; don't rebuild what's already there.
 2. **When something fails, fix the tool, verify, then record what was learned.** This project's
-   regression net for the screener is `scripts/check_screener.py` — run it after any
+   regression net for the screener is `system/scripts/check_screener.py` — run it after any
    `fit_screen.py` change, real file or synthetic. What was learned goes in the `context.md` /
    `memory.md` pair each QA subagent keeps under `docs/agents/<name>/` — that is this project's
    "update the workflow" step, scoped per-agent rather than one shared log.
@@ -481,9 +524,9 @@ recorded in `docs/agents/screening-checker/memory.md` and this file's own histor
 **Where things go:**
 - **Deliverables** (what a person actually looks at) → `Vaulter AI Shared` (OneDrive), never
   local-only. This project's equivalent of "cloud services" as the deliverable destination.
-- **Intermediates** → `data/` subfolders — gitignored, safe to delete and rebuild, the same role
+- **Intermediates** → `system/data/` subfolders — gitignored, safe to delete and rebuild, the same role
   a generic `.tmp/` would play.
-- **Secrets** → `confidentials/.env` only, per "Secrets never touch `config.py` or git" above.
+- **Secrets** → `system/confidentials/.env` only, per "Secrets never touch `system/config.py` or git" above.
 
 ## Working guidelines
 

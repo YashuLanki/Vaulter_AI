@@ -41,7 +41,8 @@ KeyError -- checks the base export cannot answer report SKIP and do not count.
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent.parent))
+PROJECT_ROOT = Path(__file__).parent.parent
+sys.path.insert(0, str(PROJECT_ROOT))
 
 import pandas as pd  # noqa: E402
 
@@ -86,7 +87,10 @@ def main() -> int:
 
     logging.basicConfig(level=logging.ERROR)
 
-    source = Path(sys.argv[1]) if len(sys.argv) > 1 else Path("data/drop/CostarExport.xlsx")
+    # Anchored to the project root, not the working directory: this used to be a
+    # bare relative path, so it only worked when run from exactly one folder.
+    source = (Path(sys.argv[1]) if len(sys.argv) > 1
+              else PROJECT_ROOT / "data" / "drop" / "CostarExport.xlsx")
     if not source.exists():
         print(f"No export at {source}. Pass one as an argument.")
         return 2
