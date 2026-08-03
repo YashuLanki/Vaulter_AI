@@ -97,6 +97,19 @@ START_HERE_TEXT = """\
 Vaulter AI — start here
 =======================
 
+FIRST — put this folder somewhere permanent.
+
+   Before running anything, move the whole "Vaulter AI" folder out of
+   Downloads and into somewhere you'll keep it — your Documents folder
+   is ideal.
+
+   This matters: setup remembers exactly where this folder is. If you
+   move, rename or delete it afterwards, Claude stops being able to
+   reach it. (Fixable — just run the setup again from the new spot —
+   but easier to avoid.)
+
+Then:
+
 1. Double-click "Setup Vaulter AI" in this folder.
 
    A black window will open and print what it's doing. That's normal --

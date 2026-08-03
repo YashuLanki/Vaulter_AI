@@ -86,6 +86,45 @@ def _print_header(title: str) -> None:
     print("=" * 64)
 
 
+def check_install_location() -> bool:
+    """
+    Warn before this folder's location gets baked into Claude Desktop's config.
+
+    Step 5 writes this folder's ABSOLUTE path into claude_desktop_config.json, so
+    moving, renaming or deleting the folder afterwards silently breaks the
+    connection. The realistic way that happens: someone unzips into Downloads,
+    runs setup, then tidies up later. Cheaper to say so now than to debug a dead
+    connector for them a week later. A warning, never a block -- Downloads is a
+    perfectly valid place to keep it if that's a deliberate choice.
+    """
+    _print_header("0. Where this folder lives")
+    home = Path.home()
+    risky = {
+        "downloads": "your Downloads folder",
+        "temp": "a temporary folder",
+        "tmp": "a temporary folder",
+        "appdata/local/temp": "a temporary folder Windows may clear on its own",
+        "recycle": "the Recycle Bin",
+        "onedrive": "a OneDrive-synced folder (syncing can move or lock files mid-run)",
+    }
+    lowered = str(PROJECT_ROOT).replace("\\", "/").lower()
+    for needle, description in risky.items():
+        if needle in lowered:
+            print(f"  ⚠ This looks like it's running from {description}:")
+            print(f"      {PROJECT_ROOT.parent}")
+            print("    Setup records this exact location, so moving or deleting the folder")
+            print("    later will break the connection to Claude Desktop.")
+            print("    Best to close this window, move the whole 'Vaulter AI' folder somewhere")
+            print("    permanent (e.g. your Documents folder), and run setup again from there.")
+            print("    Continuing is fine if you meant to keep it here.")
+            return False
+
+    print(f"  ✓ {PROJECT_ROOT.parent}")
+    print("    Keep the folder here — setup records this location, so moving or renaming")
+    print("    it later would break the connection (re-running setup fixes that).")
+    return True
+
+
 def check_python_version() -> bool:
     _print_header("1. Python version")
     version = sys.version_info[:2]
@@ -399,9 +438,14 @@ def main() -> None:
     print("Vaulter AI — Setup Wizard")
     print(f"Project root: {PROJECT_ROOT}")
 
+    # Deliberately first, and deliberately non-blocking: it's advice about where
+    # the folder lives, and it's most useful BEFORE step 5 bakes that location
+    # into Claude Desktop's config.
     results = {
-        "Python version": check_python_version(),
+        "Folder in a permanent location": check_install_location(),
     }
+
+    results["Python version"] = check_python_version()
     if not results["Python version"]:
         _print_summary(results)
         sys.exit(1)
