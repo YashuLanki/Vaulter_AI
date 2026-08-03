@@ -87,32 +87,51 @@ def _load_config() -> tuple:
 # ── Project Master loader ──────────────────────────────────────────────────
 def _load_project_master(data_dir: Path) -> dict:
     """
-    Returns {property_name: state_abbr} from CSV/Excel/PDF in data/.
-    Priority: CSV > Excel > PDF (CSV is most reliable from Smartsheet export).
+    Returns {property_name: state_abbr} from the Project Master.
+
+    **Where** the file lives is portfolio.find_project_file()'s job, not this
+    module's -- it checks this machine's own data/project_master/ and then the
+    team's shared "Smartsheet Portfolio" folder. This used to glob data/ itself,
+    a second independent copy of that logic, and the two drifted the moment the
+    shared folder was added (2026-08-03): a fresh install with no local copy
+    could list the whole portfolio via get_portfolio_list and still fail here
+    with "no Project Master found in data/". Found in live use, not in testing.
+
+    Only the parsing below is this module's own, because it wants a cheap
+    {name: state} map rather than portfolio.py's fuller records.
     """
     properties = {}
 
-    # Project Master lives in data/project_master/
-    pm_dir = data_dir / "project_master"
-    search_dir = pm_dir if pm_dir.exists() else data_dir
+    chosen = None
+    try:
+        from portfolio import find_project_file
+        found = find_project_file()
+        if found is not None:
+            chosen = str(found)
+    except Exception as e:
+        log.warning(f"[PROXIMITY] Could not locate the Project Master via portfolio.py: {e}")
 
-    candidates = sorted(
-        [f for f in glob.glob(str(search_dir / "*"))
-         if Path(f).suffix.lower() in (".csv", ".xlsx", ".xls", ".pdf")
-         and not Path(f).name.startswith(".")],
-        key=lambda f: {".csv": 0, ".xlsx": 1, ".xls": 2, ".pdf": 3}.get(
-            Path(f).suffix.lower(), 9)
-    )
-    pm_files = [f for f in candidates if any(
-        kw in Path(f).name.lower()
-        for kw in ["project", "master", "vaulter", "portfolio"]
-    )] or candidates
+    if chosen is None:
+        # Legacy fallback: the original data/-only glob, kept so an unusual
+        # local layout that worked before still does.
+        pm_dir = data_dir / "project_master"
+        search_dir = pm_dir if pm_dir.exists() else data_dir
+        candidates = sorted(
+            [f for f in glob.glob(str(search_dir / "*"))
+             if Path(f).suffix.lower() in (".csv", ".xlsx", ".xls", ".pdf")
+             and not Path(f).name.startswith(".")],
+            key=lambda f: {".csv": 0, ".xlsx": 1, ".xls": 2, ".pdf": 3}.get(
+                Path(f).suffix.lower(), 9)
+        )
+        pm_files = [f for f in candidates if any(
+            kw in Path(f).name.lower()
+            for kw in ["project", "master", "vaulter", "portfolio"]
+        )] or candidates
+        if not pm_files:
+            log.warning("[PROXIMITY] No Project Master found locally or in the shared folder")
+            return properties
+        chosen = pm_files[0]
 
-    if not pm_files:
-        log.warning("[PROXIMITY] No Project Master file found in data/")
-        return properties
-
-    chosen = pm_files[0]
     ext = Path(chosen).suffix.lower()
     log.info(f"[PROXIMITY] Reading Project Master: {Path(chosen).name}")
 
@@ -528,8 +547,9 @@ def run_proximity_search(property_name: str,
                     + "\n".join(f"  - {n}" for n, _ in matches)
                     + "\nPlease be more specific.")
         else:
-            avail = "\n  ".join(sorted(properties)) if properties else \
-                "(no Project Master found in data/)"
+            avail = "\n  ".join(sorted(properties)) if properties else (
+                "(no Project Master found — publish the Smartsheet export to the "
+                "team's 'Vaulter AI Shared/Smartsheet Portfolio' folder)")
             return (f"'{property_name}' not found in Project Master.\n\n"
                     f"Available properties:\n  {avail}")
 
