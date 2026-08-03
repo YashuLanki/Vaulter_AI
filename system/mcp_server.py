@@ -614,7 +614,33 @@ for every listing."""
                 "Check that OneDrive is signed in and syncing."
             )
         else:
-            lines.append(f"Shared folder: connected ({SHARED_DIR})")
+            # "The folder exists" is NOT the same as "you can see the team's
+            # copy of it." Vaulter AI Shared is an ordinary folder inside one
+            # person's OneDrive, not a synced SharePoint library like the
+            # document library is -- so on a machine it hasn't been shared
+            # with, config.py's mkdir simply CREATES a private empty one and
+            # everything downstream looks connected while being completely
+            # isolated. That is exactly the silent-empty-answer failure this
+            # project distrusts everywhere else, so name it rather than let a
+            # teammate discover it by wondering where the portfolio went.
+            try:
+                has_anything = any(SHARED_DIR.rglob("*.*"))
+            except OSError:
+                has_anything = True  # unreadable is a different problem; don't guess
+            if has_anything:
+                lines.append(f"Shared folder: connected ({SHARED_DIR})")
+            else:
+                lines.append(f"Shared folder: present but EMPTY ({SHARED_DIR})")
+                issues.append(
+                    "The shared folder exists on this machine but has nothing in it. If "
+                    "teammates have data there, this is probably a private empty folder "
+                    "that got created automatically, not the team's shared one — which "
+                    "would explain missing portfolio data and no shared CoStar exports. "
+                    "Ask whoever set up Vaulter AI to share the 'Vaulter AI Shared' "
+                    "folder with you, then use OneDrive's \"Add shortcut to My files\" so "
+                    "it appears in the same place. (If you're the first person setting "
+                    "this up, an empty folder is expected and this will resolve itself.)"
+                )
 
         # ── Portfolio file ───────────────────────────────────────
         try:
