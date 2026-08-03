@@ -103,12 +103,58 @@ def _detect_onedrive_root() -> Path | None:
 ONEDRIVE_ROOT = _detect_onedrive_root()
 
 
+def _dir_has_content(d: Path) -> bool:
+    """Any file anywhere under d. Never raises -- runs at import time."""
+    try:
+        return any(d.rglob("*.*"))
+    except OSError:
+        return False
+
+
 def _detect_shared_dir() -> Path:
     override = os.getenv("VAULTER_SHARED_DIR", "").strip()
     if override:
         return Path(override)
+
     if ONEDRIVE_ROOT:
-        return ONEDRIVE_ROOT / SHARED_SUBFOLDER
+        exact = ONEDRIVE_ROOT / SHARED_SUBFOLDER
+        if _dir_has_content(exact):
+            return exact
+
+        # The exact name is missing or empty. That's the signature of a
+        # specific, likely situation, not a rare one: "Vaulter AI Shared" is an
+        # ordinary folder in one person's OneDrive, not a synced SharePoint
+        # library, so a teammate only gets it by being shared the folder and
+        # using OneDrive's "Add shortcut to My files". But THIS code's own
+        # mkdir below will already have created an empty folder under the exact
+        # name on first run -- so that shortcut collides and OneDrive lands it
+        # as "Vaulter AI Shared 1". Preferring a same-prefixed sibling that
+        # actually has content is what stops the empty decoy winning forever.
+        #
+        # Same shape as _find_corpus_subfolder's handling of "shaw"/"Shaw":
+        # match the concept, and refuse to guess when genuinely ambiguous.
+        try:
+            variants = [d for d in ONEDRIVE_ROOT.iterdir()
+                        if d.is_dir() and d != exact
+                        and d.name.startswith(SHARED_SUBFOLDER)
+                        and _dir_has_content(d)]
+        except OSError:
+            variants = []
+
+        if len(variants) == 1:
+            print(f"NOTE: using '{variants[0].name}' as the team's shared folder — "
+                  f"'{SHARED_SUBFOLDER}' exists but is empty, which usually means a "
+                  f"shared-folder shortcut was added alongside it.", file=sys.stderr)
+            return variants[0]
+        if len(variants) > 1:
+            print(f"WARNING: found {len(variants)} candidate shared folders under "
+                  f"{ONEDRIVE_ROOT} ({[v.name for v in variants]}) — can't tell which is "
+                  f"the team's. Using '{SHARED_SUBFOLDER}'; set VAULTER_SHARED_DIR in "
+                  f"confidentials/.env to pick one explicitly.", file=sys.stderr)
+
+        # Nothing better available. May be empty -- check_system_health says so
+        # in plain English rather than letting it look connected.
+        return exact
 
     # OneDrive not found on this machine -- fall back to a local folder so
     # nothing crashes, but this means screening results won't actually be
