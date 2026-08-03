@@ -23,10 +23,15 @@ English rather than assumed to have succeeded:
      doesn't exist yet. There are no API keys any more, so a blank file
      is a working setup; this step only flags it if the template itself
      is missing.
-  5. Merges a "vaulter_ai" entry into Claude Desktop's own config file --
+  5. Finds the TEAM's shared OneDrive folder -- and records where it
+     actually is if OneDrive put it somewhere unexpected. Without this a
+     teammate silently gets a private empty folder instead (see that
+     step's own docstring for why), and portfolio questions come back
+     empty with nothing explaining it.
+  6. Merges a "vaulter_ai" entry into Claude Desktop's own config file --
      without touching any other entry already in it -- or explains how
      to install Claude Desktop first if it isn't found.
-  6. Builds the document-library search index (names/paths only, no file
+  7. Builds the document-library search index (names/paths only, no file
      contents) so search works from the first conversation.
 
 Per Priority 3's design, this is now the ENTIRE setup for a non-technical
@@ -353,6 +358,110 @@ def setup_env_file() -> bool:
     return True
 
 
+def _looks_like_team_folder(d: Path) -> bool:
+    """A shared folder with real content in it, not an empty auto-created one."""
+    try:
+        return d.is_dir() and any(d.rglob("*.*"))
+    except OSError:
+        return False
+
+
+def _hunt_for_shared_folder(onedrive_root: Path, corpus_dir) -> Path | None:
+    """
+    Look for the team's shared folder wherever OneDrive actually put it.
+
+    "Add shortcut to My files" usually lands at the OneDrive root under the
+    original name -- but not always: if this installer already created an empty
+    "Vaulter AI Shared" (it does, on first run), OneDrive renames the shortcut
+    to avoid the clash, and some setups nest it a level down instead. Rather
+    than insist on one exact path, find a folder that looks like the real one
+    and record it.
+
+    Bounded to two levels deliberately, and the document library is skipped
+    outright: it holds ~493,000 OneDrive placeholder files, and walking it here
+    would take minutes and hydrate files nobody asked for.
+    """
+    name = "Vaulter AI Shared"
+    hits = []
+    try:
+        for lvl1 in onedrive_root.iterdir():
+            if not lvl1.is_dir():
+                continue
+            if corpus_dir and lvl1.resolve() == Path(corpus_dir).resolve():
+                continue  # never walk the firm's document library
+            if lvl1.name.startswith(name) and _looks_like_team_folder(lvl1):
+                hits.append(lvl1)
+                continue
+            try:
+                for lvl2 in lvl1.iterdir():
+                    if lvl2.is_dir() and lvl2.name.startswith(name) \
+                            and _looks_like_team_folder(lvl2):
+                        hits.append(lvl2)
+            except OSError:
+                continue
+    except OSError:
+        return None
+    return hits[0] if len(hits) == 1 else None
+
+
+def check_shared_folder() -> bool:
+    """
+    Make sure this machine can see the TEAM's shared folder, not a private
+    empty one.
+
+    Why this step exists: "Vaulter AI Shared" is an ordinary folder inside one
+    person's OneDrive, not a synced SharePoint library like the document
+    library. A teammate only gets it if it's shared with them AND they use
+    OneDrive's "Add shortcut to My files". Without that they silently get an
+    empty folder that this system creates itself, and everything looks
+    connected while being completely isolated -- no portfolio, no shared CoStar
+    exports. Better to say so during setup than let them find out later.
+    """
+    _print_header("5. The team's shared folder")
+    import config
+
+    if not config.SHARED_DIR_IS_FALLBACK and _looks_like_team_folder(config.SHARED_DIR):
+        print(f"  ✓ Found, with team data in it:\n      {config.SHARED_DIR}")
+        return True
+
+    found = None
+    if config.ONEDRIVE_ROOT:
+        found = _hunt_for_shared_folder(config.ONEDRIVE_ROOT, config.CORPUS_DIR)
+
+    if found:
+        # Record it so every later run goes straight there, whatever OneDrive
+        # decided to call it.
+        env_path = PROJECT_ROOT / "confidentials" / ".env"
+        try:
+            existing = env_path.read_text(encoding="utf-8") if env_path.exists() else ""
+            if "VAULTER_SHARED_DIR=" not in existing:
+                with open(env_path, "a", encoding="utf-8") as f:
+                    f.write(f"\n# Set by the setup wizard: where this machine actually\n"
+                            f"# sees the team's shared folder.\n"
+                            f"VAULTER_SHARED_DIR={found}\n")
+            print(f"  ✓ Found the team's folder at a different name/location:\n"
+                  f"      {found}\n"
+                  f"    Recorded it so Vaulter AI uses it from now on.")
+            return True
+        except OSError as e:
+            print(f"  ⚠ Found it at {found} but couldn't save that setting ({e}).")
+            return False
+
+    print("  ⚠ This machine can't see the team's shared folder yet.")
+    print("    Everything else still works — but portfolio questions will come back")
+    print("    empty, and you won't see the team's CoStar exports, until it's fixed.")
+    print()
+    print("    Whoever set up Vaulter AI needs to share the 'Vaulter AI Shared'")
+    print("    folder with you (Edit access). Then, on onedrive.com:")
+    print("      1. Open 'Shared' in the left sidebar")
+    print("      2. Find 'Vaulter AI Shared'")
+    print("      3. Click 'Add shortcut to My files'")
+    print()
+    print("    Then double-click 'Setup Vaulter AI' again — it will find it")
+    print("    automatically, wherever OneDrive puts it.")
+    return False
+
+
 def _claude_desktop_config_path() -> Path | None:
     if sys.platform == "win32":
         appdata = os.environ.get("APPDATA")
@@ -364,7 +473,7 @@ def _claude_desktop_config_path() -> Path | None:
 
 
 def setup_claude_desktop() -> bool:
-    _print_header("5. Claude Desktop connection")
+    _print_header("6. Claude Desktop connection")
     config_path = _claude_desktop_config_path()
     if config_path is None:
         print("  ✗ Could not determine where Claude Desktop's config file lives on this OS.")
@@ -403,7 +512,7 @@ def build_corpus_index() -> bool:
     per-person sign-in any more: the library reaches this machine through
     OneDrive, which the user is already signed into.
     """
-    _print_header("6. Index the document library")
+    _print_header("7. Index the document library")
 
     try:
         import config
@@ -457,6 +566,7 @@ def main() -> None:
 
     results["OCR tools found"] = check_ocr_tools()
     results["Credentials ready"] = setup_env_file()
+    results["Team shared folder"] = check_shared_folder()
     results["Claude Desktop connected"] = setup_claude_desktop()
 
     results["Document library indexed"] = build_corpus_index()
