@@ -111,10 +111,68 @@ def _dir_has_content(d: Path) -> bool:
         return False
 
 
+def _find_corpus_subfolder(onedrive_root: Path) -> Path | None:
+    """
+    CORPUS_SUBFOLDER's exact name isn't guaranteed to match across every
+    teammate's synced copy -- confirmed 2026-07-29 that colleagues see
+    different capitalization ("shaw" vs "Shaw"), and this machine's own
+    exact "Vaulter LLC - shaw" match is not something to assume elsewhere.
+    Same problem CoStar column resolution already solved: don't index one
+    exact name, match the concept, and refuse rather than guess when it's
+    genuinely ambiguous.
+    """
+    exact = onedrive_root / CORPUS_SUBFOLDER
+    if exact.is_dir():
+        return exact
+
+    try:
+        candidates = [d for d in onedrive_root.iterdir()
+                      if d.is_dir() and "shaw" in d.name.lower()]
+    except OSError:
+        return None
+
+    if len(candidates) == 1:
+        return candidates[0]
+    if len(candidates) > 1:
+        print(f"WARNING: found {len(candidates)} folders under {onedrive_root} "
+              f"matching 'shaw' ({[c.name for c in candidates]}) -- can't tell "
+              f"which is the real document library. Set VAULTER_CORPUS_DIR in "
+              f"confidentials/.env to the correct one.", file=sys.stderr)
+    return None
+
+
 def _detect_shared_dir() -> Path:
     override = os.getenv("VAULTER_SHARED_DIR", "").strip()
     if override:
         return Path(override)
+
+    # PREFERRED: inside the firm's document library.
+    #
+    # The library is a synced SharePoint library -- every teammate with access
+    # already has it on disk. Putting the shared folder there means a new
+    # teammate gets the portfolio data, the CoStar drop folder and everyone's
+    # output automatically, with no folder to share and no "Add shortcut to My
+    # files" click. That click was the last manual step in onboarding, and the
+    # one most likely to be skipped or done wrong.
+    #
+    # The carve-out that makes this safe: corpus/index.py skips this folder by
+    # name, so nothing in it is ever indexed and it can never surface in a
+    # document search. It sits inside the library on disk, but it is NOT part
+    # of the document corpus -- this system's own space, walled off.
+    #
+    # Only used if it already exists. This code never creates it inside the
+    # library: doing so would mean every install silently writing a new folder
+    # into the firm's document store. Whoever sets Vaulter AI up creates it
+    # once, deliberately.
+    if ONEDRIVE_ROOT:
+        corpus = _find_corpus_subfolder(ONEDRIVE_ROOT)
+        if corpus:
+            in_library = corpus / SHARED_SUBFOLDER
+            try:
+                if in_library.is_dir():
+                    return in_library
+            except OSError:
+                pass
 
     if ONEDRIVE_ROOT:
         exact = ONEDRIVE_ROOT / SHARED_SUBFOLDER
@@ -187,35 +245,6 @@ except OSError as e:
 # fell back to local" without reaching into this module's private
 # _LOCAL_FALLBACK_DIR/_detect_shared_dir internals.
 SHARED_DIR_IS_FALLBACK = (SHARED_DIR == _LOCAL_FALLBACK_DIR)
-
-def _find_corpus_subfolder(onedrive_root: Path) -> Path | None:
-    """
-    CORPUS_SUBFOLDER's exact name isn't guaranteed to match across every
-    teammate's synced copy -- confirmed 2026-07-29 that colleagues see
-    different capitalization ("shaw" vs "Shaw"), and this machine's own
-    exact "Vaulter LLC - shaw" match is not something to assume elsewhere.
-    Same problem CoStar column resolution already solved: don't index one
-    exact name, match the concept, and refuse rather than guess when it's
-    genuinely ambiguous.
-    """
-    exact = onedrive_root / CORPUS_SUBFOLDER
-    if exact.is_dir():
-        return exact
-
-    try:
-        candidates = [d for d in onedrive_root.iterdir()
-                      if d.is_dir() and "shaw" in d.name.lower()]
-    except OSError:
-        return None
-
-    if len(candidates) == 1:
-        return candidates[0]
-    if len(candidates) > 1:
-        print(f"WARNING: found {len(candidates)} folders under {onedrive_root} "
-              f"matching 'shaw' ({[c.name for c in candidates]}) -- can't tell "
-              f"which is the real document library. Set VAULTER_CORPUS_DIR in "
-              f"confidentials/.env to the correct one.", file=sys.stderr)
-    return None
 
 
 # The firm's document library. Read-only, and deliberately NOT mkdir'd:

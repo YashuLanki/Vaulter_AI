@@ -68,7 +68,15 @@ _PLACEHOLDER_FLAGS = (
 # Skipped wholesale when indexing. OneDrive/Office scratch, and Windows
 # shortcuts (the library has dozens of stale .lnk files pointing at a
 # decommissioned file server -- they resolve to nothing useful).
-_SKIP_DIR_NAMES  = {".git", "$RECYCLE.BIN", "System Volume Information"}
+# "Vaulter AI Shared" may live INSIDE the document library, so that a teammate
+# gets the team's data automatically instead of having to be sent a folder and
+# add a OneDrive shortcut. It sits in the library on disk but is emphatically
+# NOT part of the document corpus -- it holds this system's own output, and
+# indexing it would mean screening workbooks and proximity CSVs turning up when
+# someone searches for a closing memo. Skipping it here is the whole reason
+# that arrangement is safe; do not remove this without moving the folder out.
+_SKIP_DIR_NAMES  = {".git", "$RECYCLE.BIN", "System Volume Information",
+                    "Vaulter AI Shared"}
 _SKIP_SUFFIXES   = {".lnk", ".url", ".tmp", ".ini"}
 _SKIP_PREFIXES   = ("~$", ".~")
 
