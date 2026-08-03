@@ -21,6 +21,7 @@ along with the pipelines behind them. See docs/REBUILD_PLAN.md.
 import os
 import sys
 import logging
+import logging.handlers  # submodule: `import logging` alone does NOT expose this
 from pathlib import Path
 
 # ─── Console encoding ──────────────────────────────────────────────
@@ -48,7 +49,15 @@ from config import LOG_DIR
 # When running as MCP server, only log to file — NOT stdout.
 # stdout is used for MCP stdio transport; any extra output breaks the connection.
 _mcp_mode = len(sys.argv) > 1 and sys.argv[1] == "mcp"
-_handlers = [logging.FileHandler(LOG_DIR / "vaulter.log", encoding="utf-8")]
+
+# Rotating, not a plain FileHandler: this was appending forever with no cap,
+# and measured 5.5 MB / 46,700 lines after roughly a week on one machine.
+# Nothing ever trims it, nobody looks at it, and it would grow unbounded on
+# every teammate's install. 2 MB × 3 keeps enough history to diagnose the
+# kind of problem this log is actually used for (the 2026-07-30 connector
+# hang was found in the last few hundred lines) while staying bounded at 8 MB.
+_handlers = [logging.handlers.RotatingFileHandler(
+    LOG_DIR / "vaulter.log", maxBytes=2_000_000, backupCount=3, encoding="utf-8")]
 if not _mcp_mode:
     _handlers.append(logging.StreamHandler())
 
