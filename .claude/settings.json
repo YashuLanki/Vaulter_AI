@@ -31,7 +31,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python .claude/hooks/check_no_leaks.py",
+            "command": "python \"${CLAUDE_PROJECT_DIR}/.claude/hooks/check_no_leaks.py\"",
             "statusMessage": "Checking for confidential data before commit...",
             "timeout": 45
           }
@@ -44,7 +44,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python .claude/hooks/check_python_syntax.py"
+            "command": "python \"${CLAUDE_PROJECT_DIR}/.claude/hooks/check_python_syntax.py\""
           }
         ]
       }

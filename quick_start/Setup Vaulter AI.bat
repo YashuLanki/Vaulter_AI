@@ -63,6 +63,21 @@ pause
 exit /b 1
 
 :run
-"%PYCMD%" "..\scripts\setup_wizard.py"
+REM Works in both layouts without needing two versions of this file: the
+REM development checkout (scripts\ sits beside quick_start\) and the packaged
+REM handoff folder built by scripts\build_handoff.py (everything tucked into
+REM system\). Checked in that order; if neither exists the folder is incomplete.
+set WIZARD=..\scripts\setup_wizard.py
+if not exist "%WIZARD%" set WIZARD=..\system\scripts\setup_wizard.py
+if not exist "%WIZARD%" (
+    echo.
+    echo This folder looks incomplete -- the setup files couldn't be found.
+    echo Please ask whoever sent it to you for a fresh copy.
+    echo.
+    pause
+    exit /b 1
+)
+
+"%PYCMD%" "%WIZARD%"
 echo.
 pause

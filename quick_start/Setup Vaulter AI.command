@@ -13,6 +13,21 @@ if ! command -v python3 >/dev/null 2>&1; then
     exit 1
 fi
 
-python3 ../scripts/setup_wizard.py
+# Works in both layouts without needing two versions of this file: the
+# development checkout (scripts/ sits beside quick_start/) and the packaged
+# handoff folder built by scripts/build_handoff.py (everything tucked into
+# system/). Checked in that order; if neither exists the folder is incomplete.
+WIZARD="../scripts/setup_wizard.py"
+[ -f "$WIZARD" ] || WIZARD="../system/scripts/setup_wizard.py"
+if [ ! -f "$WIZARD" ]; then
+    echo
+    echo "This folder looks incomplete -- the setup files couldn't be found."
+    echo "Please ask whoever sent it to you for a fresh copy."
+    echo
+    read -p "Press Enter to close this window..."
+    exit 1
+fi
+
+python3 "$WIZARD"
 echo
 read -p "Press Enter to close this window..."

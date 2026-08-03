@@ -42,6 +42,11 @@ data/project_master/*
 # one didn't have its own explicit line, so it wasn't actually covered.
 data/shared_fallback_not_synced/*
 
+# Built by scripts/build_handoff.py -- the send-ready copy of the project
+# for a new teammate, plus its zip. A build artifact, rebuilt on demand;
+# never commit it (it also contains a copy of every source file).
+data/handoff/*
+
 # ── Confidential business documents (repo is deliberately PUBLIC) ──
 # This repo is public on purpose -- it's a portfolio piece. These docs
 # hold the firm's real deal names, prices, addresses, and counterparty
