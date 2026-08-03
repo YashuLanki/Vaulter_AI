@@ -81,6 +81,29 @@ confused: `SHARED_DIR` (`Vaulter AI Shared`) is this system's own output, writte
 syncing the library, which `check_system_health` needs to report rather than paper over
 with an empty folder.
 
+**Shape of `SHARED_DIR` (restructured 2026-08-03).** It had grown to eight sibling folders
+mixing three unrelated things — what you drop in, what you go read, and machinery nobody
+should open. Now:
+
+```
+Vaulter AI Shared/
+  CoStar Drop/           inputs — deliberately at the top level so they stay
+  Smartsheet Portfolio/    easy to find and drop files into
+  output/                what people actually read
+    proximity/  screening/  property_summaries/
+  system/                machinery; nobody should need to open this
+    geo_cache/  org_settings/  updates/
+```
+
+Inputs stay at the top on purpose: burying the drop folder is precisely what drove
+teammates to paste files into the conversation instead, at ~43,000 tokens a file. The move
+also pulled `geo_cache` into `config.GEO_CACHE_DIR` — it had been hardcoded as
+`Path(SHARED_DIR) / "geo_cache"` in three separate modules, against this file's own "nothing
+else hardcodes a path" rule, which is why it was the one folder that couldn't be relocated
+without hunting down every copy. Two known gaps here, both hygiene rather than correctness:
+nothing ever cleans up `CoStar Drop/`, and `_resolve_costar_source` returns the first
+filename match without warning, so a stale local file silently shadows a newer shared one.
+
 ### Data access: the firm's document library (`system/corpus/`)
 The firm's SharePoint library is synced to disk by OneDrive at `config.CORPUS_DIR`
 (`OneDrive - Vaulter LLC/Vaulter LLC - shaw`). `system/corpus/` reads it; nothing writes to it.

@@ -226,11 +226,40 @@ LEGACY_PROCESSED_DIR = DATA_DIR / "processed"
 # meeting-transcript feature that was never built and has since been retired,
 # and because it lived under SHARED_DIR it created an empty "meetings" folder
 # in the team's OneDrive on every import, on every machine.
-PROXIMITY_OUTPUT_DIR  = SHARED_DIR / "proximity_output"
-SCREENING_OUTPUT_DIR  = SHARED_DIR / "screening_output"
+# ── Shape of the shared folder (2026-08-03) ───────────────────────────────
+# It had grown to eight sibling folders at the top level, mixing three very
+# different things: what a person DROPS IN, what they should GO LOOK AT, and
+# machinery nobody should ever need to open. Now grouped so the top level
+# answers "where do I put things / where do I find results" at a glance:
+#
+#   Vaulter AI Shared/
+#     CoStar Drop/           <- inputs, deliberately kept at the top level so
+#     Smartsheet Portfolio/     they stay easy to find and drop files into
+#     output/                <- what people actually read
+#       proximity/  screening/  property_summaries/
+#     system/                <- machinery; nobody should need to open this
+#       geo_cache/  org_settings/  updates/
+#
+# Inputs stay at the top on purpose: burying the drop folder is exactly the
+# problem that made teammates paste files into the conversation instead (see
+# COSTAR_DROP_DIR below for what that cost).
+SHARED_OUTPUT_DIR = SHARED_DIR / "output"
+SHARED_SYSTEM_DIR = SHARED_DIR / "system"
+
+PROXIMITY_OUTPUT_DIR  = SHARED_OUTPUT_DIR / "proximity"
+SCREENING_OUTPUT_DIR  = SHARED_OUTPUT_DIR / "screening"
 
 PROXIMITY_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 SCREENING_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+
+# Basemap tiles and Overpass/federal lookups, cached per rounded bounding box
+# so two properties in the same area don't re-fetch the same data. Was
+# hardcoded as `Path(SHARED_DIR) / "geo_cache"` in three separate modules,
+# against this file's own "nothing else hardcodes a path" rule -- which is
+# also why it was the one shared folder that couldn't be moved without
+# hunting down every copy.
+GEO_CACHE_DIR = SHARED_SYSTEM_DIR / "geo_cache"
+GEO_CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
 # Per-property research summaries -- built 2026-07-30 as a byproduct of
 # vaulter-document-reader's normal work, never a separate ingestion pass.
@@ -239,7 +268,7 @@ SCREENING_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 # user) reads a few hundred tokens instead of re-reading the same documents.
 # Deliberately lazy and demand-driven -- properties nobody asks about never
 # get a file here, so this never becomes a second full-corpus copy.
-PROPERTY_SUMMARIES_DIR = SHARED_DIR / "property_summaries"
+PROPERTY_SUMMARIES_DIR = SHARED_OUTPUT_DIR / "property_summaries"
 PROPERTY_SUMMARIES_DIR.mkdir(parents=True, exist_ok=True)
 
 # The firm's own portfolio data: the Smartsheet Project Master export, the
@@ -286,7 +315,7 @@ COSTAR_DROP_DIR.mkdir(parents=True, exist_ok=True)
 # everything else shared across the team, not a new channel.
 # PENDING_UPDATE_DIR is LOCAL (per machine) -- where an update gets
 # staged once downloaded, before a human decides to actually apply it.
-UPDATES_DIR        = SHARED_DIR / "updates"
+UPDATES_DIR        = SHARED_SYSTEM_DIR / "updates"
 PENDING_UPDATE_DIR = DATA_DIR / "pending_update"
 
 UPDATES_DIR.mkdir(parents=True, exist_ok=True)
@@ -308,7 +337,7 @@ LOG_DIR.mkdir(parents=True, exist_ok=True)
 # PENDING_SETTINGS_DIR is LOCAL -- staged here once downloaded, and
 # only written into confidentials/.env after a human says yes (see
 # apply_pending_settings in mcp_server.py).
-ORG_SETTINGS_DIR     = SHARED_DIR / "org_settings"
+ORG_SETTINGS_DIR     = SHARED_SYSTEM_DIR / "org_settings"
 PENDING_SETTINGS_DIR = DATA_DIR / "pending_settings"
 
 ORG_SETTINGS_DIR.mkdir(parents=True, exist_ok=True)

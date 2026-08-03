@@ -263,8 +263,8 @@ def elevation_profile(lat: float, lng: float) -> dict:
 CACHE_VERSION = 2
 
 def _cache_path() -> Path:
-    from config import SHARED_DIR
-    p = Path(SHARED_DIR) / "geo_cache"
+    from config import SHARED_DIR, GEO_CACHE_DIR
+    p = GEO_CACHE_DIR
     p.mkdir(parents=True, exist_ok=True)
     return p / "federal_geo_cache.json"
 

@@ -47,16 +47,16 @@ For every subfolder, group files by their name with any trailing timestamp strip
 ## Step 2 — don't flag a folder that's supposed to grow
 
 Some folders are legitimately caches or version history, not accumulation bugs:
-- `geo_cache/` — a growing cache of basemap lookups keyed by rounded bounding box. More distinct
+- `system/geo_cache/` — a growing cache of basemap lookups keyed by rounded bounding box. More distinct
   areas screened should mean more entries. Only flag this one if you find genuinely
   duplicate-content entries for the *same* bounding box, or entries with no plausible source
   (orphaned).
-- `updates/` — holds published release packages plus the canary/general version markers. A small
+- `system/updates/` — holds published release packages plus the canary/general version markers. A small
   number of recent zips is expected. Flag it if OLD versions' zips are still present long after a
   newer version superseded them (check `system/scripts/release.py`'s `_build_package()` — it has no
   cleanup step for a superseded version's zip, so this is a real, plausible finding here even if
   the folder happens to be empty or small today).
-- `org_settings/` — check the same way, but it may legitimately be near-empty if few org-wide
+- `system/org_settings/` — check the same way, but it may legitimately be near-empty if few org-wide
   settings have ever been pushed.
 
 If you're not sure whether a folder's growth is a cache or a bug, say so as an open question

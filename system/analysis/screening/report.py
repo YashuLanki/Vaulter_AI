@@ -61,8 +61,8 @@ def _round_bbox(bbox, step=0.5):
 
 
 def _basemap_cache_path(bbox) -> Path:
-    from config import SHARED_DIR
-    d = Path(SHARED_DIR) / "geo_cache"
+    from config import SHARED_DIR, GEO_CACHE_DIR
+    d = GEO_CACHE_DIR
     d.mkdir(parents=True, exist_ok=True)
     tag = "_".join(f"{v:+.1f}" for v in bbox)
     return d / f"basemap_v{_BASEMAP_CACHE_VERSION}_{tag}.json"

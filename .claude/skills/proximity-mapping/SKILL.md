@@ -41,7 +41,7 @@ right things, and dispatching workers when a result matters enough to verify.
 ## When to dispatch workers
 
 - **After a large batch** (a full shortlist, or anything that wrote 10+ files) →
-  `vaulter-onedrive-auditor` to audit `proximity_output/` for accumulation regressions.
+  `vaulter-onedrive-auditor` to audit `output/proximity/` for accumulation regressions.
 - **Before a proximity finding goes into an investment memo** (e.g. "no rail within 5 miles",
   "nearest school is X") → `vaulter-fact-checker` on that specific claim. One agent per claim,
   parallel is fine.

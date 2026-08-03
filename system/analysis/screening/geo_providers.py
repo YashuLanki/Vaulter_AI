@@ -194,8 +194,8 @@ def _overpass_cache_path(query: str) -> Path | None:
     config is imported lazily: it prints to stdout on some failure paths, and
     stdout is the MCP transport."""
     try:
-        from config import SHARED_DIR
-        d = Path(SHARED_DIR) / "geo_cache"
+        from config import SHARED_DIR, GEO_CACHE_DIR
+        d = GEO_CACHE_DIR
         d.mkdir(parents=True, exist_ok=True)
     except Exception as e:                       # no shared folder, read-only, ...
         log.debug(f"Overpass cache unavailable: {e}")
