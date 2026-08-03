@@ -341,7 +341,15 @@ if sys.platform == "win32":
     ]
     TESSERACT_PATH = _find_executable(["tesseract.exe", "tesseract"], _tesseract_dirs) or "tesseract"
 
+    # setup_wizard.py's auto-installer (2026-08-03) extracts the official
+    # release zip to AppData\Local\Programs\poppler\poppler-<version>\Library\bin
+    # -- verified against the real release's own internal folder layout, not
+    # assumed. Checked first since it's where a fresh auto-install lands;
+    # Packages\poppler* is kept for any machine set up before that existed.
     _poppler_dirs = []
+    _programs_poppler_dir = Path(r"C:\Users") / _username / r"AppData\Local\Programs\poppler"
+    if _programs_poppler_dir.exists():
+        _poppler_dirs += [d / "Library" / "bin" for d in _programs_poppler_dir.glob("poppler*") if d.is_dir()]
     _packages_dir = Path(r"C:\Users") / _username / "Packages"
     if _packages_dir.exists():
         _poppler_dirs += [d / "Library" / "bin" for d in _packages_dir.glob("poppler*") if d.is_dir()]

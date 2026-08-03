@@ -14,9 +14,11 @@ What it does, in order — each step is checked and reported in plain
 English rather than assumed to have succeeded:
   1. Checks the Python version is one dependencies are known to work on.
   2. Installs Python dependencies from requirements.txt.
-  3. Reports whether Tesseract/Poppler (OCR tools) were found, and how to
-     install them (non-admin, per-user methods only — see config.py's own
-     auto-detection, which this step just reports on).
+  3. Checks for Tesseract/Poppler (OCR tools) and, on Windows, installs
+     whichever is missing automatically (official sources, per-user, no
+     admin rights) -- falling back to manual instructions only if that
+     download/install doesn't succeed. See config.py's own auto-detection
+     for exactly which folders are checked afterward.
   4. Creates confidentials/.env from confidentials/.env.template if it
      doesn't exist yet. There are no API keys any more, so a blank file
      is a working setup; this step only flags it if the template itself
@@ -124,36 +126,142 @@ def install_dependencies() -> bool:
     return True
 
 
+# Pinned to specific verified releases rather than a "latest" redirect, so this
+# keeps working even if a future release changes its asset naming. Both were
+# checked live on 2026-08-03: the .exe resolves (HTTP 200, official
+# tesseract-ocr GitHub releases), and the zip's own internal layout was
+# inspected directly -- it extracts to poppler-<version>/Library/bin, which is
+# exactly the pattern config.py's POPPLER_PATH detection already knows to look
+# for once extracted under AppData\Local\Programs\poppler.
+_TESSERACT_INSTALLER_URL = (
+    "https://github.com/tesseract-ocr/tesseract/releases/download/5.5.3/"
+    "tesseract-ocr-w64-setup-5.5.3.20260724.exe"
+)
+_POPPLER_ZIP_URL = (
+    "https://github.com/oschwartz10612/poppler-windows/releases/download/"
+    "v26.02.0-0/Release-26.02.0-0.zip"
+)
+
+
+def _download_with_progress(url: str, dest: Path) -> bool:
+    """Stdlib-only download (no dependency on requests being installed yet)."""
+    import urllib.request
+
+    try:
+        with urllib.request.urlopen(url, timeout=30) as resp, open(dest, "wb") as f:
+            shutil.copyfileobj(resp, f)
+        return True
+    except Exception as e:
+        print(f"      Download failed: {e}")
+        return False
+
+
+def _install_tesseract_windows() -> bool:
+    """
+    Downloads the official Windows installer and runs it silently, per-user,
+    into the exact folder config.py's TESSERACT_PATH detection already
+    searches -- so no config change was needed to make this discoverable.
+    """
+    username = os.environ.get("USERNAME", "YourName")
+    install_dir = Path(r"C:\Users") / username / r"AppData\Local\Programs\Tesseract-OCR"
+    installer_path = Path(os.environ.get("TEMP", ".")) / "vaulter_tesseract_installer.exe"
+
+    print("  Downloading Tesseract OCR from the official tesseract-ocr GitHub releases...")
+    if not _download_with_progress(_TESSERACT_INSTALLER_URL, installer_path):
+        return False
+
+    print("  Installing (per-user, no admin rights)...")
+    try:
+        # NSIS installer convention: /S = silent, /D=<dir> = install location.
+        # /D must be the last argument and unquoted -- adding quotes ourselves
+        # here would double-quote it once subprocess passes it through.
+        subprocess.run([str(installer_path), "/S", f"/D={install_dir}"], timeout=180)
+    except Exception as e:
+        print(f"      Installer didn't run cleanly: {e}")
+        return False
+    finally:
+        installer_path.unlink(missing_ok=True)
+
+    return (install_dir / "tesseract.exe").exists()
+
+
+def _install_poppler_windows() -> bool:
+    """
+    Downloads the official release zip and extracts it -- Poppler for Windows
+    has no installer, just a zip -- into AppData\\Local\\Programs\\poppler,
+    which config.py's POPPLER_PATH detection now also searches.
+    """
+    import zipfile
+
+    username = os.environ.get("USERNAME", "YourName")
+    extract_root = Path(r"C:\Users") / username / r"AppData\Local\Programs\poppler"
+    zip_path = Path(os.environ.get("TEMP", ".")) / "vaulter_poppler.zip"
+
+    print("  Downloading Poppler from the official poppler-windows GitHub releases...")
+    if not _download_with_progress(_POPPLER_ZIP_URL, zip_path):
+        return False
+
+    print("  Extracting (per-user, no admin rights)...")
+    try:
+        extract_root.mkdir(parents=True, exist_ok=True)
+        with zipfile.ZipFile(zip_path) as zf:
+            zf.extractall(extract_root)
+    except Exception as e:
+        print(f"      Couldn't extract the download: {e}")
+        return False
+    finally:
+        zip_path.unlink(missing_ok=True)
+
+    return any((d / "Library" / "bin" / "pdftoppm.exe").exists()
+               for d in extract_root.glob("poppler*") if d.is_dir())
+
+
 def check_ocr_tools() -> bool:
     _print_header("3. OCR tools (Tesseract + Poppler)")
     # Imported here, not at module load time -- config.py's own imports
     # (dotenv, etc.) only need to succeed AFTER step 2 has installed them.
     import config
+    import importlib
 
     ok = True
     if shutil.which("tesseract") or (config.TESSERACT_PATH and config.TESSERACT_PATH != "tesseract"):
         print(f"  ✓ Tesseract OCR found: {config.TESSERACT_PATH}")
+    elif sys.platform == "win32":
+        print("  ⚠ Tesseract OCR was not found. Installing it now (official installer, "
+              "per-user, no admin rights)...")
+        if _install_tesseract_windows():
+            importlib.reload(config)
+            print(f"  ✓ Tesseract OCR installed: {config.TESSERACT_PATH}")
+        else:
+            ok = False
+            print("  ⚠ Couldn't install Tesseract automatically. You can install it yourself "
+                  "instead -- no admin rights needed:")
+            print("      https://github.com/UB-Mannheim/tesseract/wiki (per-user install option)")
     else:
         ok = False
         print("  ⚠ Tesseract OCR was not found. Scanned/image-only PDF pages won't be "
               "readable until it's installed. No admin rights needed:")
-        if sys.platform == "win32":
-            print("      Windows: https://github.com/UB-Mannheim/tesseract/wiki "
-                  "(use the per-user install option)")
-        else:
-            print("      Mac: brew install tesseract")
+        print("      Mac: brew install tesseract")
 
     if config.POPPLER_PATH:
         print(f"  ✓ Poppler found: {config.POPPLER_PATH}")
+    elif sys.platform == "win32":
+        print("  ⚠ Poppler was not found. Installing it now (official release, per-user, "
+              "no admin rights)...")
+        if _install_poppler_windows():
+            importlib.reload(config)
+            print(f"  ✓ Poppler installed: {config.POPPLER_PATH}")
+        else:
+            ok = False
+            print("  ⚠ Couldn't install Poppler automatically. You can install it yourself "
+                  "instead -- no admin rights needed:")
+            print("      https://github.com/oschwartz10612/poppler-windows/releases "
+                  "(unzip it into %LOCALAPPDATA%\\Programs\\poppler)")
     else:
         ok = False
         print("  ⚠ Poppler was not found. Scanned/image-only PDF pages won't be readable "
               "until it's installed. No admin rights needed:")
-        if sys.platform == "win32":
-            print("      Windows: https://github.com/oschwartz10612/poppler-windows/releases "
-                  "(just unzip it anywhere -- nothing to install or elevate)")
-        else:
-            print("      Mac: brew install poppler")
+        print("      Mac: brew install poppler")
 
     if not ok:
         print("  (Digital-text PDFs are completely unaffected either way -- only scanned/"
