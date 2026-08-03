@@ -232,6 +232,16 @@ SCREENING_OUTPUT_DIR  = SHARED_DIR / "screening_output"
 PROXIMITY_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 SCREENING_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
+# Per-property research summaries -- built 2026-07-30 as a byproduct of
+# vaulter-document-reader's normal work, never a separate ingestion pass.
+# The first real question about a property costs a full document read; that
+# agent writes what it found here, cited, so every later question (from any
+# user) reads a few hundred tokens instead of re-reading the same documents.
+# Deliberately lazy and demand-driven -- properties nobody asks about never
+# get a file here, so this never becomes a second full-corpus copy.
+PROPERTY_SUMMARIES_DIR = SHARED_DIR / "property_summaries"
+PROPERTY_SUMMARIES_DIR.mkdir(parents=True, exist_ok=True)
+
 # Priority 4 (docs/MULTI_USER_TRANSITION.md) — auto-update. UPDATES_DIR is
 # where release.py (run by whoever ships a reviewed fix) publishes a new
 # version's code package + version marker; every instance's scheduler

@@ -16,7 +16,11 @@ exists to prevent.
 - **Extract findings from the firm's own documents** (due diligence PDFs, memos, ALTA surveys,
   site plans, closed-deal files, scanned/visual/very long documents) → `vaulter-document-reader`.
   One agent per property or document set. It cites file+page on every finding and never asserts
-  a dimension read off a drawing.
+  a dimension read off a drawing. It checks `config.PROPERTY_SUMMARIES_DIR` for an existing
+  shared summary before reading anything, and writes/updates one after a real read — built
+  2026-07-30 so the first question about a property is the only one that ever pays the full
+  reading cost; every later question, from any user, reads the summary instead. You don't need
+  to check for that summary yourself before delegating — it's the agent's own first step.
 - **Build or refresh a jurisdiction dossier** (a city/county's CIP, comprehensive plan, utility
   service, school district, development-trajectory signals) → `vaulter-city-researcher`.
   One agent per jurisdiction; a batch of jurisdictions runs in parallel safely.

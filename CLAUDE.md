@@ -91,6 +91,19 @@ whole-phrase hit beats both. The phrase bonus is not cosmetic — without it, se
 property named `<Name> 10` ranked the adjacent `<Name> 80` parcel's files first, because `10`
 matches inside dates like `20260107`.
 
+**Per-property summaries (`config.PROPERTY_SUMMARIES_DIR`).** Built 2026-07-30 to solve a real
+cost, not a hypothetical one: reading a property's documents into a conversation costs real
+tokens every time, for every user, regardless of whether the file was already downloaded —
+downloading is already free on repeat (OneDrive keeps the hydrated copy), so caching *files*
+saves nothing. What actually repeats is re-explaining the same document to Claude. So
+`vaulter-document-reader` checks `Vaulter AI Shared/property_summaries/<property-slug>.md` before
+reading anything, and writes/updates it after a real read — one property, one team-shared,
+cited summary. The first real question about a property pays the full cost once; every later
+question, from any user, reads a few hundred tokens instead of tens of thousands. Deliberately
+lazy: properties nobody asks about never get a file here, so this never becomes a second copy of
+the whole corpus. Each summary stamps the newest source file's mtime it was built from, so a
+later check can tell whether new documents have shown up since and the summary might be stale.
+
 ### Proximity (`pipeline/proximity_tool.py`)
 One Overpass query returns every POI category at once within a radius, classified locally, and
 exports CSV + XLSX to the shared folder. It is the only remaining OpenStreetMap consumer —
