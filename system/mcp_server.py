@@ -430,7 +430,11 @@ def _summary_staleness(property_name: str, summary_text: str) -> str:
         f"it were current.\n"
         f"Caveat worth stating if you rely on this: the date reflects when a file last "
         f"changed on disk, which OneDrive also updates on sync -- so this can overstate how "
-        f"much is genuinely new. Judge from the filenames, not the count alone. ***\n"
+        f"much is genuinely new. Judge from the filenames, not the count alone.\n"
+        f"WANT TO FIX IT FOR EVERYONE? After answering, offer to bring the summary up to "
+        f"date: read the most relevant newer files with read_document, then save what "
+        f"changed with update_property_summary. Whoever accepts pays a few minutes of "
+        f"reading once, and every teammate after them gets the current answer. ***\n"
     )
 
 
@@ -1201,6 +1205,102 @@ for every listing."""
             )
         except Exception as e:
             return f"Could not read the property summary: {e}"
+
+    @mcp.tool()
+    def update_property_summary(property_name: str, update_text: str,
+                                sources_as_of: str = "") -> str:
+        """
+        Add a dated update to a property's shared summary, after reading
+        newer documents that appeared since it was written.
+
+        Use this to close the loop when get_property_summary warned the
+        summary was possibly out of date and you then read the newer files:
+        write what CHANGED as a short, cited update. Whoever does this pays
+        the reading cost once; every teammate after them gets the current
+        picture.
+
+        Rules for the update text, matching how the summaries are written:
+        - Only what changed or is new -- do not restate the original.
+        - Cite every finding: "-- <filename>, p.<page>". No citation, no claim.
+        - If a newer document supersedes something (a plat recorded, a sale
+          closed), say so explicitly rather than leaving the two to conflict.
+        - Say what you did NOT read, if you skipped some of the newer files.
+
+        This APPENDS a dated section to the end of the file. It never edits
+        or deletes the original text, so a bad update can't destroy the
+        summary -- the worst case is an extra section a human can review.
+
+        Args:
+            property_name: Property name, as in the Project Master
+            update_text:   The cited findings, markdown, no heading needed
+            sources_as_of: YYYY-MM-DD of the newest document you read. Sets
+                           the summary's freshness stamp so the out-of-date
+                           warning stops firing for files you already covered.
+        """
+        import re
+        import datetime as _dt
+        try:
+            from config import PROPERTY_SUMMARIES_DIR
+
+            if not property_name.strip():
+                return "Which property? Please give me a property name."
+            if not update_text.strip():
+                return "The update text is empty -- nothing was saved."
+
+            def _slug(name: str) -> str:
+                return re.sub(r"[^a-z0-9]+", "-", name.lower().strip()).strip("-")
+
+            summaries_dir = Path(PROPERTY_SUMMARIES_DIR)
+            wanted = _slug(property_name)
+            available = sorted(summaries_dir.glob("*.md")) if summaries_dir.is_dir() else []
+            match = next((p for p in available if p.stem == wanted), None)
+            if match is None:
+                candidates = [p for p in available if wanted in p.stem or p.stem in wanted]
+                if len(candidates) == 1:
+                    match = candidates[0]
+                elif len(candidates) > 1:
+                    return (f"Several summaries could match '{property_name}': "
+                            f"{', '.join(p.stem for p in candidates)}. Use the exact name.")
+            if match is None:
+                return (f"No summary exists for '{property_name}' yet, so there is nothing "
+                        f"to update. A first summary needs the full treatment -- reading the "
+                        f"key documents, not just the newest ones -- so say so to the user "
+                        f"rather than writing a partial one here.")
+
+            stamp_new = ""
+            if sources_as_of.strip():
+                try:
+                    _dt.date.fromisoformat(sources_as_of.strip())
+                    stamp_new = sources_as_of.strip()
+                except ValueError:
+                    return (f"'{sources_as_of}' isn't a date in YYYY-MM-DD form -- nothing "
+                            f"was saved. Pass the newest document date you actually read.")
+
+            text = match.read_text(encoding="utf-8", errors="replace")
+            today = _dt.date.today().isoformat()
+            section = (f"\n\n## Update {today} — from documents filed since the last read\n\n"
+                       f"{update_text.strip()}\n")
+
+            # Append first, bump the freshness stamp second -- the stamp is
+            # what silences the out-of-date warning, so it must only ever
+            # advance once the update is actually in the file.
+            new_text = text.rstrip("\n") + "\n" + section
+            if stamp_new:
+                new_text = re.sub(
+                    r"(Source files as of:\*{0,2}\s*)\d{4}-\d{2}-\d{2}",
+                    rf"\g<1>{stamp_new}",
+                    new_text, count=1,
+                )
+            match.write_text(new_text, encoding="utf-8")
+
+            log.info(f"[MCP] Summary updated: {match.name} "
+                     f"(+{len(update_text):,} chars, sources_as_of={stamp_new or 'unchanged'})")
+            return (f"Saved to {match.name} as a dated update section"
+                    + (f", and its freshness stamp now reads {stamp_new}" if stamp_new else "")
+                    + ". The whole team sees this the next time anyone asks about "
+                      "this property.")
+        except Exception as e:
+            return f"Could not update the summary: {e}"
 
     @mcp.tool()
     def get_portfolio_list(group_by: str = "state") -> str:
