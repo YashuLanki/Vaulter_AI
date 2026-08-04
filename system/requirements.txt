@@ -27,7 +27,11 @@ python-dotenv       # Load credentials from confidentials/.env
 geopy               # Geodesic distance
 
 # ── MCP server ─────────────────────────────────────────────────────
-mcp[cli]            # MCP server framework (local stdio, launched by Claude Desktop)
+mcp[cli]>=1.9,<2    # MCP server framework (local stdio, launched by Claude Desktop)
+                    # Pinned below 2.0: the 2.0.0 release (2026-08) removed
+                    # mcp.server.fastmcp, which mcp_server.py imports. A fresh
+                    # install picked up 2.0.0 unpinned and the connector failed
+                    # to start (found 2026-08-04 on a real bare-machine reinstall).
 
 # ── External Tools (install separately, not via pip) ───────────────
 # Tesseract OCR  : https://github.com/UB-Mannheim/tesseract/wiki
