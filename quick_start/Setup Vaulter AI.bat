@@ -44,15 +44,12 @@ if %errorlevel% GEQ 8 (
     pause
     exit /b 1
 )
-echo   Done. Opening the new folder...
-explorer.exe "%TARGET%"
+echo   Done. Continuing setup from the new location -- no need to click
+echo   anything else. (The old copy in OneDrive can be deleted once this
+echo   finishes.)
 echo.
-echo   This window can be closed now. In the folder that just opened, go
-echo   into "quick_start" and double-click "Setup Vaulter AI" again to
-echo   continue. Once that's working, this old copy can be deleted.
-echo.
-pause
-exit /b 0
+cd /d "%TARGET%\quick_start"
+goto :python_check
 
 :python_check
 where python >nul 2>nul
