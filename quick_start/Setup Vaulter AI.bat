@@ -3,6 +3,58 @@ REM Double-click this file to run the Vaulter AI setup wizard.
 REM (No terminal or typed commands needed -- this window just shows its progress.)
 cd /d "%~dp0"
 
+REM ---- Move out of OneDrive before anything else runs -------------------
+REM OneDrive can lock or partially-sync files this system writes to
+REM constantly (the search index, screening output), and asking a
+REM non-technical user to relocate the folder by hand -- editing the path,
+REM deleting folder name segments -- is exactly the friction this removes.
+for %%I in ("%~dp0..") do set "VAULTER_ROOT=%%~fI"
+echo %VAULTER_ROOT%| findstr /I "OneDrive" >nul
+if not errorlevel 1 goto :relocate
+goto :python_check
+
+:relocate
+set "TARGET=%USERPROFILE%\Vaulter AI"
+echo.
+echo ============================================================
+echo   Moving Vaulter AI to a local folder
+echo ============================================================
+echo.
+echo   This folder is inside OneDrive, which can interfere with files
+echo   Vaulter AI writes to constantly -- its search index and
+echo   screening results. Copying it now to a local folder that
+echo   OneDrive won't touch:
+echo.
+echo     %TARGET%
+echo.
+if exist "%TARGET%" (
+    echo   A folder already exists there, so this can't be done automatically.
+    echo   Please move or rename that folder, then double-click Setup again.
+    echo.
+    pause
+    exit /b 1
+)
+echo   This takes a few seconds. Please wait...
+robocopy "%VAULTER_ROOT%" "%TARGET%" /E /NFL /NDL /NJH /NJS /NP >nul
+if %errorlevel% GEQ 8 (
+    echo.
+    echo   The copy didn't complete. Please copy this "Vaulter AI" folder to
+    echo   %TARGET% yourself, then double-click Setup from there.
+    echo.
+    pause
+    exit /b 1
+)
+echo   Done. Opening the new folder...
+explorer.exe "%TARGET%"
+echo.
+echo   This window can be closed now. In the folder that just opened, go
+echo   into "quick_start" and double-click "Setup Vaulter AI" again to
+echo   continue. Once that's working, this old copy can be deleted.
+echo.
+pause
+exit /b 0
+
+:python_check
 where python >nul 2>nul
 if %errorlevel%==0 (
     set PYCMD=python
