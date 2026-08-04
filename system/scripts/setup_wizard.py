@@ -659,22 +659,30 @@ def _schedule_monthly_refresh() -> None:
     if not runner.exists():
         runner = Path(sys.executable)
 
+    # Values reach PowerShell via environment variables, never spliced into
+    # the command text. Measured 2026-08-04 on a real end-to-end install: the
+    # previous version passed them as command-line arguments, and the
+    # apostrophe in "Vaulter AI's" broke PowerShell's parsing -- the task
+    # silently failed to register while every other setup step succeeded.
     ps = (
-        "$a = New-ScheduledTaskAction -Execute $args[0] -Argument $args[1]; "
+        "$a = New-ScheduledTaskAction -Execute $env:VLT_RUNNER -Argument $env:VLT_ARG; "
         "$t = New-ScheduledTaskTrigger -Weekly -WeeksInterval 4 -DaysOfWeek Sunday -At 7am; "
         "$s = New-ScheduledTaskSettingsSet -StartWhenAvailable "
         "-ExecutionTimeLimit (New-TimeSpan -Hours 2) -MultipleInstances IgnoreNew; "
-        "Register-ScheduledTask -TaskName $args[2] -Action $a -Trigger $t -Settings $s "
-        "-Description $args[3] -Force | Out-Null"
+        "Register-ScheduledTask -TaskName $env:VLT_TASK -Action $a -Trigger $t -Settings $s "
+        "-Description $env:VLT_DESC -Force | Out-Null"
     )
-    desc = ("Rebuilds Vaulter AI's list of documents in the shaw library. Reads file "
-            "names and dates only - never opens or downloads documents, so it uses no "
-            "disk space.")
+    env = dict(os.environ,
+               VLT_RUNNER=str(runner),
+               VLT_ARG=f'"{target}" index-corpus',
+               VLT_TASK=task,
+               VLT_DESC=("Rebuilds Vaulter AI's list of documents in the shaw library. "
+                         "Reads file names and dates only - never opens or downloads "
+                         "documents, so it uses no disk space."))
     try:
         r = subprocess.run(
-            ["powershell", "-NoProfile", "-NonInteractive", "-Command", ps,
-             str(runner), f'"{target}" index-corpus', task, desc],
-            capture_output=True, text=True, timeout=60,
+            ["powershell", "-NoProfile", "-NonInteractive", "-Command", ps],
+            capture_output=True, text=True, timeout=60, env=env,
         )
         if r.returncode == 0:
             print()
