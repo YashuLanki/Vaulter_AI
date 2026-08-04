@@ -119,8 +119,24 @@ def check_install_location() -> bool:
             print(f"      {PROJECT_ROOT.parent}")
             print("    Setup records this exact location, so moving or deleting the folder")
             print("    later will break the connection to Claude Desktop.")
-            print("    Best to close this window, move the whole 'Vaulter AI' folder somewhere")
-            print("    permanent (e.g. your Documents folder), and run setup again from there.")
+            if needle == "onedrive":
+                # "Move it to Documents" is the obvious advice and the wrong one
+                # here: in a Microsoft 365 org, Documents is usually the
+                # OneDrive-synced folder, so that lands right back here. Name a
+                # concrete local path instead. This also matters because the
+                # search index is a ~100MB database that would sync for no
+                # reason -- it is local cache and rebuilds in a couple of minutes.
+                print("    This folder also holds a large index file that would sync to the")
+                print("    cloud for no reason, and syncing a database while it's in use can")
+                print("    corrupt it.")
+                print(f"    Best to close this window, move the whole 'Vaulter AI' folder to a")
+                print(f"    local (non-synced) path such as:")
+                print(f"      {Path.home() / 'Vaulter AI'}")
+                print("    and run setup again from there.")
+            else:
+                print("    Best to close this window, move the whole 'Vaulter AI' folder somewhere")
+                print(f"    permanent and local, such as {Path.home() / 'Vaulter AI'},")
+                print("    and run setup again from there.")
             print("    Continuing is fine if you meant to keep it here.")
             return False
 
