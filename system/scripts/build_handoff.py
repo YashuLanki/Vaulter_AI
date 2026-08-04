@@ -94,44 +94,6 @@ FORBIDDEN_IN_PACKAGE = {
     "PORTFOLIO_STANDARD.md", "COMPANY_PROFILE.md", "EVIDENCE_APPENDIX.md",
 }
 
-START_HERE_TEXT = """\
-Vaulter AI — start here
-=======================
-
-FIRST — put this folder somewhere permanent.
-
-   Before running anything, move the whole "Vaulter AI" folder out of
-   Downloads and into somewhere you'll keep it — your Documents folder
-   is ideal.
-
-   This matters: setup remembers exactly where this folder is. If you
-   move, rename or delete it afterwards, Claude stops being able to
-   reach it. (Fixable — just run the setup again from the new spot —
-   but easier to avoid.)
-
-Then:
-
-1. Double-click "Setup Vaulter AI" in this folder.
-
-   A black window will open and print what it's doing. That's normal --
-   it's the setup running, not an error. Leave it open.
-
-2. Wait. It installs what it needs and connects to Claude Desktop.
-   This takes a few minutes. There's nothing to type.
-
-3. When it finishes, fully quit Claude Desktop and open it again.
-   (Right-click the Claude icon near the clock, choose Quit.)
-
-4. Start a new conversation and ask it something real, like
-   "What properties are in the portfolio?"
-
-If anything looks wrong, or a step reports a warning, stop and ask --
-nothing you've done needs undoing to get help.
-
-You never need to open the "system" folder. That's the program itself.
-"""
-
-
 def _should_skip(path: Path, rel: Path) -> bool:
     if any(part in EXCLUDED_DIR_NAMES for part in rel.parts):
         return True
@@ -235,13 +197,19 @@ def main() -> int:
     shutil.copy2(template, dest_system / "confidentials" / ".env.template")
     print("  system/confidentials/.env.template")
 
-    # 3. The only folder the recipient ever opens.
+    # 3. The only folder the recipient ever opens. Windows-only for now: the
+    # team is on Windows, and a second file (the Mac .command launcher) just
+    # reads as "which one do I click?" to someone non-technical. The .command
+    # launcher stays in the repo -- add it back into a package deliberately
+    # if a teammate ever needs it, rather than shipping it to everyone by
+    # default. No separate "Start Here" file either: the wizard's own printed
+    # output (see setup_wizard.py's numbered steps and final Summary) already
+    # carries that guidance step by step, so a second, easy-to-skip document
+    # saying the same thing isn't needed.
     for launcher in sorted((REPO_ROOT / "quick_start").iterdir()):
-        if launcher.is_file():
+        if launcher.is_file() and launcher.suffix != ".command":
             shutil.copy2(launcher, dest_quick / launcher.name)
             print(f"  quick_start/  {launcher.name}")
-    (dest_quick / "Start Here.txt").write_text(START_HERE_TEXT, encoding="utf-8")
-    print("  quick_start/  Start Here.txt")
 
     # 3b. QA subagents, skills and the project guide -- see the docstring above
     #     for why this is partial and what it does NOT do for a Desktop user.
