@@ -222,7 +222,8 @@ def _check_and_stage_update() -> None:
         "current_version_at_download": current_version,
     }, indent=2))
     log.info(f"[UPDATE] Staged version {remote_version} (currently running {current_version}) -- "
-             f"run `python scripts/apply_update.py` when ready to apply it.")
+             f"apply it with the apply_pending_update tool, or as a fallback "
+             f"`python system/scripts/apply_update.py`.")
 
 
 def _check_and_stage_org_settings() -> None:
@@ -363,10 +364,12 @@ def _resolve_costar_source(source_file: str, property_name: str = "", file_conte
           it is just where CoStar exports live so they can be found by name.
 
       (b) else look for a filename matching source_file (case-insensitive)
-          in DROP_DIR, then in the firm's document library, then in the
-          pre-rebuild watched_folder/processed trees if they still exist on
-          this machine. If property_name is given, library results are
-          narrowed to it first.
+          in the team's shared COSTAR_DROP_DIR first, then the local
+          DROP_DIR, then the firm's document library, then the pre-rebuild
+          watched_folder/processed trees if they still exist on this machine.
+          Shared beats local so a stale local copy cannot shadow a newer
+          export the team just published. If property_name is given, library
+          results are narrowed to it first.
 
       (c) else return None.
     """
@@ -388,15 +391,23 @@ def _resolve_costar_source(source_file: str, property_name: str = "", file_conte
 
     target_lower = source_file.lower()
 
-    # Local first so a machine that already used data/drop is unchanged, then
-    # the team's shared "CoStar Drop" -- the one people can actually find, and
-    # the one open_costar_folder opens.
-    for drop in (DROP_DIR, COSTAR_DROP_DIR):
+    # The team's shared "CoStar Drop" FIRST -- it is the folder people can
+    # actually find, the one open_costar_folder opens, and the one a colleague
+    # publishes a fresh export to. Local data/drop is the fallback, and exists
+    # mainly because pasted content lands there.
+    #
+    # This order matters. Searching local first meant a stale copy left over on
+    # one machine silently shadowed a newer file the team had just published --
+    # same filename, older data, no warning, and every downstream number wrong.
+    # Preferring the shared copy makes the team folder the source of truth.
+    for drop in (COSTAR_DROP_DIR, DROP_DIR):
         try:
             if not drop.exists():
                 continue
             for candidate in drop.rglob("*"):
                 if candidate.is_file() and candidate.name.lower() == target_lower:
+                    where = "shared CoStar Drop" if drop == COSTAR_DROP_DIR else "local data/drop"
+                    log.info(f"[MCP] CoStar source resolved from the {where}: {candidate}")
                     return candidate
         except OSError as e:
             # An unreachable shared folder is a reason to try the next
@@ -587,7 +598,9 @@ for every listing."""
                     issues.append(
                         "The document index hasn't been built, so search can't run. "
                         "It takes a few minutes and only reads filenames, never file "
-                        "contents. Run: python main.py index-corpus"
+                        "contents. Easiest fix: double-click \"Setup Vaulter AI\" in "
+                        "the quick_start folder. From a terminal: "
+                        "python system/main.py index-corpus"
                     )
                 else:
                     count, built = age
@@ -596,7 +609,9 @@ for every listing."""
                     if days > 30:
                         issues.append(
                             f"The document index is {days} days old, so anything filed since "
-                            "then won't turn up in search. Rebuild with: python main.py index-corpus"
+                            "then won't turn up in search. Rebuild by double-clicking "
+                            "\"Setup Vaulter AI\" in the quick_start folder, or from a "
+                            "terminal: python system/main.py index-corpus"
                         )
             except Exception as e:
                 lines.append(f"  Index: could not check ({e})")

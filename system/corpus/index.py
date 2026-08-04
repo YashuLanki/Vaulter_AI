@@ -288,8 +288,10 @@ def search(query: str, limit: int = 40, subtree: str = "") -> list[dict]:
     if con is None:
         raise CorpusUnavailable(
             "No corpus index has been built yet, so document search can't run. "
-            "Build it once with: python main.py index-corpus  (takes a few "
-            "minutes -- it reads filenames only, never file contents)."
+            "Easiest fix: double-click \"Setup Vaulter AI\" in the quick_start "
+            "folder, which builds it for you. From a terminal it is: "
+            "python system/main.py index-corpus  (takes a few minutes -- it "
+            "reads filenames only, never file contents)."
         )
 
     try:

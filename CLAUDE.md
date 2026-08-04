@@ -115,9 +115,10 @@ teammates to paste files into the conversation instead, at ~43,000 tokens a file
 also pulled `geo_cache` into `config.GEO_CACHE_DIR` — it had been hardcoded as
 `Path(SHARED_DIR) / "geo_cache"` in three separate modules, against this file's own "nothing
 else hardcodes a path" rule, which is why it was the one folder that couldn't be relocated
-without hunting down every copy. Two known gaps here, both hygiene rather than correctness:
-nothing ever cleans up `CoStar Drop/`, and `_resolve_costar_source` returns the first
-filename match without warning, so a stale local file silently shadows a newer shared one.
+without hunting down every copy. One known gap remains here, hygiene rather than
+correctness: nothing ever cleans up `CoStar Drop/`. (The other — a stale local file
+silently shadowing a newer shared one — was fixed 2026-08-03 by searching the shared
+folder first; see the screener's file-resolution note below.)
 
 ### Data access: the firm's document library (`system/corpus/`)
 The firm's SharePoint library is synced to disk by OneDrive at `config.CORPUS_DIR`
@@ -448,8 +449,12 @@ because the file never enters the conversation. This was found in live use — a
 attached exports to the chat and Claude dutifully base64'd each one in a loop. The shared
 `CoStar Drop` folder exists because the local one sat at `<install>/system/data/drop`,
 where no non-technical person will ever navigate; `open_costar_folder` opens the shared
-one. Local is still searched first so an existing machine is unchanged, and a pasted file
-still lands locally — one person's paste shouldn't appear in the team's folder.
+one. **The shared folder is searched FIRST (changed 2026-08-03)** — it is the team's
+source of truth, and searching local first meant a leftover copy on one machine silently
+shadowed a newer export the team had just published: same filename, older data, no
+warning, every downstream number wrong. Local remains the fallback, so a local-only file
+still resolves and a pasted file still lands locally — one person's paste shouldn't appear
+in the team's folder. Which folder a file came from is logged on every resolve.
 
 pre-rebuild `system/data/watched_folder/` and `system/data/processed/` trees are still searched last, so
 an export already sitting on an existing machine doesn't become invisible after an update.

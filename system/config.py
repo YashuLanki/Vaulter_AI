@@ -377,9 +377,13 @@ SMARTSHEET_PORTFOLIO_DIR.mkdir(parents=True, exist_ok=True)
 # In OneDrive beside every other Vaulter AI folder, so "everything this system
 # touches lives in Vaulter AI Shared" stays true and there is one place to
 # look. Shared also means one person's export is screenable by the whole team
-# without re-sending it. DROP_DIR still works and is still searched first --
-# see _resolve_costar_source -- so nothing breaks on a machine that was
-# already using it.
+# without re-sending it.
+#
+# This folder is searched FIRST (see _resolve_costar_source), so it is the
+# source of truth. DROP_DIR is only a fallback now, and exists for one real
+# reason: a file pasted into a conversation has to land somewhere, and it must
+# not land here -- one person's paste should not appear in the team's folder.
+# It is otherwise expected to stay empty.
 COSTAR_DROP_DIR = SHARED_DIR / "CoStar Drop"
 COSTAR_DROP_DIR.mkdir(parents=True, exist_ok=True)
 
