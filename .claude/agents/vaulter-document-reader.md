@@ -85,10 +85,38 @@ a 300-page Phase I ESA will either fail or drown the answer.
 
 Always report which pages you actually read, so the caller knows your coverage.
 
-If direct PDF rendering fails (poppler exists on some machines but is not on the PATH your
-shell sees — a known gap, hit 2026-08-04), don't stop there: render pages to PNG with the
-project's own `pypdfium2` (already installed in `system/`'s environment) and read those, and
-use `pdfplumber` for the text layer. Both are proven fallbacks on real files.
+## Scanned documents — use the project's own OCR, don't improvise
+
+A great deal of this library is scanned: old deeds, recorded plats, county letters, DD
+binders. On those pages the Read tool may return nothing useful, or a caption-like
+fragment that *looks* like content but isn't. **A scanned page you failed to read is not
+an empty page** — never report "the document says nothing about X" when what actually
+happened is the text never got extracted.
+
+The project already has a working OCR pipeline; use it rather than inventing one. It
+tries the text layer first and OCRs only the pages that have none, so a mostly-digital
+PDF with three scanned pages costs almost nothing:
+
+```bash
+python -c "
+import sys; sys.path.insert(0,'system')
+from pathlib import Path
+from corpus.extract import _extract_pdf
+text, meta = _extract_pdf(Path(r'<absolute path to the pdf>'), {})
+print(f'pages={meta.get(\"page_count\")} ocr_used={meta.get(\"ocr_used\", False)}')
+print(text[:4000])
+"
+```
+
+`ocr_used=True` in the output tells you OCR actually fired. Pages it recovered are marked
+`[Page N - OCR]`, so you can cite them normally — the page numbers are real.
+
+Two cautions. OCR output is *recognized* text, not certified text: treat an OCR'd number
+(a price, an APN, a date) as needing corroboration from a second document before you state
+it as fact, the same way you already refuse to read dimensions off a drawing. And on a
+300-page scanned binder, OCR every page is genuinely slow — narrow to the pages you need
+first (`first_page`/`last_page` are available on the same helper's underlying call), and
+say in your Gaps section which pages you OCR'd and which you left.
 
 ## Say unknown
 
