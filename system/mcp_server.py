@@ -494,6 +494,17 @@ synced locally. This includes:
 - Closing memos, entity records, and firm-wide templates
 - Inbound CoStar exports and broker listing spreadsheets
 
+ASKED ABOUT A SPECIFIC PROPERTY? CALL get_property_summary FIRST.
+The team keeps one shared, cited summary per property. It costs a few hundred
+tokens and usually answers the question outright, with file and page citations.
+Going to the source documents instead costs tens of thousands of tokens to reach
+the same answer, and every teammate would pay it again. These summaries do NOT
+appear in search_documents (the shared folder is deliberately excluded from the
+document index), so the tool is the only way to reach them -- do not conclude a
+property has no summary because a search didn't surface one. If the summary
+doesn't cover what was asked, its Gaps section names what was not read, which
+tells you which original document to open.
+
 HOW DOCUMENT SEARCH WORKS — this matters, and it is not a vector database.
 search_documents matches file and folder NAMES, not the text inside documents.
 The library holds roughly half a million files stored as download-on-demand
@@ -1030,6 +1041,79 @@ for every listing."""
             return details + _format_hits(hits, f"{len(hits)} document(s) for '{property_name}':")
         except Exception as e:
             return f"Property lookup failed: {e}"
+
+    @mcp.tool()
+    def get_property_summary(property_name: str) -> str:
+        """
+        Read the team's existing cited summary for a property, if one exists.
+
+        ALWAYS TRY THIS FIRST when asked anything about a specific property.
+        It is a few hundred tokens and answers most questions outright, with
+        file+page citations. Reading the underlying documents instead costs
+        tens of thousands of tokens for the same answer.
+
+        These summaries are shared with the whole team, so one person's
+        reading has already been paid for on everyone's behalf. They are not
+        reachable through search_documents (the shared folder is deliberately
+        excluded from the document index so this system's own output can never
+        surface as a firm document), which is exactly why this tool exists.
+
+        Each summary carries its own Gaps section naming what was NOT read. If
+        the answer isn't in the summary, use that section to pick which
+        original document to open with read_document -- it tells you where to
+        look instead of searching blind.
+
+        Args:
+            property_name: Property name, as it appears in the Project Master
+        """
+        if not property_name.strip():
+            return "Which property? Please give me a property name."
+        try:
+            import re
+            from config import PROPERTY_SUMMARIES_DIR
+
+            summaries_dir = Path(PROPERTY_SUMMARIES_DIR)
+            if not summaries_dir.is_dir():
+                return ("No shared summaries folder found on this machine. Check that "
+                        "OneDrive is syncing, then read documents directly instead.")
+
+            def _slug(name: str) -> str:
+                return re.sub(r"[^a-z0-9]+", "-", name.lower().strip()).strip("-")
+
+            wanted = _slug(property_name)
+            available = sorted(summaries_dir.glob("*.md"))
+
+            match = next((p for p in available if p.stem == wanted), None)
+            if match is None:
+                # Fall back to a containment match so "Magic Ranch 10" still
+                # finds a file slugged from a longer folder-style name, and a
+                # partial name the user typed still lands.
+                candidates = [p for p in available
+                              if wanted in p.stem or p.stem in wanted]
+                if len(candidates) == 1:
+                    match = candidates[0]
+                elif len(candidates) > 1:
+                    names = ", ".join(p.stem for p in candidates)
+                    return (f"Several summaries could match '{property_name}': {names}. "
+                            f"Ask again with the exact name.")
+
+            if match is None:
+                have = ", ".join(p.stem for p in available) or "none yet"
+                return (
+                    f"No summary has been written for '{property_name}' yet.\n\n"
+                    f"Read its documents directly (get_property_info then read_document) "
+                    f"to answer the question. Summaries that DO exist: {have}"
+                )
+
+            text = match.read_text(encoding="utf-8", errors="replace")
+            return (
+                f"Shared summary for '{property_name}' ({match.name}).\n"
+                f"Every finding below is cited to a source document and page. If what you "
+                f"need isn't here, check the Gaps section at the end -- it names what was "
+                f"not read, so you know which original document to open.\n\n{text}"
+            )
+        except Exception as e:
+            return f"Could not read the property summary: {e}"
 
     @mcp.tool()
     def get_portfolio_list(group_by: str = "state") -> str:
