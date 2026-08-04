@@ -391,17 +391,18 @@ def _summary_staleness(property_name: str, summary_text: str) -> str:
             # LIKE, so escape its wildcards -- '_' matches any single
             # character, which silently over-matches property names.
             needle = property_name.strip().replace("!", "!!").replace("%", "!%").replace("_", "!_")
-            # Exclude .eml/.msg. Two reasons, and the first alone is enough:
-            # nothing in this system can read them, so flagging one as "newer"
-            # tells a reader to go look at something they cannot open. They are
-            # also the noisiest -- measured 2026-08-04, Griffin Ranch's only two
-            # "newer" files were both email, so every summary would have carried
-            # a permanent warning that no one could ever act on. A stale-alarm
-            # that is always on is worse than none: it trains people to ignore
-            # the one that matters.
-            where = ("path LIKE ? ESCAPE '!' AND mtime > ? "
-                     "AND lower(name) NOT LIKE '%.eml' AND lower(name) NOT LIKE '%.msg'")
-            args = (f"%{needle}%", int(stamped.timestamp()))
+            # Count ONLY what read_document can actually open. This started as
+            # a blocklist (.eml/.msg) and that was not enough: on Eloy 310 the
+            # four "newest" files were drone .MP4s, so the warning told the
+            # reader to go read a video. A whitelist keeps it honest by
+            # construction -- if the tool can't open it, naming it is worse than
+            # silence, because it converts "here is what to check" into a dead
+            # end. Same lesson the .eml exclusion taught: an alarm pointing at
+            # something unreadable trains people to ignore alarms.
+            exts = ("pdf", "doc", "docx", "xls", "xlsx", "csv", "txt", "md")
+            ext_clause = " OR ".join("lower(name) LIKE ?" for _ in exts)
+            where = (f"path LIKE ? ESCAPE '!' AND mtime > ? AND ({ext_clause})")
+            args = (f"%{needle}%", int(stamped.timestamp()), *[f"%.{e}" for e in exts])
             rows = con.execute(
                 f"SELECT name, mtime FROM files WHERE {where} ORDER BY mtime DESC LIMIT 6", args
             ).fetchall()
