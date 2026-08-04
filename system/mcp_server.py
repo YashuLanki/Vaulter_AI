@@ -350,6 +350,90 @@ def _acres_str(v) -> str:
 
 
 # ══════════════════════════════════════════════════════════════════
+# Property summary staleness
+# ══════════════════════════════════════════════════════════════════
+
+def _summary_staleness(property_name: str, summary_text: str) -> str:
+    """
+    Compare a summary's own "Source files as of:" stamp against the corpus
+    index's mtimes, and say what has been filed since.
+
+    The failure this exists to prevent is the worst shape a wrong answer can
+    take here: not "I don't know" but a confident, well-cited answer that is
+    simply months out of date. Every summary already records how current it
+    was; the index already knows every file's mtime. Nothing was comparing
+    them, so a summary could silently age forever.
+
+    Returns a line to prepend to the summary, or "" when it can't tell --
+    never a guess. Reports the newest filenames rather than only a count,
+    because "6 newer files" prompts a re-read of everything while
+    "Closing Memo.docx, Final ESA.pdf" tells the reader whether the change
+    even matters to the question they asked.
+    """
+    import re
+    import sqlite3
+    import datetime as _dt
+
+    m = re.search(r"Source files as of:\*{0,2}\s*(\d{4})-(\d{2})-(\d{2})", summary_text)
+    if not m:
+        return ""
+    try:
+        stamped = _dt.datetime(int(m[1]), int(m[2]), int(m[3]), tzinfo=_dt.timezone.utc)
+    except ValueError:
+        return ""
+
+    try:
+        from config import CORPUS_INDEX_FILE
+        if not Path(CORPUS_INDEX_FILE).exists():
+            return ""
+        con = sqlite3.connect(f"file:{CORPUS_INDEX_FILE}?mode=ro", uri=True)
+        try:
+            # LIKE, so escape its wildcards -- '_' matches any single
+            # character, which silently over-matches property names.
+            needle = property_name.strip().replace("!", "!!").replace("%", "!%").replace("_", "!_")
+            # Exclude .eml/.msg. Two reasons, and the first alone is enough:
+            # nothing in this system can read them, so flagging one as "newer"
+            # tells a reader to go look at something they cannot open. They are
+            # also the noisiest -- measured 2026-08-04, Griffin Ranch's only two
+            # "newer" files were both email, so every summary would have carried
+            # a permanent warning that no one could ever act on. A stale-alarm
+            # that is always on is worse than none: it trains people to ignore
+            # the one that matters.
+            where = ("path LIKE ? ESCAPE '!' AND mtime > ? "
+                     "AND lower(name) NOT LIKE '%.eml' AND lower(name) NOT LIKE '%.msg'")
+            args = (f"%{needle}%", int(stamped.timestamp()))
+            rows = con.execute(
+                f"SELECT name, mtime FROM files WHERE {where} ORDER BY mtime DESC LIMIT 6", args
+            ).fetchall()
+            total = con.execute(f"SELECT COUNT(*) FROM files WHERE {where}", args).fetchone()[0]
+        finally:
+            con.close()
+    except sqlite3.Error as e:
+        log.warning(f"[MCP] Staleness check failed for {property_name}: {e}")
+        return ""
+
+    if not total:
+        return ("\nCURRENCY: no readable documents newer than this summary's sources have "
+                "appeared for this property, so it is current as far as the index knows.\n")
+
+    names = ", ".join(n for n, _ in rows[:4])
+    more = f" (and {total - 4} more)" if total > 4 else ""
+    return (
+        f"\n*** POSSIBLY OUT OF DATE: {total} document(s) for this property have appeared "
+        f"or changed since this summary's sources, which stop at {stamped:%Y-%m-%d}. "
+        f"Newest: {names}{more}.\n"
+        f"Durable facts here -- what was bought, when, the legal description, the flood zone "
+        f"-- are still good. Treat STATUS answers (is it recorded / sold / paid / approved) "
+        f"as possibly superseded: read the newer files named above before stating status as "
+        f"fact, and tell the user the summary may be behind rather than answering as though "
+        f"it were current.\n"
+        f"Caveat worth stating if you rely on this: the date reflects when a file last "
+        f"changed on disk, which OneDrive also updates on sync -- so this can overstate how "
+        f"much is genuinely new. Judge from the filenames, not the count alone. ***\n"
+    )
+
+
+# ══════════════════════════════════════════════════════════════════
 # Screening Source Resolver
 # ══════════════════════════════════════════════════════════════════
 
@@ -1106,11 +1190,13 @@ for every listing."""
                 )
 
             text = match.read_text(encoding="utf-8", errors="replace")
+            staleness = _summary_staleness(property_name, text)
             return (
                 f"Shared summary for '{property_name}' ({match.name}).\n"
                 f"Every finding below is cited to a source document and page. If what you "
                 f"need isn't here, check the Gaps section at the end -- it names what was "
-                f"not read, so you know which original document to open.\n\n{text}"
+                f"not read, so you know which original document to open.\n"
+                f"{staleness}\n{text}"
             )
         except Exception as e:
             return f"Could not read the property summary: {e}"
