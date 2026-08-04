@@ -323,10 +323,66 @@ def check_ocr_tools() -> bool:
               "until it's installed. No admin rights needed:")
         print("      Mac: brew install poppler")
 
+    # Register both tools on the USER PATH so they're callable by name from any
+    # shell, not only from code that imports config.py's explicit paths. Found
+    # 2026-08-04: poppler was installed but findable by nothing -- every shell
+    # that tried `pdftoppm` failed. Per-user registry value only (never the
+    # system PATH, no admin rights); written via the .NET API rather than
+    # `setx`, which silently truncates PATH at 1024 characters.
+    if sys.platform == "win32":
+        _register_ocr_tools_on_user_path(config)
+
     if not ok:
         print("  (Digital-text PDFs are completely unaffected either way -- only scanned/"
               "image-only pages need these tools.)")
     return ok
+
+
+def _register_ocr_tools_on_user_path(config) -> None:
+    """
+    Add the OCR tool folders to the per-user PATH (HKCU\\Environment).
+
+    Written with winreg rather than by shelling out: `setx` silently truncates
+    PATH at 1024 characters, and passing paths as arguments to
+    `powershell -Command` does NOT populate $args -- they get appended to the
+    script text and PowerShell tries to execute them as commands. That failed
+    loudly on stderr while returning nothing on stdout, so a stdout-only check
+    read it as a successful no-op. winreg avoids the whole quoting problem.
+
+    Never touches the machine-wide PATH, so no admin rights are needed.
+    """
+    import winreg
+    dirs = []
+    if config.POPPLER_PATH:
+        dirs.append(str(config.POPPLER_PATH))
+    if config.TESSERACT_PATH and config.TESSERACT_PATH != "tesseract":
+        dirs.append(str(Path(config.TESSERACT_PATH).parent))
+    if not dirs:
+        return
+    try:
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, "Environment", 0,
+                            winreg.KEY_READ | winreg.KEY_WRITE) as key:
+            try:
+                current, kind = winreg.QueryValueEx(key, "Path")
+            except FileNotFoundError:
+                current, kind = "", winreg.REG_EXPAND_SZ
+            parts = [p for p in current.split(";") if p]
+            existing = {p.rstrip("\\").lower() for p in parts}
+            added = [d for d in dirs if d.rstrip("\\").lower() not in existing]
+            if not added:
+                return
+            # Preserve REG_EXPAND_SZ if that's what was there -- rewriting an
+            # expandable PATH as a plain string would freeze any %VAR% in it.
+            winreg.SetValueEx(key, "Path", 0, kind or winreg.REG_EXPAND_SZ,
+                              ";".join(parts + added))
+        print(f"  ✓ Added to your PATH so other tools can find them: {'; '.join(added)}")
+        print("    (Takes effect in newly opened windows.)")
+    except OSError as e:
+        # Cosmetic hardening only -- the system itself never needs this
+        # (extract.py passes explicit paths). Never fail setup over it, but
+        # say so rather than looking like it worked.
+        print(f"  (Couldn't add the OCR tools to your PATH: {e} -- harmless, "
+              f"Vaulter AI uses their full paths directly.)")
 
 
 def setup_env_file() -> bool:

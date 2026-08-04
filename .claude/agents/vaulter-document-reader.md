@@ -85,6 +85,11 @@ a 300-page Phase I ESA will either fail or drown the answer.
 
 Always report which pages you actually read, so the caller knows your coverage.
 
+If direct PDF rendering fails (poppler exists on some machines but is not on the PATH your
+shell sees — a known gap, hit 2026-08-04), don't stop there: render pages to PNG with the
+project's own `pypdfium2` (already installed in `system/`'s environment) and read those, and
+use `pdfplumber` for the text layer. Both are proven fallbacks on real files.
+
 ## Say unknown
 
 If the documents don't establish something, say "not established in the documents reviewed."

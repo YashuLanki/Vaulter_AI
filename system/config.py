@@ -526,6 +526,17 @@ if POPPLER_PATH is None:
           "will not be readable until it's installed. See README.md's Setup section.",
           file=sys.stderr)
 
+# Make both OCR tools reachable by NAME (pdftoppm, tesseract) for anything this
+# process spawns, not just for code that imports the explicit paths above.
+# Found 2026-08-04: poppler was installed but on no PATH, so every shell,
+# helper script, and subprocess that tried `pdftoppm` failed and had to invent
+# its own fallback -- the tool existed and went unused. extract.py never needed
+# this (it passes poppler_path= explicitly); this is for everything else.
+# Process-local only: os.environ here never touches the user's persistent PATH.
+for _tool_dir in (POPPLER_PATH, Path(TESSERACT_PATH).parent if TESSERACT_PATH != "tesseract" else None):
+    if _tool_dir and str(_tool_dir) not in os.environ.get("PATH", ""):
+        os.environ["PATH"] = f"{_tool_dir}{os.pathsep}" + os.environ.get("PATH", "")
+
 # ══════════════════════════════════════════════════════════════════
 # API Keys — there are none
 # ══════════════════════════════════════════════════════════════════
