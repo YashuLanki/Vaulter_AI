@@ -75,8 +75,21 @@ _PLACEHOLDER_FLAGS = (
 # indexing it would mean screening workbooks and proximity CSVs turning up when
 # someone searches for a closing memo. Skipping it here is the whole reason
 # that arrangement is safe; do not remove this without moving the folder out.
+#
+# The shared folder is skipped by whatever name config actually DETECTED it
+# under, not only the canonical literal: config._detect_shared_dir can land on
+# a renamed variant ("Vaulter AI Shared 1" after a shortcut collision) or an
+# operator-set VAULTER_SHARED_DIR, and a literal-only skip would quietly index
+# the team's output on exactly those machines. The literal stays as a
+# belt-and-braces floor for the common case.
 _SKIP_DIR_NAMES  = {".git", "$RECYCLE.BIN", "System Volume Information",
                     "Vaulter AI Shared"}
+try:
+    from config import SHARED_DIR as _SHARED_DIR
+    if _SHARED_DIR:
+        _SKIP_DIR_NAMES.add(Path(_SHARED_DIR).name)
+except ImportError:
+    pass
 _SKIP_SUFFIXES   = {".lnk", ".url", ".tmp", ".ini"}
 _SKIP_PREFIXES   = ("~$", ".~")
 

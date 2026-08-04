@@ -85,8 +85,21 @@ def _detect_onedrive_root() -> Path | None:
     """The synced OneDrive-for-Business account root, or None if not found."""
     candidates = []
     if sys.platform == "win32":
+        # OneDrive itself publishes its root in env vars -- the authoritative
+        # answer, correct even when the folder lives on another drive, under a
+        # relocated profile, or under a tenant name that isn't exactly
+        # ONEDRIVE_FOLDER_NAME. OneDriveCommercial is the work account
+        # specifically; plain OneDrive can point at a personal account, so it
+        # comes second and only counts if its folder name looks like a
+        # business root ("OneDrive - <org>"). The name-based guess stays as
+        # the last fallback for a machine where OneDrive is synced but the
+        # env vars are missing (e.g. a service context).
+        for var in ("OneDriveCommercial", "OneDrive"):
+            v = os.environ.get(var, "").strip()
+            if v and (var == "OneDriveCommercial" or " - " in Path(v).name):
+                candidates.append(Path(v))
         username = os.environ.get("USERNAME", "YourName")
-        candidates.append(Path(r"C:\Users") / username / ONEDRIVE_FOLDER_NAME)
+        candidates.append(Path(os.environ.get("USERPROFILE", rf"C:\Users\{username}")) / ONEDRIVE_FOLDER_NAME)
     else:
         home = Path.home()
         # Modern OneDrive for Mac syncs under ~/Library/CloudStorage/;
