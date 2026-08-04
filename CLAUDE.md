@@ -591,6 +591,27 @@ project-specific instructions above.
 
 **Tradeoff:** these bias toward caution over speed. For trivial tasks, use judgment.
 
+### 0. Write for a non-technical reader — always
+
+**Standing instruction from this project's owner, given more than once.** Every user-facing
+explanation goes in plain English, as if to someone who does not write code. This is the
+required register, not a simplification to fall back on when asked.
+
+The people who read this system's output are the ones who can tell whether a number is right.
+An explanation pitched at a developer never gets corrected by the person who actually knows
+the deal — so jargon does not merely read badly, it hides mistakes from the only people able
+to catch them.
+
+**Where it always slips: reporting finished work.** Commit summaries and "here's what I fixed"
+messages are exactly where `skiprows`, `mtime`, "schema", "placeholder", "whitelist" and
+"subprocess" creep back in. That is the moment plain language matters most, because it is the
+part that actually gets read.
+
+Say **spreadsheet** not CSV, **column headings** not header row, **downloaded onto your
+computer** not hydrated, **the list of files** not the index, **checks the numbers make sense**
+not assertions. Lead with what broke and what it means for the reader; put mechanism last, or
+leave it out.
+
 ### 1. Think before coding
 
 **Don't assume. Don't hide confusion. Surface tradeoffs.**

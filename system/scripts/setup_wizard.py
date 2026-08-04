@@ -607,12 +607,89 @@ def build_corpus_index() -> bool:
         from corpus import build_index
         result = build_index()
         print(f"  ✓ Indexed {result['file_count']:,} files in {result['build_seconds']:.0f}s.")
-        return True
     except Exception as e:
         print(f"  ⚠ Could not build the index: {e}")
         print("     You can try again later by re-running this wizard, or by running")
-        print("     'python main.py index-corpus' from this folder.")
+        print("     'python system/main.py index-corpus' from this folder.")
         return False
+
+    _schedule_monthly_refresh()
+    return True
+
+
+def _schedule_monthly_refresh() -> None:
+    """
+    Register a monthly Windows task that rebuilds the file list.
+
+    Why this has to exist: the "this summary may be out of date" warning
+    compares a summary's own date against the file list. If the list is never
+    rebuilt, it freezes at install day and the warning quietly stops warning --
+    the failure mode is silence, not an error, which is the worst kind here.
+
+    Monthly, because check_system_health starts complaining at 30 days; this
+    keeps a machine just inside that with room for a missed run. Costs nothing
+    on disk: it reads names and dates only, never opens a document.
+
+    A scheduled task rather than a thread or a subagent. mcp_server.py runs no
+    background threads (see CLAUDE.md), and a subagent only exists inside a live
+    conversation -- nothing dispatches one on a timer, and Claude Desktop does
+    not load them at all. The OS is the only thing here that actually runs on
+    its own.
+
+    Per-user, no admin rights. Never fails setup: a machine without this still
+    works, it just needs the wizard re-run occasionally.
+    """
+    if sys.platform != "win32":
+        return
+    import subprocess
+
+    task = "Vaulter AI - Monthly document list refresh"
+    target = PROJECT_ROOT / "main.py"
+    if not target.exists():
+        return
+
+    # pythonw.exe, NOT python.exe. Measured 2026-08-04: with python.exe the
+    # task registered fine, reported "Ready", then died on every run with
+    # 0xC000013A (console-close) having rebuilt nothing. The console window a
+    # scheduled task opens is torn down under it. pythonw has no console, so
+    # there is nothing to close. This failed silently -- the task looked
+    # healthy while doing nothing -- which is exactly the shape of bug that
+    # would have quietly disabled the staleness warning for months.
+    runner = Path(sys.executable).with_name("pythonw.exe")
+    if not runner.exists():
+        runner = Path(sys.executable)
+
+    ps = (
+        "$a = New-ScheduledTaskAction -Execute $args[0] -Argument $args[1]; "
+        "$t = New-ScheduledTaskTrigger -Weekly -WeeksInterval 4 -DaysOfWeek Sunday -At 7am; "
+        "$s = New-ScheduledTaskSettingsSet -StartWhenAvailable "
+        "-ExecutionTimeLimit (New-TimeSpan -Hours 2) -MultipleInstances IgnoreNew; "
+        "Register-ScheduledTask -TaskName $args[2] -Action $a -Trigger $t -Settings $s "
+        "-Description $args[3] -Force | Out-Null"
+    )
+    desc = ("Rebuilds Vaulter AI's list of documents in the shaw library. Reads file "
+            "names and dates only - never opens or downloads documents, so it uses no "
+            "disk space.")
+    try:
+        r = subprocess.run(
+            ["powershell", "-NoProfile", "-NonInteractive", "-Command", ps,
+             str(runner), f'"{target}" index-corpus', task, desc],
+            capture_output=True, text=True, timeout=60,
+        )
+        if r.returncode == 0:
+            print()
+            print("  ✓ Scheduled a monthly refresh of the document list (Sundays, 7am,")
+            print("    every 4 weeks). It reads file names only and never opens a")
+            print("    document, so it costs no disk space. This is what keeps the")
+            print("    \"this summary may be out of date\" warning honest.")
+            print(f"    Remove it any time from Windows Task Scheduler: \"{task}\".")
+        else:
+            print(f"\n  (Could not schedule the monthly refresh: "
+                  f"{(r.stderr or r.stdout).strip()[:120]})")
+            print("   Not a problem today -- re-run this setup occasionally instead.")
+    except (OSError, subprocess.SubprocessError) as e:
+        print(f"\n  (Could not schedule the monthly refresh: {e})")
+        print("   Not a problem today -- re-run this setup occasionally instead.")
 
 
 def main() -> None:
