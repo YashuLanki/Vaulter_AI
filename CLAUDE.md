@@ -290,6 +290,15 @@ change still reaches every teammate normally. Two consequences worth knowing:
   launcher fix ever needs to reach installed teammates, release/apply need an explicit
   `quick_start/` path, which is asymmetric work on both scripts and was deliberately not done
   during the restructure.
+* **`.claude/` has the exact same gap, for the exact same structural reason** — it also sits
+  beside `system/`, not inside it, so agent and skill instruction fixes never reach an
+  already-installed teammate through `release.py`/`apply_update.py`, only through a fresh
+  install via `build_handoff.py` (which does include `.claude/`). Found concretely on 2026-08-06:
+  a real leaked property-name fragment was fixed in `.claude/agents/vaulter-document-reader.md`
+  and pushed through the normal update pipeline, but the live install's copy of that file simply
+  never changed — confirmed by checking its content directly, not by trusting the update's own
+  success report. Fixed for that one installed machine with a direct file copy as a stopgap.
+  Same asymmetric-work tradeoff as `quick_start/` above, and not fixed here either.
 
 Priority 4 in `docs/MULTI_USER_TRANSITION.md`. `system/scripts/release.py` (run by whoever ships a
 reviewed fix, never by staff) packages the current code — excluding `system/confidentials/`,
