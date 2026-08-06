@@ -147,10 +147,10 @@ ASSUMPTIONS = {
 
     # Residential lot yield, lots per acre. MEASURED across five deals, and the
     # single largest correction in this file: the previous value of 8.0 was
-    # roughly double anything in the record. Dated 2025-06: 3.33; dated
-    # 2025-03: 3.50; two more at 4.20 and 2.50; and one at 0.63 (estate lots,
-    # excluded as an outlier). Of the remaining four, the two most recent
-    # deals are the two lowest. COMPANY_PROFILE.md §7's "7-9" is also stale.
+    # roughly double anything in the record. One deal was excluded as an
+    # outlier (estate lots, a much lower density than the rest). Of the
+    # remaining four, the two most recent deals are the two lowest.
+    # COMPANY_PROFILE.md §7's "7-9" is also stale.
     # Range is reported alongside every figure derived from it.
     "lots_per_acre":       3.5,
     "lots_per_acre_low":   2.5,

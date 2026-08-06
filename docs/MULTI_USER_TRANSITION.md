@@ -561,7 +561,7 @@ This is the "what could go wrong with the fix itself" analysis.
 > index is local, and it must stay local.
 
 **Goal:** record the weekly Monday meeting, and let anyone later ask Claude what was said —
-"what did we decide about the Forney deal last Monday?" — and get back the actual spoken
+"what did we decide about that deal last Monday?" — and get back the actual spoken
 passages. Purely to refresh memory, so nothing is forgotten.
 
 **Decisions made during brainstorming:**

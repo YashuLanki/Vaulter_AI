@@ -67,8 +67,8 @@ owns; this says what is actually there. Run it on a shortlist candidate, not on 
   1.61x @15yr, and documented holds ran 12–16 years against 36–48 months underwritten. A 3x
   at 4 years is 31.6% IRR; the same 3x at 14 years is 8.2%.
 - **Always note the assumptions aren't ratified.** `docs/COMPANY_PROFILE.md` is a draft
-  derived from documents and confirmed by nobody; the weights and the 35% carry load are
-  guesses in `fit_screen.ASSUMPTIONS`. Say so rather than presenting output as authoritative.
+  derived from documents and confirmed by nobody; the four `WEIGHTS` in `fit_screen.ASSUMPTIONS`
+  are guesses with no evidence behind them. Say so rather than presenting output as authoritative.
 
 ## Common mistakes
 

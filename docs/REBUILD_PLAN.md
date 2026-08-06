@@ -260,7 +260,7 @@ figure with the document it came from — and the screener was rewritten against
 | Was | Is | Source |
 |---|---|---|
 | `cost_load`, a flat **0.35 of purchase price** covering entitlement and carry | Gone. Entitlement is priced **per lot** and falls meaningfully with project size, interpolated between measured anchors | Three Arizona budget workbooks — one an invoiced actual |
-| `lots_per_acre` **8.0** | **3.5**, with 2.5–4.2 reported alongside anything derived from it | Five measured deals: 3.33, 3.50, 4.20, 2.50 and one outlier excluded. The two most recent deals are the two lowest |
+| `lots_per_acre` **8.0** | **3.5**, with 2.5–4.2 reported alongside anything derived from it | Five measured deals, one outlier excluded (estate lots, much lower density). The two most recent deals are the two lowest |
 | Carry folded into the 35% | Charged separately at a measured **1.78%/yr property tax**, over the **observed** hold, not the underwritten one | One real Arizona property's tax history |
 
 Three things about that table matter more than the numbers in it.
@@ -436,7 +436,7 @@ Three additions worth building alongside it:
    wrong," append a dated note. Highest-compounding accuracy gain over 12 months.
 2. **Conversational interface, workbook as record.** *"42 of 318 passed. Here are the top 10.
    Want me to know why the 276 were cut?"* — not "open this 4-tab xlsx."
-3. **Show closest analogs, not just scores.** "Resembles Forney (pursued) more than the 40 you
+3. **Show closest analogs, not just scores.** "Resembles a deal you pursued more than the 40 you
    passed on" persuades a partner better than a composite score.
 
 </details>
@@ -664,8 +664,8 @@ Still genuinely open:
    ship the label-quoting version.
 5. **Is the smallest anchor's entitlement figure the right floor for a genuinely small
    project?** It is the figure from the smallest measured project, and
-   `PORTFOLIO_STANDARD.md` (local-only) §5.5 flags that same project's 0.63 lots/acre
-   estate-lot density as an outlier. The anchors are flat below the smallest measured
+   `PORTFOLIO_STANDARD.md` (local-only) §5.5 flags that same project's estate-lot density
+   as a low-density outlier. The anchors are flat below the smallest measured
    project's lot count, so every small project pays the outlier's rate.
 6. **Should a sub-20-acre listing be in the headroom test at all?** Its exit band maps to its
    own band, so it is scored against a median it is part of, and its entire modelled lift has

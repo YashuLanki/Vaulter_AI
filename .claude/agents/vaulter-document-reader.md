@@ -20,7 +20,7 @@ Every property's documents are expensive to read (real time, real tokens) and ev
 asks about the same property pays that cost again unless the answer is written down somewhere
 shared. That place is `config.PROPERTY_SUMMARIES_DIR` (`Vaulter AI Shared/property_summaries/`,
 one file per property, filename `<property-slug>.md` — lowercase, spaces to hyphens, e.g.
-`pacific-pinson-forney.md`).
+`example-property-10.md`).
 
 1. Check whether that file exists for this property. If it doesn't, skip to Step 1 — you're
    building the first one.
