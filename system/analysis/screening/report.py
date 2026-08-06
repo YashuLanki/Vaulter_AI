@@ -232,6 +232,7 @@ def _listing(row) -> dict:
         # Cost_Basis is the sentence that says so, and it has to travel with
         # the number it qualifies.
         "read": _str(g("Vaulter_Read")),
+        "history": _str(g("Portfolio_Comparison")),
         "costBasis": _str(g("Cost_Basis")),
         "entPerAcre": _num(g("Entitlement_Per_Acre")),
         "carryPerAcre": _num(g("Carry_Per_Acre")),

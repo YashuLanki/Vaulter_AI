@@ -404,7 +404,7 @@ ranks or weights selection factors. They need a senior partner's judgment, not a
 (Real names and figures behind every genericized citation in this file live in
 `docs/EVIDENCE_APPENDIX.md`, local-only — this repo is deliberately public.)
 
-`system/scripts/check_screener.py` runs **68 assertions** across deformed market shapes. Run it after
+`system/scripts/check_screener.py` runs **71 assertions** across deformed market shapes. Run it after
 any change to `fit_screen.py`. Note it covers the screener only — **`geo_providers.py` has no
 automated coverage at all**, and that is where the worst measured bug of 2026-07-29 lived (see
 the proximity note below).
@@ -489,10 +489,30 @@ all) scored just high enough to look like a real match against a deliberately un
 — the reporting threshold was raised specifically to require at least one real anchor (state or
 land type), not just a shared strategy label.
 
-Exposed as the `compare_to_portfolio_history` MCP tool. `market_eras.py`'s timeline is
-intentionally separate from the cited, per-deal facts in the index: it's general public-record
-economic history (recession dates, Fed rate-cycle turns), never a claim about a specific deal, so
-mixing the two would blur the citation discipline that's kept these summaries trustworthy.
+Exposed two ways: the standalone `compare_to_portfolio_history` MCP tool, and — wired in
+2026-08-06 — automatically for every row of every `screen_listings` run, via
+`add_portfolio_comparison()` in `fit_screen.py` and a `Portfolio_Comparison` column that flows
+into both the workbook and the HTML report's per-listing detail view ("Similar to the firm's own
+history"). A listing's own free-text land-use column is classified into the fixed vocabulary by
+`classify_land_type()`, reusing `fit_screen.py`'s own pattern families for consistency (with
+mixed-use broken out as its own category, since `fit_screen.py` folds it into commercial for
+*pricing* purposes — correct there, but it would have hidden every real mixed-use deal in the
+portfolio from ever matching a mixed-use listing here). No `plan_type` is passed for an incoming
+listing — the firm hasn't decided an approach yet for something it doesn't own, and guessing one
+would misrepresent an unmade decision as a known fact.
+
+`market_eras.py`'s timeline is intentionally separate from the cited, per-deal facts in the index:
+it's general public-record economic history (recession dates, Fed rate-cycle turns), never a claim
+about a specific deal, so mixing the two would blur the citation discipline that's kept these
+summaries trustworthy.
+
+Wiring this into a real 216-row export caught a real bug on the first run: `_size_band` crashed
+with `StopIteration` on any row with a blank acreage. `float("nan")` passes Python's own `float()`
+conversion without raising, but `NaN` compares `False` against every band limit including infinity,
+so the "pick the first band it's under" logic found nothing. Not a rare shape — a real CoStar
+export routinely has rows with no `Land Area (AC)` value. Fixed by checking for `NaN` explicitly
+before banding; `check_screener.py`'s own section 14 and `check_portfolio_comparison.py` both now
+assert this specific case doesn't crash.
 
 ## Conventions to preserve
 

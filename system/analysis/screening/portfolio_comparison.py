@@ -18,7 +18,7 @@ Vaulter AI Shared/output/property_summaries/*.md), but classifying a deal's
 land type, plan type, and outcome from that free-text prose is a judgment
 call, not something a regex can reliably do -- exactly why fit_screen.py's own
 docstring warns that name-based column matching alone misreads real exports.
-So PORTFOLIO_INDEX_PATH is built by having an agent read each summary and
+So INDEX_PATH is built by having an agent read each summary and
 tag it against the fixed category lists below (LAND_TYPES, PLAN_TYPES,
 OUTCOME_STATUSES) -- a one-time (or periodic, after new summaries are added)
 curation pass, not a push-button rebuild. What IS deterministic, tested, and
@@ -34,6 +34,7 @@ measured result. Change them in ASSUMPTIONS, not scattered through the code.
 """
 
 import json
+import re
 from pathlib import Path
 
 from analysis.screening.market_eras import era_note
@@ -85,6 +86,13 @@ def _size_band(acres) -> str | None:
     try:
         a = float(acres)
     except (TypeError, ValueError):
+        return None
+    # float("nan") passes the conversion above without raising -- and NaN
+    # compares False against every limit below, including infinity, so the
+    # generator would find nothing and raise StopIteration. A missing/blank
+    # acreage is a normal input here (not every CoStar row has one), not an
+    # error condition, so this must return None rather than crash the caller.
+    if a != a:  # the standard, allocation-free way to test for NaN
         return None
     return next(label for limit, label in _SIZE_BANDS if a < limit)
 
@@ -152,6 +160,59 @@ def _score(facts: dict, record: dict) -> tuple[int, list[str]]:
             reasons.append(f"comparable size ({r_band} vs {f_band})")
 
     return score, reasons
+
+
+# Land-type text -> this module's fixed vocabulary. Same pattern families as
+# fit_screen.py's own _EXIT_PATH, since a CoStar listing's "Secondary Type"
+# text is the same kind of free text either module has to classify -- but
+# mixed-use is split out as its own category here (fit_screen.py folds it into
+# commercial for exit-pricing purposes, which is right for pricing but would
+# silently hide every real mixed-use deal in the portfolio index from ever
+# matching a mixed-use listing).
+_LAND_TYPE_PATTERNS = (
+    ("mixed-use", r"mixed[\s-]*use"),
+    ("residential", r"residential|single[\s-]*family|multi[\s-]*family|apartment|"
+                     r"condo|townhome|manufactured\s*home"),
+    ("industrial", r"industrial|warehouse|distribution|manufactur|truck\s*stop|storage\s*yard"),
+    ("agricultural", r"agricultur|pasture|ranch\b|farm|timber|open\s*space"),
+    ("commercial", r"commercial|retail|office|medical|health|restaurant|fast\s*food|hotel|"
+                   r"store|service\s*station|auto|bank|car\s*wash"),
+)
+
+
+def classify_land_type(text) -> str:
+    """
+    Maps free-text land-use description (e.g. a CoStar "Secondary Type" or
+    "Proposed Land Use" value) to this module's fixed LAND_TYPES vocabulary.
+    Returns "unclear" for blank/unrecognized text -- never raises, since a
+    listing with a blank or odd land-use field is normal input, not an error.
+    """
+    s = str(text or "").strip().lower()
+    if not s or s == "nan":
+        return "unclear"
+    for label, pattern in _LAND_TYPE_PATTERNS:
+        if re.search(pattern, s):
+            return label
+    return "unclear"
+
+
+def compare_listing_row(state, county, land_type_text, acres, top_n: int = 3,
+                         index: list[dict] = None) -> dict:
+    """
+    Same as find_similar_deals(), but for a single CoStar listing row: takes
+    the listing's own raw State/County/land-use-text/acreage, classifies the
+    land-use text into the fixed vocabulary, and compares. No plan_type is
+    passed -- a listing the firm hasn't bought yet has no documented approach
+    to match on, and guessing one would misrepresent an unmade decision as a
+    known fact.
+    """
+    facts = {
+        "state": state,
+        "county": county,
+        "land_type": classify_land_type(land_type_text),
+        "acres": acres,
+    }
+    return find_similar_deals(facts, top_n=top_n, index=index)
 
 
 def find_similar_deals(facts: dict, top_n: int = 5, index: list[dict] = None) -> dict:

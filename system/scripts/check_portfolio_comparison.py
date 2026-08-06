@@ -72,6 +72,17 @@ def main() -> int:
     check("a genuinely unrelated deal does not appear in the results",
           all(m["property_name"] != "Ca Different Everything" for m in r["matches"]))
 
+    # Found 2026-08-06 when this was wired into the real screener: a real
+    # CoStar row with no Land Area (AC) value arrives as float("nan"), which
+    # passes float() without raising but compares False against every size
+    # band including infinity -- crashed the whole screen with StopIteration
+    # on the very first deformed export tested, not a rare edge case.
+    r_nan_acres = pc.find_similar_deals(
+        {"state": "AZ", "land_type": "residential", "acres": float("nan")},
+        index=SYNTHETIC_INDEX)
+    check("NaN acreage (a real CoStar row with a blank Land Area field) does not crash",
+          isinstance(r_nan_acres, dict))
+
     r_unrelated = pc.find_similar_deals(
         {"state": "WY", "land_type": "agricultural", "plan_type": "hold-only", "acres": 5000},
         index=SYNTHETIC_INDEX)

@@ -698,6 +698,21 @@ def main() -> int:
               tr["total_screened"] == len(pd.read_excel(thin_real)),
               f"{tr['total_screened']} rows, tiers {tr['tier_counts']}")
 
+    # ── 14. Portfolio comparison never crashes the screen, never fabricates ──
+    # Added 2026-08-06 when compare_to_portfolio_history was wired into every
+    # row. Its own regression suite (check_portfolio_comparison.py) covers the
+    # scoring logic; this just confirms the column shows up correctly on a
+    # real export and never silently disappears or errors out mid-screen.
+    print("\n14. Portfolio comparison column")
+    check("Portfolio_Comparison column exists on the base export",
+          "Portfolio_Comparison" in base["dataframe"].columns)
+    pc = base["dataframe"]["Portfolio_Comparison"]
+    check("every row has a value (a real comparison or an honest empty string, never null)",
+          pc.notna().all(), f"{pc.isna().sum()} null rows")
+    check("no comparison text mentions a price -- this only compares characteristics/history",
+          not pc.astype(str).str.contains(r"\$", regex=True).any(),
+          "a dollar sign appearing here would mean price leaked into a tool that must not compare it")
+
     passed = sum(1 for _, ok, _ in RESULTS if ok)
     print(f"\n{passed}/{len(RESULTS)} checks passed")
     return 0 if passed == len(RESULTS) else 1

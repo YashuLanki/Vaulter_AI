@@ -1161,6 +1161,41 @@ def add_cautions(df: pd.DataFrame) -> pd.DataFrame:
     return _attach(df, {"Cautions": out})
 
 
+def add_portfolio_comparison(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    "Have we done anything like this before?" for every listing, not just
+    market pricing. Deliberately separate from Fit_Score/Why -- this NEVER
+    affects ranking or scoring, purely informational, same principle as
+    Cautions above. See portfolio_comparison.py for what it does and does not
+    compare (characteristics and history, never price, never a verdict).
+
+    Loads the comparison index once for the whole export, not once per row --
+    216 listings against a ~49-deal index is fast arithmetic either way, but
+    there is no reason to re-read the same file 216 times.
+    """
+    from analysis.screening.portfolio_comparison import compare_listing_row, load_index
+
+    index = load_index()
+    if not index:
+        return _attach(df, {"Portfolio_Comparison": [""] * len(df)})
+
+    states = _text(_col(df, "State", default=""))
+    counties = _text(_col(df, "County Name", default=""))
+    kinds = _text(_col(df, "Secondary Type", default=""))
+    acres = _num(_col(df, "Land Area (AC)"))
+
+    out = []
+    for st, co, kind, ac in zip(states, counties, kinds, acres):
+        r = compare_listing_row(st, co, kind, ac, top_n=3, index=index)
+        if not r["matches"]:
+            out.append("")
+            continue
+        parts = [f"{m['property_name']} ({m['outcome_status'].replace('-', ' ')})"
+                  for m in r["matches"]]
+        out.append("Most similar in our history: " + "; ".join(parts))
+    return _attach(df, {"Portfolio_Comparison": out})
+
+
 # ─── Compose ──────────────────────────────────────────────────────────────────
 
 # Tiers are assigned by RANK WITHIN THE EXPORT, not by an absolute score.
@@ -1477,6 +1512,7 @@ def screen(source_path: Path, moic: float = None, write_workbook: bool = True) -
     df = add_distress(df)
     df = add_cautions(df)
     df = add_vaulter_context(df)
+    df = add_portfolio_comparison(df)
 
     # If the firm owns nothing anywhere near this export, proximity carries no
     # information -- and scoring every listing down for it would make a genuinely
@@ -1524,7 +1560,7 @@ def screen(source_path: Path, moic: float = None, write_workbook: bool = True) -
              "Exit_Comp_Per_Acre", "Exit_Headroom", "Pricing_Confidence",
              "Exit_Comp_N", "Exit_Comp_Basis", "Pricing_Verdict",
              "Distress_Signals", "Ask_vs_Prior_Basis",
-             "Cautions", "Why", "Vaulter_Read", "Days On Market",
+             "Cautions", "Why", "Vaulter_Read", "Portfolio_Comparison", "Days On Market",
              "Indicative_Lots", "Implied_Exit_Per_Lot"]
     front = [c for c in front if c in df.columns]
     view = df[front + [c for c in df.columns if c not in front and not c.startswith("_")]]
