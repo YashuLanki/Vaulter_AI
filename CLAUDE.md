@@ -213,7 +213,7 @@ boundary is "is this your own computer, logged in as you." claude.ai (the web ap
 be used with this server: it runs in the cloud and can only reach a network address, never
 a process on someone's own machine. Claude Desktop or Claude Code are required.
 
-**21 tools.** Don't maintain this list by hand — it drifted to 19 entries with one duplicated
+**24 tools.** Don't maintain this list by hand — it drifted to 19 entries with one duplicated
 and two missing. Get the truth from the code:
 
 ```bash
@@ -225,7 +225,8 @@ Grouped by what they're for: **health & updates** — `check_system_health`,
 `apply_pending_update`, `apply_pending_settings`, `get_pending_setup_details`.
 **Documents** — `search_documents`, `read_document`, `browse_documents`.
 **Portfolio** — `get_property_info`, `get_portfolio_list`, `get_properties_by_stage`,
-`open_property_files`. **Screening** — `screen_listings`, `get_screening_rules`,
+`open_property_files`, `open_property_document`, `update_property_summary`.
+**Screening** — `screen_listings`, `get_screening_rules`,
 `test_screener`, `verify_listings`, `open_screening_dashboard`, `open_costar_folder`.
 **Proximity** — `run_proximity_for_property`, `run_proximity_for_listing`,
 `compare_proximity_to_portfolio`, `open_proximity_files`.

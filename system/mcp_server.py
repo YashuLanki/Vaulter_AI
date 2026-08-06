@@ -106,6 +106,30 @@ def _open_in_file_manager(path: "Path", select: bool = False) -> None:
         subprocess.Popen(["xdg-open", str(target)], **quiet)
 
 
+def _find_property_folders(property_name: str) -> list:
+    """
+    Find property folders under !PROPERTIES/<STATE>/ whose name contains
+    property_name (case-insensitive substring). Shared by open_property_files
+    and open_property_document so both use the identical matching rule.
+
+    Returns folders sorted by name (deterministic, not iterdir()'s arbitrary
+    order). Caller decides what "exact match wins, else first, note others"
+    means for its own situation -- this just finds candidates.
+    """
+    from config import CORPUS_DIR
+    matches = []
+    properties_root = CORPUS_DIR / "!PROPERTIES"
+    if properties_root.is_dir():
+        for state_dir in properties_root.iterdir():
+            if not state_dir.is_dir():
+                continue
+            for prop_dir in state_dir.iterdir():
+                if prop_dir.is_dir() and property_name.lower() in prop_dir.name.lower():
+                    matches.append(prop_dir)
+    matches.sort(key=lambda p: p.name)
+    return matches
+
+
 # ══════════════════════════════════════════════════════════════════
 # Code Version
 # ══════════════════════════════════════════════════════════════════
@@ -1393,17 +1417,7 @@ for every listing."""
                 return ("The firm's document library isn't synced on this machine, so there's "
                         "no folder to open. Check that OneDrive is syncing 'Vaulter LLC - shaw'.")
 
-            # Property folders live at !PROPERTIES/<STATE>/<Property>/.
-            matches = []
-            properties_root = CORPUS_DIR / "!PROPERTIES"
-            if properties_root.is_dir():
-                for state_dir in properties_root.iterdir():
-                    if not state_dir.is_dir():
-                        continue
-                    for prop_dir in state_dir.iterdir():
-                        if prop_dir.is_dir() and property_name.lower() in prop_dir.name.lower():
-                            matches.append(prop_dir)
-            matches.sort(key=lambda p: p.name)  # deterministic, not iterdir()'s arbitrary order
+            matches = _find_property_folders(property_name)
 
             if matches:
                 exact = [m for m in matches if m.name.lower() == property_name.lower()]
@@ -1419,12 +1433,99 @@ for every listing."""
                     extra = f"\n\nOther folders also matched: {others}"
                 return f"Opened File Explorer to {folder.name}.{extra}"
 
+            properties_root = CORPUS_DIR / "!PROPERTIES"
             _open_in_file_manager(properties_root if properties_root.is_dir() else CORPUS_DIR)
             return (f"No folder found for '{property_name}'. Opened the properties folder "
                     f"instead — the name may be filed differently.")
 
         except Exception as e:
             return f"Could not open folder: {e}"
+
+    @mcp.tool()
+    def open_property_document(property_name: str, filename: str) -> str:
+        """
+        Open File Explorer directly to ONE specific document for a property,
+        with that exact file highlighted -- not just the property's folder.
+
+        Use this when the user asks for a SPECIFIC document by name or by what
+        a property summary cited it as -- "open that escrow agreement", "show
+        me the deed", "pull up the Phase I ESA" -- rather than a general "show
+        me the files for X" (use open_property_files for that instead).
+
+        Property folders can hold thousands of files, and the same or a
+        near-identical filename often appears more than once in different
+        subfolders (seen repeatedly in this library: duplicate copies, the
+        same memo filed under both Acquisition and Disposition, etc.) --
+        finding one match is the common case, not a rare one. So this tool
+        NEVER guesses between multiple matches: if more than one file in the
+        property's folder matches, it lists every one (with its folder, so
+        they can be told apart) and asks which was meant, rather than
+        opening one and risking it being the wrong copy.
+
+        Args:
+            property_name: Property name, as it appears in the Project Master
+            filename: The filename, or a distinctive part of it, as cited in
+                      a property summary (e.g. from a "-- filename, p.N" citation)
+        """
+        from config import CORPUS_DIR, CORPUS_AVAILABLE
+        try:
+            if not property_name.strip():
+                return "Which property? Please tell me the property name."
+            if not filename.strip():
+                return "Which file? Please tell me the filename, or the name cited in the summary."
+
+            if not CORPUS_AVAILABLE:
+                return ("The firm's document library isn't synced on this machine, so there's "
+                        "no file to open. Check that OneDrive is syncing 'Vaulter LLC - shaw'.")
+
+            folders = _find_property_folders(property_name)
+            if not folders:
+                return (f"No folder found for '{property_name}', so there's nothing to search "
+                        f"for '{filename}' in. The property name may be filed differently -- "
+                        f"try open_property_files first to see what folders exist.")
+
+            exact = [f for f in folders if f.name.lower() == property_name.lower()]
+            folder = exact[0] if exact else folders[0]
+            folder_note = ""
+            if len(folders) > 1:
+                others = ", ".join(f.name for f in folders if f is not folder)
+                folder_note = f" (other property folders also matched '{property_name}': {others})"
+
+            # Search the chosen property's own folder only -- never the wider
+            # corpus. Exact filename match first (the normal case: a citation
+            # is usually the real filename verbatim); fall back to a substring
+            # match so a shortened or reworded reference still finds it.
+            wanted = filename.strip().lower()
+            all_files = [p for p in folder.rglob("*") if p.is_file()]
+            exact_hits = [p for p in all_files if p.name.lower() == wanted]
+            hits = exact_hits or [p for p in all_files if wanted in p.name.lower()]
+
+            if not hits:
+                return (f"No file matching '{filename}' found anywhere in {folder.name}'s "
+                        f"folder{folder_note}. It may be named differently than cited, or in "
+                        f"a format this search didn't catch -- try open_property_files to "
+                        f"browse the folder directly.")
+
+            if len(hits) == 1:
+                _open_in_file_manager(hits[0], select=True)
+                rel = hits[0].relative_to(folder)
+                return f"Opened {hits[0].name} in {folder.name}'s folder ({rel}).{folder_note}"
+
+            # More than one match: list every one rather than guessing. Cap
+            # the list so a too-broad fragment (e.g. a single common word)
+            # doesn't dump an unreadable wall of paths.
+            hits.sort(key=lambda p: str(p.relative_to(folder)))
+            shown = hits[:15]
+            lines = [f"{len(hits)} files in {folder.name}'s folder match '{filename}'{folder_note} "
+                     f"-- which one did you mean?\n"]
+            for p in shown:
+                lines.append(f"  - {p.relative_to(folder)}")
+            if len(hits) > len(shown):
+                lines.append(f"  ...and {len(hits) - len(shown)} more.")
+            return "\n".join(lines)
+
+        except Exception as e:
+            return f"Could not open document: {e}"
 
     @mcp.tool()
     def open_costar_folder() -> str:
