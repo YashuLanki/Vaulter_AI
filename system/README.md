@@ -19,7 +19,7 @@ through their own Claude Desktop app via an MCP server — no separate UI.
 
 | Part | Description |
 |------|-------------|
-| **Document library** (`system/corpus/`) | Searches ~493,000 files in the firm's OneDrive-synced SharePoint library by name and folder path, and reads any one of them on request — PDF (with OCR for scanned pages), Word, Excel, CSV, text |
+| **Document library** (`system/corpus/`) | Searches files and reads any one of them on request — PDF (with OCR for scanned pages), Word, Excel, CSV, text |
 | **Portfolio** (`system/portfolio.py`) | The active property list, read from the Smartsheet Project Master export |
 | **CoStar screener** (`system/analysis/screening/fit_screen.py`) | Ranks any market's listings by proximity to existing holdings, size-in-context, MOIC-based pricing, and distress signals. Free, instant, eliminates nothing. |
 | **Screening report** (`system/analysis/screening/report.py`) | One self-contained HTML file next to the workbook — the decision, then the map and shortlist, then every listing and every assumption. Opens straight from OneDrive |
