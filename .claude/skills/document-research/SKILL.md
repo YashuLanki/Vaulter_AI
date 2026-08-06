@@ -31,6 +31,22 @@ exists to prevent.
 - **Check one specific claim before it's trusted** — a numeric threshold derived from documents,
   a trajectory signal headed for an investment memo, anything about to be acted on →
   `vaulter-fact-checker`. Skeptical by default; one agent per claim, parallel across claims.
+- **Compare an off-market property to the firm's own deal history** ("have we done anything like
+  this before," a property an analyst is looking at directly rather than a CoStar export row) →
+  delegate the document read to `vaulter-document-reader` as above (same citation discipline, same
+  size-check-before-reading-everything rule), then call the `compare_to_portfolio_history` MCP tool
+  yourself with the facts it surfaced. This is characteristics-only (location, land type,
+  approximate size) — never a price comparison and never a pursue/pass verdict; both need either a
+  person or a still-open decision about where standalone-property pricing data would come from
+  (see CLAUDE.md's "Portfolio comparison" section). Get the tool's `land_type` argument
+  right or it silently matches nothing: use exactly one of `residential`, `commercial`,
+  `industrial`, `mixed-use`, `agricultural` (from `portfolio_comparison.py`'s `LAND_TYPES`) — leave
+  it blank rather than inventing a category the tool doesn't recognize. Leave `plan_type` blank too:
+  the property isn't owned yet, so the firm hasn't documented an approach to it, and guessing one
+  would misrepresent an unmade decision as a known fact. Present the matches alongside the
+  document-reader's own findings, and read the matched properties' own `## Approach & Outcome`
+  sections (`get_property_summary`) before drawing any comparison in prose — the tool returns
+  which deals matched and why, not their full story.
 
 If a request spans layers (e.g. "what do we know about water in Coolidge?"), that's document-reader
 on the firm's own files **and** city-researcher on the public record, run in parallel,
