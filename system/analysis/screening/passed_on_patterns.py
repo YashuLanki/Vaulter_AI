@@ -44,13 +44,13 @@ KNOWN_PATTERNS = [
         "state": "CO",
         "county": "Weld",
         "caution": (
-            "5 of the firm's own passed-on Weld County, CO deals (2004-2007) document "
+            "Multiple of the firm's own passed-on Weld County, CO deals document "
             "active or legacy oil & gas wells, leases, or environmental contamination as "
             "a real complication -- worth a targeted mineral-rights and Phase I check "
             "before proceeding. Past pattern, not a confirmed cause for any one deal; "
             "context, not a reason to avoid this one."
         ),
-        "source": "_passed-on-deals.md, Colorado section (5 of 16 documented deals)",
+        "source": "_passed-on-deals.md, Colorado section",
     },
 ]
 

@@ -245,11 +245,12 @@ ask about it directly. Deliberately detection-only — it never writes a summary
 sees the flag decides whether to ask Claude to build one, same reviewed, human-in-the-loop
 process every other summary has ever gone through. Matching is substring-based on the fully
 normalized (non-alphanumerics stripped) name, not exact — Project Master names often carry a
-parenthetical alias or slash-suffix the summary's own filename dropped (e.g. "Eloy 310 (Interlink
-8/10)" vs. `eloy-310.md`), and exact match flagged those as false positives when tested against
-the real 49-property list. Known, deliberately accepted tradeoff: two properties sharing a name
-stem (e.g. "Mesquite Trails" and "Mesquite Trails Ph 2, 3, 4") can mask each other here if only
-the shorter-named one has a summary — a false negative, not a false positive, and chosen on
+parenthetical alias or slash-suffix the summary's own filename dropped (e.g. a property name with
+a parenthetical alias vs. a summary filename that dropped it), and exact match flagged those as
+false positives when tested against the real 49-property list. Known, deliberately accepted
+tradeoff: two properties sharing a name stem (e.g. a property name and a longer-named later-phase
+sibling sharing the same stem) can mask each other here if only the shorter-named one has a
+summary — a false negative, not a false positive, and chosen on
 purpose: a wrong "you're missing this" claim damages trust in a tool built to stay silent unless
 something is actually wrong, more than an occasional missed detection in one narrow case costs.
 
@@ -546,7 +547,7 @@ to it by hand when real, multi-deal, documented evidence exists — never auto-d
 prose whose own causation is uncertain, which would manufacture exactly the kind of unverified
 signal this project has repeatedly measured and removed elsewhere (a mirror that answered a flood
 question with a confident, wrong empty result; the hard-filter incident above). The one pattern in
-the table as of this writing: 5 of Colorado's 16 documented Weld County dead deals (2004-2007) cite
+the table as of this writing: multiple of Colorado's documented Weld County dead deals cite
 active or legacy oil & gas wells, leases, or contamination as a real complication — worth a caution
 on a new Weld County listing even though no single termination notice states it as the cause.
 

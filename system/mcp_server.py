@@ -416,9 +416,9 @@ def _summary_staleness(property_name: str, summary_text: str) -> str:
             # character, which silently over-matches property names.
             needle = property_name.strip().replace("!", "!!").replace("%", "!%").replace("_", "!_")
             # Count ONLY what read_document can actually open. This started as
-            # a blocklist (.eml/.msg) and that was not enough: on Eloy 310 the
-            # four "newest" files were drone .MP4s, so the warning told the
-            # reader to go read a video. A whitelist keeps it honest by
+            # a blocklist (.eml/.msg) and that was not enough: on one real
+            # property the four "newest" files were drone .MP4s, so the
+            # warning told the reader to go read a video. A whitelist keeps it honest by
             # construction -- if the tool can't open it, naming it is worse than
             # silence, because it converts "here is what to check" into a dead
             # end. Same lesson the .eml exclusion taught: an alarm pointing at
@@ -843,14 +843,16 @@ for every listing."""
             existing_norm = [_norm(e) for e in existing]
             # Substring match, not exact -- Project Master names often carry
             # a parenthetical alias or slash-suffix the summary's own
-            # filename dropped (e.g. "Eloy 310 (Interlink 8/10)" vs.
-            # "eloy-310.md"), so exact match alone flagged real,
-            # already-summarized properties as missing. Verified against
-            # the live 49-property Project Master: zero false positives.
+            # filename dropped (e.g. a property name with a parenthetical
+            # alias vs. a summary filename that dropped it), so exact match
+            # alone flagged real, already-summarized properties as missing.
+            # Verified against the live 49-property Project Master: zero
+            # false positives.
             # Known tradeoff, deliberately accepted: two properties sharing
-            # a name stem (e.g. "Mesquite Trails" and "Mesquite Trails Ph 2,
-            # 3, 4") can mask each other here if only the shorter-named one
-            # has been summarized -- a false negative, not a false
+            # a name stem (e.g. a property name and a longer-named later-
+            # phase sibling sharing the same stem) can mask each other here
+            # if only the shorter-named one has been summarized -- a false
+            # negative, not a false
             # positive. Chosen on purpose: a wrong "you're missing this"
             # claim damages trust in a tool built to stay silent unless
             # something is actually wrong; an occasional missed detection
@@ -1256,9 +1258,9 @@ for every listing."""
 
             match = next((p for p in available if p.stem == wanted), None)
             if match is None:
-                # Fall back to a containment match so "Magic Ranch 10" still
-                # finds a file slugged from a longer folder-style name, and a
-                # partial name the user typed still lands.
+                # Fall back to a containment match so a short property name
+                # still finds a file slugged from a longer folder-style
+                # name, and a partial name the user typed still lands.
                 candidates = [p for p in available
                               if wanted in p.stem or p.stem in wanted]
                 if len(candidates) == 1:
