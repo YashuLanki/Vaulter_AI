@@ -713,6 +713,34 @@ def main() -> int:
           not pc.astype(str).str.contains(r"\$", regex=True).any(),
           "a dollar sign appearing here would mean price leaked into a tool that must not compare it")
 
+    # ── 15. Passed-on-deal patterns never touch score/rank ──────────────────
+    # Added 2026-08-06 with passed_on_patterns.py. The one rule that must
+    # never break: a documented "we passed on deals like this before" caution
+    # is informational only. Deform two identical rows so only their county
+    # differs, and confirm the pattern fires on the matching one, stays
+    # silent on the other, and neither row's score moves because of it.
+    print("\n15. Passed-on-deal patterns are informational only")
+    weld = src.copy()
+    weld["State"] = "CO"
+    weld["County Name"] = "Weld"
+    other = src.copy()
+    other["State"] = "CO"
+    other["County Name"] = "Larimer"
+    r_weld = _run(weld, full, tmp, "weld")
+    r_other = _run(other, full, tmp, "larimer")
+    d_weld, d_other = r_weld["dataframe"], r_other["dataframe"]
+    check("Weld County rows get the documented oil & gas caution",
+          d_weld["Cautions"].str.contains("oil & gas", case=False, na=False).all(),
+          f"{d_weld['Cautions'].str.contains('oil & gas', case=False, na=False).sum()} of "
+          f"{len(d_weld)} rows")
+    check("a different Colorado county gets no such caution",
+          not d_other["Cautions"].str.contains("oil & gas", case=False, na=False).any())
+    check("Fit_Score is identical whether or not the caution fired",
+          d_weld["Fit_Score"].equals(d_other["Fit_Score"]),
+          "scores must match row-for-row since only County Name differs")
+    check("Fit_Tier is identical whether or not the caution fired",
+          d_weld["Fit_Tier"].equals(d_other["Fit_Tier"]))
+
     passed = sum(1 for _, ok, _ in RESULTS if ok)
     print(f"\n{passed}/{len(RESULTS)} checks passed")
     return 0 if passed == len(RESULTS) else 1

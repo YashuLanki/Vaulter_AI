@@ -418,7 +418,7 @@ ranks or weights selection factors. They need a senior partner's judgment, not a
 (Real names and figures behind every genericized citation in this file live in
 `docs/EVIDENCE_APPENDIX.md`, local-only — this repo is deliberately public.)
 
-`system/scripts/check_screener.py` runs **71 assertions** across deformed market shapes. Run it after
+`system/scripts/check_screener.py` runs **75 assertions** across deformed market shapes. Run it after
 any change to `fit_screen.py`. Note it covers the screener only — **`geo_providers.py` has no
 automated coverage at all**, and that is where the worst measured bug of 2026-07-29 lived (see
 the proximity note below).
@@ -527,6 +527,35 @@ so the "pick the first band it's under" logic found nothing. Not a rare shape �
 export routinely has rows with no `Land Area (AC)` value. Fixed by checking for `NaN` explicitly
 before banding; `check_screener.py`'s own section 14 and `check_portfolio_comparison.py` both now
 assert this specific case doesn't crash.
+
+### Passed-on-deal patterns (`system/analysis/screening/passed_on_patterns.py`)
+
+Surfaces a documented pattern from `_passed-on-deals.md` (the firm's own passed-on/lost-deal
+history) as a **caution** on a matching new listing — informational only, wired into
+`fit_screen.py`'s existing `add_cautions()`, never a score or rank change. Built 2026-08-06 after
+a direct question in a team conversation: should this history become a rule the screener applies?
+No — for the same reason `screen_listings` never eliminates anything: a hard filter built from
+just three rejection grounds once threw out 60 of 69 real listings on grounds that weren't real
+dealbreakers, and most of `_passed-on-deals.md`'s own causation is honestly uncertain (locked in
+unreadable archived email). But a caution — the same non-eliminating mechanism flood risk and an
+oversized ask already use — is safe, so that's what this is.
+
+**`KNOWN_PATTERNS` is a short, hand-curated table, deliberately not a miner over the whole
+passed-on-deals file**, in the same spirit as `fit_screen.py`'s own `ASSUMPTIONS`/`WEIGHTS`: add
+to it by hand when real, multi-deal, documented evidence exists — never auto-derive a pattern from
+prose whose own causation is uncertain, which would manufacture exactly the kind of unverified
+signal this project has repeatedly measured and removed elsewhere (a mirror that answered a flood
+question with a confident, wrong empty result; the hard-filter incident above). The one pattern in
+the table as of this writing: 5 of Colorado's 16 documented Weld County dead deals (2004-2007) cite
+active or legacy oil & gas wells, leases, or contamination as a real complication — worth a caution
+on a new Weld County listing even though no single termination notice states it as the cause.
+
+Verified with a mathematical proof, not just a manual check: ran the real 216-row export twice,
+identical except one copy's `County Name` was set to "Weld" and the other to a different Colorado
+county, and asserted `Fit_Score` and `Fit_Tier` come back **byte-for-byte identical** between the
+two — the caution genuinely cannot influence ranking, because `add_cautions()` runs into its own
+`Cautions` column and the score is computed only from `_proximity_score`/`_pricing_score`/
+`_distress_score`/`_size_score`, which never read it.
 
 ## Conventions to preserve
 

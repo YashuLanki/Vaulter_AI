@@ -1122,7 +1122,16 @@ def add_cautions(df: pd.DataFrame) -> pd.DataFrame:
     existing structures -- §5 documents the firm buying through every one of
     those. Flood is surfaced as an informational caution only, never a
     disqualifier -- see REBUILD_PLAN.md §7.4 for the history behind this.
+
+    Also checks passed_on_patterns.py -- a documented pattern from the
+    firm's own passed-on/lost-deal history (e.g. Weld County, CO oil & gas
+    risk). Same rule as every other caution here: informational only, never
+    changes Fit_Score or Fit_Tier, never removes a row. See that module's
+    own docstring for why this table is small and hand-curated rather than
+    mined from the full passed-on-deals file.
     """
+    from analysis.screening.passed_on_patterns import passed_on_caution
+
     acres = _num(_col(df, "Land Area (AC)"))
     # NOTE: on both real exports `Floodplain Area` holds a LABEL, not a number
     # ("500-year Floodplain" on 69 of 216 Arizona rows), so this numeric read
@@ -1140,9 +1149,12 @@ def add_cautions(df: pd.DataFrame) -> pd.DataFrame:
     in_sfha = _text(_col(df, "In SFHA", default=""))
     stories = _num(_col(df, "Number of Stories"))
     ask = _num(_col(df, "For Sale Price"))
+    state = _text(_col(df, "State", default=""))
+    county = _text(_col(df, "County Name", default=""))
 
     out = []
-    for ac, fa, fr, sf, st, pr in zip(acres, flood_area, flood_risk, in_sfha, stories, ask):
+    for ac, fa, fr, sf, st, pr, sta, co in zip(acres, flood_area, flood_risk, in_sfha,
+                                                 stories, ask, state, county):
         c = []
         if pd.notna(fa) and pd.notna(ac) and ac > 0:
             share = fa / ac
@@ -1157,6 +1169,9 @@ def add_cautions(df: pd.DataFrame) -> pd.DataFrame:
             c.append(f"{int(st)} structure(s) on site — verify if income or demo cost")
         if pd.notna(pr) and pr > 20_000_000:
             c.append(f"${pr/1e6:.0f}M ask — well above the firm's ~$3.5M average per asset")
+        past = passed_on_caution(sta, co)
+        if past:
+            c.append(past)
         out.append("; ".join(c) if c else "")
     return _attach(df, {"Cautions": out})
 
