@@ -213,7 +213,7 @@ boundary is "is this your own computer, logged in as you." claude.ai (the web ap
 be used with this server: it runs in the cloud and can only reach a network address, never
 a process on someone's own machine. Claude Desktop or Claude Code are required.
 
-**24 tools.** Don't maintain this list by hand — it drifted to 19 entries with one duplicated
+**25 tools.** Don't maintain this list by hand — it drifted to 19 entries with one duplicated
 and two missing. Get the truth from the code:
 
 ```bash
@@ -227,7 +227,8 @@ Grouped by what they're for: **health & updates** — `check_system_health`,
 **Portfolio** — `get_property_info`, `get_portfolio_list`, `get_properties_by_stage`,
 `open_property_files`, `open_property_document`, `update_property_summary`.
 **Screening** — `screen_listings`, `get_screening_rules`,
-`test_screener`, `verify_listings`, `open_screening_dashboard`, `open_costar_folder`.
+`test_screener`, `verify_listings`, `open_screening_dashboard`, `open_costar_folder`,
+`compare_to_portfolio_history`.
 **Proximity** — `run_proximity_for_property`, `run_proximity_for_listing`,
 `compare_proximity_to_portfolio`, `open_proximity_files`.
 
@@ -459,6 +460,39 @@ in the team's folder. Which folder a file came from is logged on every resolve.
 
 pre-rebuild `system/data/watched_folder/` and `system/data/processed/` trees are still searched last, so
 an export already sitting on an existing machine doesn't become invisible after an update.
+
+### Portfolio comparison (`system/analysis/screening/portfolio_comparison.py`)
+
+Built 2026-08-06 to answer a specific ask from a team meeting: "name the projects that are
+similar, how did we approach those, and can that method be applied to this listing." Deliberately
+**characteristics-only** — location, land type, plan type (rezone/subdivide/entitle-only/annex/
+hold-only/assemble-resell/recapitalization), and size. It never compares price and never issues a
+pursue/don't-pursue verdict; both of those need either a human or the still-open peer-pricing
+decision for standalone properties (on hold as of this writing). What it returns: the 3-5 most
+similar past deals, why each matched, what actually happened (still held / sold / pending), and —
+via `market_eras.py`'s hand-authored, publicly-sourced timeline — what broader market conditions
+each was bought into, so a person can judge whether that playbook still applies today.
+
+**The comparison index is agent-curated, not deterministically derived, and that's deliberate.**
+Every property now has an `## Approach & Outcome` section, but classifying a deal's land type or
+plan type from free-text prose is a judgment call a regex can't reliably make — the same reason
+`fit_screen.py`'s own `normalise_columns()` needs pattern-plus-value-check rather than name alone.
+So the index (`system/data/portfolio_comparison_index.json` — gitignored, real firm data) is built
+by having an agent read each summary and tag it against a fixed category list, refreshed whenever
+new summaries are added or backfilled. Everything downstream of that index — the scoring in
+`find_similar_deals()` — is ordinary deterministic Python, with its own `ASSUMPTIONS` dict in the
+same spirit as `fit_screen.py`'s: reasonable defaults, not measured results, meant to be argued
+with. `system/scripts/check_portfolio_comparison.py` is its regression suite — run it after any
+change to either file. One calibration bug it caught before shipping: a single soft signal (a
+shared plan-type label plus a loosely similar size band, with no location or land-type match at
+all) scored just high enough to look like a real match against a deliberately unrelated test deal
+— the reporting threshold was raised specifically to require at least one real anchor (state or
+land type), not just a shared strategy label.
+
+Exposed as the `compare_to_portfolio_history` MCP tool. `market_eras.py`'s timeline is
+intentionally separate from the cited, per-deal facts in the index: it's general public-record
+economic history (recession dates, Fed rate-cycle turns), never a claim about a specific deal, so
+mixing the two would blur the citation discipline that's kept these summaries trustworthy.
 
 ## Conventions to preserve
 

@@ -2020,6 +2020,79 @@ for every listing."""
             return _screen_error(source_file, e)
 
     @mcp.tool()
+    def compare_to_portfolio_history(
+        state: str = "",
+        county: str = "",
+        land_type: str = "",
+        plan_type: str = "",
+        acres: float = None,
+        top_n: int = 5,
+    ) -> str:
+        """
+        Find the firm's own past deals that most resemble a listing or an
+        off-market property, and how the firm approached them.
+
+        Use this when someone asks "have we done anything like this before,"
+        "what's similar in our history," or wants a new deal compared against
+        the firm's track record — for a listing already screened by
+        screen_listings, or for a single off-market property an analyst is
+        looking at directly.
+
+        Compares CHARACTERISTICS only — location, land type, the kind of plan
+        (rezone/subdivide/etc.), and size. Does NOT compare price or tell you
+        whether to pursue the deal — that decision needs a person, and pricing
+        comparison for a standalone property isn't wired up yet. What this
+        gives you: the most similar past deals, why they matched, what
+        actually happened with each one (still held / sold / pending), and
+        the market conditions each was bought into, so a person can judge
+        whether that playbook still applies today.
+
+        If nothing in the portfolio meaningfully resembles the input, this
+        says so plainly rather than forcing a weak match — that's a genuine
+        finding (this may be a new kind of deal for the firm), not a failure.
+
+        Args:
+            state: two-letter state code (e.g. "AZ"), if known
+            county: county name, if known
+            land_type: one of residential, commercial, industrial, mixed-use,
+                       agricultural — leave blank if unclear
+            plan_type: one of rezone, subdivide, entitle-only, annex,
+                       hold-only, assemble-resell, recapitalization — leave
+                       blank if unclear
+            acres: parcel size, if known
+            top_n: how many matches to return (default 5)
+        """
+        try:
+            from analysis.screening.portfolio_comparison import find_similar_deals
+
+            facts = {"state": state, "county": county, "land_type": land_type,
+                      "plan_type": plan_type, "acres": acres}
+            result = find_similar_deals(facts, top_n=top_n)
+
+            lines = [result["coverage_note"], ""]
+            if not result["matches"]:
+                lines.append("Nothing else to report — no forced or approximate match follows.")
+                return "\n".join(lines)
+
+            for i, m in enumerate(result["matches"], 1):
+                lines.append(f"{i}. {m['property_name']}")
+                lines.append(f"   Why it matched: {', '.join(m['reasons'])}")
+                lines.append(f"   What happened: {m['outcome_status'].replace('-', ' ')} — {m['notes']}")
+                if m["era_note"]:
+                    lines.append(f"   {m['era_note']}")
+                lines.append("")
+
+            lines.append(
+                "This is a comparison, not a recommendation — read the full story for any of "
+                "these with get_property_summary before drawing a conclusion."
+            )
+            return "\n".join(lines)
+
+        except Exception as e:
+            log.error(f"[MCP] compare_to_portfolio_history failed: {e}", exc_info=True)
+            return f"Could not compare to portfolio history: {e}"
+
+    @mcp.tool()
     def verify_listings(
         source_file: str = "CostarExport.xlsx",
         property_name: str = "",
