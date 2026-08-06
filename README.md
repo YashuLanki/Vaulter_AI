@@ -14,7 +14,7 @@ deleted because the measurement said to.
 
 ## What it does
 
-- **Search the firm's document library** by filename and path — ~490,000
+- **Search the firm's document library** by filename and path,
   files synced from SharePoint via OneDrive, indexed locally, never uploaded
   anywhere.
 - **Screen a CoStar export or broker spreadsheet** by fit against the firm's
