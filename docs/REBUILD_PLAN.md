@@ -24,7 +24,7 @@ That could have killed the rebuild. It didn't, because of one fact that was alre
 already noted in the old §9:
 
 > **The firm's SharePoint library is already a synced local folder.**
-> `C:\Users\<user>\OneDrive - Vaulter LLC\Vaulter LLC - shaw`
+> `C:\Users\<user>\OneDrive - <firm's account>\<firm's SharePoint library name>`
 
 A connector was never the only way to reach those documents — it was one way. OneDrive already
 puts all ~493,000 of them on disk. So document access survived the verdict intact, and the
@@ -91,7 +91,7 @@ The new path is: find the file by name, read it, hand the text to Claude.
 
 **Two constraints shaped the design, both discovered by measurement, not assumption:**
 
-**Scope.** `CORPUS_DIR` points at the `Vaulter LLC - shaw` library, *never* the OneDrive account
+**Scope.** `CORPUS_DIR` points at the firm's own SharePoint library, *never* the OneDrive account
 root one level up — that root also holds the individual's own `Desktop`, `Documents`, and
 `Microsoft Teams Chat Files`. `corpus.resolve_in_corpus()` resolves and re-checks every path, so
 `../Documents` and absolute paths elsewhere on disk both fail. This is the privacy boundary that
@@ -638,15 +638,16 @@ Still genuinely open:
      controls. It was never actually at risk of a naming mismatch -- every install creates it
      fresh with the identical literal name, so "screening output went somewhere nobody can see"
      was never really a naming problem.
-   - `CORPUS_DIR` ("Vaulter LLC - shaw") is a pre-existing SharePoint library synced with a name
-     nobody here controls, and it genuinely does vary -- confirmed colleagues see "shaw" or
-     "Shaw", not necessarily with the "Vaulter LLC - " prefix this machine's own copy happens to
-     have. `config._find_corpus_subfolder()` now matches the word "shaw" case-insensitively
-     instead of one exact string, and refuses -- rather than guessing -- if more than one folder
-     matches, same "pattern, then refuse on ambiguity" rule the CoStar column resolver uses.
+   - `CORPUS_DIR` (the firm's own SharePoint library) is a pre-existing SharePoint library
+     synced with a name nobody here controls, and it genuinely does vary -- confirmed
+     colleagues see slightly different casing and prefixing on the same underlying library.
+     `config._find_corpus_subfolder()` now matches a distinctive fragment of the library's own
+     name case-insensitively instead of one exact string, and refuses -- rather than guessing --
+     if more than one folder matches, same "pattern, then refuse on ambiguity" rule the CoStar
+     column resolver uses.
 
-   **Still genuinely open:** `ONEDRIVE_FOLDER_NAME` ("OneDrive - Vaulter LLC") -- the account
-   root's own name -- is still an exact-match assumption, unverified on an actual second machine.
+   **Still genuinely open:** `ONEDRIVE_FOLDER_NAME` (the account root's own name) -- is still
+   an exact-match assumption, unverified on an actual second machine.
    Confirmed consistent across the team as of 2026-07-29 (standard OneDrive-for-Business naming,
    tied to the org name), which lowers the risk, but doesn't close it.
 3. **Does the team's plan include 1M context?** Determines the practical ceiling for how much of

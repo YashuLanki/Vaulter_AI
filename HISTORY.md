@@ -181,7 +181,7 @@ A few threads worth following in the list below:
 - `2026-07-28` — Preload pandas before the event loop starts -- the cause of the "server not responding" hangs
 - `2026-07-29` — Fine-tune screening and proximity; fix a wrong answer, a crash, and a report a version behind
 - `2026-07-29` — Add screening/dashboard QA subagents, then use them to catch three real bugs on a new market
-- `2026-07-29` — Stop assuming the shaw library's folder name matches this machine's exactly
+- `2026-07-29` — Stop assuming the document library's folder name matches this machine's exactly
 - `2026-07-29` — Fix a permanent re-staging loop in auto-update -- version tracking never moved
 - `2026-07-29` — Stop shared-folder output from accumulating forever; add a subagent to keep checking it
 - `2026-07-29` — Keep the firm's data out of a deliberately public repo, and add a hook that enforces it

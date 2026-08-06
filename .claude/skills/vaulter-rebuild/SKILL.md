@@ -64,7 +64,7 @@ could not be established.
 
 Settled, so don't re-investigate:
 - The library structure is `!PROPERTIES/<STATE>/<Property>/00. Pre-Acquisition … 06. Disposition`,
-  under `Vaulter LLC - shaw`. Old blocker #5 (unconfirmed folder name) is closed.
+  under the firm's synced document library. Old blocker #5 (unconfirmed folder name) is closed.
 - The firm has **no written buy box** — criteria were tacit. The Property Analysis form in
   `01. Legal\Entity\Investors\Property Analysis\` is the closest thing, inconsistently filled.
 - Deriving numbers from prose is the risky part; §8 of the profile records what stayed unverified.

@@ -35,11 +35,11 @@ in code that no longer exists. Don't present them as open work.
 Match recent commit subjects against REBUILD_PLAN's sections. If commits don't obviously map
 to any of them, say so plainly instead of forcing a fit.
 
-Then check for saved project memory: read
-`C:\Users\YashuLanki\.claude\projects\C--Users-YashuLanki-vaulter-ai\memory\MEMORY.md` if it
-exists, and open any linked memory files whose description looks relevant (project-type
-entries especially — they carry deadlines/decisions git history won't show, like *why* a
-priority was reordered or who's waiting on what).
+Then check for saved project memory: read this project's own `MEMORY.md` index (under this
+machine's Claude Code memory directory for this project) if it exists, and open any linked
+memory files whose description looks relevant (project-type entries especially — they carry
+deadlines/decisions git history won't show, like *why* a priority was reordered or who's
+waiting on what).
 
 If `git status` shows uncommitted changes, read enough of the diff to describe what's
 in-flight, not just that something is dirty.

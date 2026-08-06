@@ -40,6 +40,20 @@ Check specifically, since these are already confirmed dense with real specifics:
 `CLAUDE.md`, and `docs/agents/*/memory.md` (these log real CoStar export filenames and findings —
 judge whether that's generic enough to leave or should be redacted).
 
+**Real machine/account paths are their own category, not just deal data.** Found 2026-08-06: the
+real OneDrive tenant display name and the real SharePoint library display name were written
+directly into `CLAUDE.md`, `system/README.md`, `docs/REBUILD_PLAN.md`, several
+`.claude/agents/*.md` and `.claude/skills/*/SKILL.md` files, and one preserved `HISTORY.md`
+commit-subject line — none of it a "deal," but all of it real, identifying account/tenant detail
+the user explicitly didn't want public. Grep every tracked file for absolute paths containing a
+real Windows username (`C:\Users\<real-name>\...`, not a `<placeholder>`), and for the real
+OneDrive account/tenant and SharePoint library display names — the exact strings to check for
+are on `leak_patterns.txt` (gitignored; read it, never copy its entries into this or any other
+tracked file). A fresh string not yet on that list is exactly the kind of gap this pass exists to
+catch. Real public repository URLs (`github.com/<owner>/<repo>`) are a different, legitimate
+category — the repo's own necessary public address, not personal/account exposure — don't flag
+those.
+
 ## Part B — .gitignore coverage
 
 Confirm `.gitignore` still excludes `system/confidentials/*`, `.env`, and every `system/data/` subfolder with

@@ -667,7 +667,7 @@ as a small standalone piece of work, with **Step 3 automation** grouped alongsid
 > **✅ 2026-07-29: right conclusion, and the implementation turned out to be much smaller than
 > the section anticipated.** Portfolio documents are indeed shared team data read from the
 > firm's existing OneDrive repository — but *nothing is ingested*. `CORPUS_DIR` points straight
-> at `OneDrive - Vaulter LLC/Vaulter LLC - shaw` and `system/corpus/` reads it in place. No watcher, no
+> at the firm's own SharePoint library and `system/corpus/` reads it in place. No watcher, no
 > per-person copy, no local database of contents.
 >
 > **The "open question to resolve" at the end of this section — how to map the real folder tree
@@ -679,7 +679,7 @@ as a small standalone piece of work, with **Step 3 automation** grouped alongsid
 >
 > **Two things this section got right that are now load-bearing rules:** portfolio documents are
 > shared and screening output is shared, but the *privacy boundary* moved rather than
-> disappeared. `CORPUS_DIR` is the shaw library specifically, **never the OneDrive account root
+> disappeared. `CORPUS_DIR` is that library specifically, **never the OneDrive account root
 > one level up** — that root also holds the individual's own Desktop, Documents and Teams chat
 > files. `corpus.resolve_in_corpus()` resolves and re-checks every path. That guard is what the
 > per-user-database architecture used to provide.

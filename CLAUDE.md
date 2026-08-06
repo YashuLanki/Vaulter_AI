@@ -76,7 +76,7 @@ fallback, but *only* if that path already has a real `.env` and the project fold
 
 Two OneDrive paths are derived from a single detected account root and must not be
 confused: `SHARED_DIR` (`Vaulter AI Shared`) is this system's own output, written to;
-`CORPUS_DIR` (`Vaulter LLC - shaw`) is the firm's document library, read-only.
+`CORPUS_DIR` (the firm's own SharePoint library name) is the firm's document library, read-only.
 
 **`SHARED_DIR` now lives INSIDE `CORPUS_DIR` (2026-08-03), and the carve-out is what
 makes that safe.** The library is a synced SharePoint library every teammate already has
@@ -122,10 +122,11 @@ folder first; see the screener's file-resolution note below.)
 
 ### Data access: the firm's document library (`system/corpus/`)
 The firm's SharePoint library is synced to disk by OneDrive at `config.CORPUS_DIR`
-(`OneDrive - Vaulter LLC/Vaulter LLC - shaw`). `system/corpus/` reads it; nothing writes to it.
+(the firm's own OneDrive account, under its own SharePoint library folder name).
+`system/corpus/` reads it; nothing writes to it.
 Two properties govern every decision in that package:
 
-**Scope is the privacy boundary.** `CORPUS_DIR` is the shaw library specifically, never
+**Scope is the privacy boundary.** `CORPUS_DIR` is that library specifically, never
 the OneDrive account root one level up — the root also holds the individual's own
 `Desktop`, `Documents`, and `Microsoft Teams Chat Files`. `corpus.resolve_in_corpus()`
 resolves and re-checks every path and raises `OutsideCorpus` on anything that escapes.

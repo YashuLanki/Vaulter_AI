@@ -38,8 +38,8 @@ new findings.
    `python system/scripts/setup_wizard.py` end to end. Note every point where the wizard assumes
    something machine-specific.
 2. **Path detection:** `system/config.py` on a simulated other-account layout. The known unclosed risk:
-   OneDrive folder naming varies by account/locale (`OneDrive - Vaulter LLC` is this machine's
-   name, not a law of nature). You cannot fully close this from one machine — test what's
+   OneDrive folder naming varies by account/locale (this machine's own OneDrive folder name is
+   not a law of nature). You cannot fully close this from one machine — test what's
    testable, and state plainly what still needs a real second account to confirm.
 3. **First MCP handshake:** from the temp clone, drive a real `python system/main.py mcp` subprocess
    over stdio (reuse the pattern in `system/scripts/check_mcp_health.py`, pointed at the clone). A

@@ -17,7 +17,7 @@ one person's session history is the problem; this agent is that test made repeat
 
 **The one known unclosed risk (still open as of 2026-07-30):** OneDrive folder naming on a
 *different* account. `system/config.py` detects the account root and derives `SHARED_DIR` and
-`CORPUS_DIR` from it; this machine's `OneDrive - Vaulter LLC` naming is an observation, not a
+`CORPUS_DIR` from it; this machine's own OneDrive naming is an observation, not a
 guarantee, and locale/tenant variations can't be tested from this machine alone. Until someone
 runs the wizard on a genuinely different account, every install test must state this caveat
 rather than claiming full coverage.

@@ -379,7 +379,7 @@ registration, no Anthropic key, no Google key, no per-person sign-in.
 
 If OneDrive put the document library somewhere unexpected, set
 `VAULTER_CORPUS_DIR` (and `VAULTER_SHARED_DIR` for the team output folder).
-Both auto-detect `OneDrive - Vaulter LLC` otherwise.
+Both auto-detect the firm's OneDrive account otherwise.
 
 #### Build the document index
 ```bash
@@ -450,7 +450,7 @@ Staff machines are on `general` and need no configuration for this.
   person's own Claude Desktop app. Nothing is exposed over the network, so
   there's no port to open, no ngrok, and no shared API key to manage
 - **The document library is read-only and scoped.** `CORPUS_DIR` points at the
-  `Vaulter LLC - shaw` SharePoint library specifically, never the OneDrive
+  firm's own SharePoint library specifically, never the OneDrive
   account root above it — that root also holds the individual's own Desktop,
   Documents, and Teams chat files. Every path is resolved and re-checked against
   that boundary (`corpus.resolve_in_corpus`), so `../Documents` and absolute
@@ -463,7 +463,7 @@ Staff machines are on `general` and need no configuration for this.
 - The **only** things written outside your machine are screening and proximity
   outputs — the ranked workbook, the HTML report, the proximity CSV/XLSX, and
   two lookup caches (ground-truth results by coordinate, and basemap outlines).
-  They save to the shared team OneDrive (`OneDrive - Vaulter LLC`, auto-detected
+  They save to the shared team OneDrive (auto-detected
   — override with `VAULTER_SHARED_DIR` in `.env` if needed) on purpose, so one
   person's run is visible to the whole team. Nothing there is private to a
   person, and nothing is read back as shared *state* — each file has a single
