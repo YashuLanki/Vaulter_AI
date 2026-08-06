@@ -15,9 +15,15 @@ WHY THE PATTERN LIST IS NOT IN THIS FILE. The confidential thing IS the list of
 names. Hardcoding them here would publish, in the public repo, exactly what the
 hook exists to keep out of it. So the names live in
 `.claude/hooks/leak_patterns.txt` (gitignored) and this file just reads them.
-The mechanism is public; the secrets are not. If that file is missing the hook
-still runs -- structural checks below need no name list -- and says so, rather
-than silently passing everything.
+The mechanism is public; the secrets are not.
+
+If that file is missing, this BLOCKS commit/push rather than silently allowing
+-- a git worktree does not inherit gitignored files from the main checkout, so
+an isolated worktree agent starts with no pattern list by default. That used
+to fail open with a stderr-only warning, and it is exactly how three real
+property names reached tracked history on 2026-08-04/08-06 undetected. Copy
+the file into the worktree (or commit from the main working directory) to
+unblock.
 
 Exit contract: prints a PreToolUse JSON decision on stdout. Never raises --
 a crashing security hook that fails open is worse than no hook, so anything
@@ -157,15 +163,37 @@ def main() -> None:
             findings.append(f"looks like a {label}")
 
     name_pats, have_list = _load_name_patterns()
-    for pat in name_pats:
-        try:
-            m = re.search(pat, added, re.IGNORECASE)
-        except re.error:
-            continue
-        if m:
-            # Report the pattern that fired, never the matched text -- this
-            # message is shown in a transcript that may itself be shared.
-            findings.append(f"confidential-name pattern matched (/{pat}/)")
+    if not have_list:
+        # FAIL CLOSED, not open. This used to be a stderr-only warning
+        # followed by an allow -- and that silently disabled the one check
+        # that matters most (the name blocklist) for a real, measured case:
+        # a git worktree does NOT inherit gitignored files from the main
+        # checkout, so an agent given `isolation: "worktree"` (a normal,
+        # supported way to parallelize work) starts with this file simply
+        # absent. Three real property names reached tracked history this
+        # way on 2026-08-04/08-06 -- the hook ran, found no list, printed a
+        # note nobody saw, and allowed the commit. Structural/credential
+        # checks below still don't need the list and still ran; only the
+        # name check was silently skipped. For a public repo, "I can't
+        # check for leaked names" must block, not pass.
+        findings.append(
+            f"{PATTERNS_FILE.name} not found in this working directory -- "
+            f"the confidential-name check cannot run here. If this is a git "
+            f"worktree, copy {PATTERNS_FILE} from the main repo working "
+            f"directory into this one, or commit from the main working "
+            f"directory instead."
+        )
+    else:
+        for pat in name_pats:
+            try:
+                m = re.search(pat, added, re.IGNORECASE)
+            except re.error:
+                continue
+            if m:
+                # Report the pattern that fired, never the matched text --
+                # this message is shown in a transcript that may itself be
+                # shared.
+                findings.append(f"confidential-name pattern matched (/{pat}/)")
 
     if findings:
         bullets = "\n".join(f"  - {f}" for f in dict.fromkeys(findings))
@@ -176,11 +204,6 @@ def main() -> None:
                   f"move the value into confidentials/.env) and retry. Real "
                   f"names belong in docs/EVIDENCE_APPENDIX.md, which is "
                   f"gitignored.")
-
-    if not have_list:
-        print(f"note: {PATTERNS_FILE.name} not found -- structural and "
-              f"credential checks ran, but the confidential-name list did not.",
-              file=sys.stderr)
 
     _decision(True)
 
