@@ -239,6 +239,20 @@ the once-daily check for a staged code update or org setting, which used to be a
 scheduled job; that is the only piece of the scheduler that survived, and it lives here
 precisely so no thread is needed.
 
+**It also checks every property in the current Project Master against `PROPERTY_SUMMARIES_DIR`
+(added 2026-08-06),** so a newly-acquired property doesn't sit invisible until someone happens to
+ask about it directly. Deliberately detection-only — it never writes a summary itself; whoever
+sees the flag decides whether to ask Claude to build one, same reviewed, human-in-the-loop
+process every other summary has ever gone through. Matching is substring-based on the fully
+normalized (non-alphanumerics stripped) name, not exact — Project Master names often carry a
+parenthetical alias or slash-suffix the summary's own filename dropped (e.g. "Eloy 310 (Interlink
+8/10)" vs. `eloy-310.md`), and exact match flagged those as false positives when tested against
+the real 49-property list. Known, deliberately accepted tradeoff: two properties sharing a name
+stem (e.g. "Mesquite Trails" and "Mesquite Trails Ph 2, 3, 4") can mask each other here if only
+the shorter-named one has a summary — a false negative, not a false positive, and chosen on
+purpose: a wrong "you're missing this" claim damages trust in a tool built to stay silent unless
+something is actually wrong, more than an occasional missed detection in one narrow case costs.
+
 That covers whether the *data behind* a healthy connector is in good shape. Whether the
 *connector itself* is reachable and fast is a different failure mode (found 2026-07-30:
 `check_system_health` itself hung 60-240+s on a stuck git subprocess — see

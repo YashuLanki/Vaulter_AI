@@ -821,6 +821,64 @@ for every listing."""
         except Exception as e:
             lines.append(f"Portfolio file: could not check ({e})")
 
+        # ── Property summaries ───────────────────────────────────
+        # A newly-acquired property has no summary until someone asks about
+        # it and Claude builds one -- deliberately lazy, see
+        # PROPERTY_SUMMARIES_DIR's own design note. But nothing previously
+        # NOTICED a gap existed at all, so a new acquisition could sit
+        # invisible indefinitely if nobody happened to ask. This only
+        # detects and names the gap; it never writes a summary itself --
+        # that stays a human-in-the-loop, reviewed-in-conversation action,
+        # same as it's always been.
+        try:
+            from portfolio import load_properties
+            from config import PROPERTY_SUMMARIES_DIR
+            import re as _re
+
+            def _norm(s):
+                return _re.sub(r"[^a-z0-9]", "", s.lower())
+
+            active, _sold = load_properties()
+            existing = [p.stem for p in Path(PROPERTY_SUMMARIES_DIR).glob("*.md")]
+            existing_norm = [_norm(e) for e in existing]
+            # Substring match, not exact -- Project Master names often carry
+            # a parenthetical alias or slash-suffix the summary's own
+            # filename dropped (e.g. "Eloy 310 (Interlink 8/10)" vs.
+            # "eloy-310.md"), so exact match alone flagged real,
+            # already-summarized properties as missing. Verified against
+            # the live 49-property Project Master: zero false positives.
+            # Known tradeoff, deliberately accepted: two properties sharing
+            # a name stem (e.g. "Mesquite Trails" and "Mesquite Trails Ph 2,
+            # 3, 4") can mask each other here if only the shorter-named one
+            # has been summarized -- a false negative, not a false
+            # positive. Chosen on purpose: a wrong "you're missing this"
+            # claim damages trust in a tool built to stay silent unless
+            # something is actually wrong; an occasional missed detection
+            # in this one narrow case is the safer failure direction, and
+            # asking about that property directly still works exactly as
+            # it always has.
+            no_summary = [
+                p["name"] for p in active
+                if not any(en in _norm(p["name"]) or _norm(p["name"]) in en
+                            for en in existing_norm)
+            ]
+            if no_summary:
+                names = ", ".join(no_summary[:5])
+                more = f" (+{len(no_summary) - 5} more)" if len(no_summary) > 5 else ""
+                lines.append(f"Property summaries: {len(no_summary)} propert"
+                              f"{'y' if len(no_summary) == 1 else 'ies'} with none yet: "
+                              f"{names}{more}")
+                issues.append(
+                    f"{len(no_summary)} propert{'y' if len(no_summary) == 1 else 'ies'} in the "
+                    f"Project Master ha{'s' if len(no_summary) == 1 else 've'} no shared summary "
+                    f"yet: {names}{more}. This is expected for a brand-new acquisition -- summaries "
+                    f"are only built the first time someone asks about a property. If this looks "
+                    f"like a real gap, offer to build one now (the same way a summary always gets "
+                    f"created): read that property's documents and save a summary."
+                )
+        except Exception as e:
+            lines.append(f"Property summaries: could not check ({e})")
+
         # ── Version ──────────────────────────────────────────────
         _v = _get_code_version()
         lines.append(f"Code version: {_v}")
