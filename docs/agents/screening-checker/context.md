@@ -13,8 +13,8 @@ nothing is rediscovered by accident.
 **What "fair for any market" means here.** Almost all of Vaulter's own cost/timing/return
 evidence is Arizona (see `docs/PORTFOLIO_STANDARD.md`). A file from Texas, Colorado, or anywhere
 else must still be scored honestly — not penalized for lacking evidence Arizona happens to have,
-and not silently scored using an Arizona-specific number (e.g. Pinal County's $70–99k/acre
-horizontal cost) that has no business touching another state's file.
+and not silently scored using an Arizona-specific number (e.g. Pinal County's horizontal cost)
+that has no business touching another state's file.
 
 **Source of truth for the checklist.** The checklist embedded in this agent's own instructions
 (`.claude/agents/vaulter-screening-checker.md`) is derived from the screening section of the project's

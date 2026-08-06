@@ -97,8 +97,8 @@ The comparison is to **the product the parcel would exit as, never to same-size
 peers.** The value-add mechanism is subdivision and entitlement, so a 293-acre
 parcel exits as 20–100 acre parcels and those exit as sub-20-acre ones. This was
 a measured bug, not a refinement: comparing every listing to peers its own size
-made big parcels look like bargains, because in Pinal, commercial land asks
-~$239k/acre under 20 acres and ~$25k/acre over 100 — a 10x spread driven purely
+made big parcels look like bargains, because in Pinal, small commercial parcels
+ask many times more per acre than large ones — a large spread driven purely
 by size. Every price in the comparison is derived from the export itself, so it
 needs no entitled-land price feed and recalibrates to whatever market the file
 covers.
@@ -111,13 +111,13 @@ figure and the document it came from.
 
 | | |
 |---|---|
-| **Entitlement** | Priced **per lot**, and it falls with project size — $8,891/lot at 48 lots, $2,000/lot at 220. It tracks lots created and plan sheets a jurisdiction demands, not what the land cost |
+| **Entitlement** | Priced **per lot**, and it falls meaningfully with project size. It tracks lots created and plan sheets a jurisdiction demands, not what the land cost |
 | **Lot yield** | **3.5 lots/acre** (range 2.5–4.2 reported alongside). The previous 8.0 was roughly double anything in the record |
 | **Carry** | Charged at a measured property-tax rate over the **observed** hold, not the underwritten one |
 | **Horizontal development** | Deliberately **excluded** — see below |
 
-Streets, utilities and grading are measured at $70–99k/acre, but only in Pinal
-County, and the firm sells entitled rather than improved land. So the figure is
+Streets, utilities and grading are measured on a real per-acre basis, but only
+in Pinal County, and the firm sells entitled rather than improved land. So the figure is
 quoted as *context* on wide-headroom rows rather than folded into the
 arithmetic, and anything above 4x headroom is flagged as "the comp is probably
 improved land" rather than celebrated as a bargain.

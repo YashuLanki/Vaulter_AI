@@ -360,8 +360,8 @@ Four rules that must survive any edit:
   exit as sub-20-acre ones. `Exit_Headroom` divides what the market pays for that *exit*
   product by what the deal needs it to pay; above 1.0 clears. This was a measured bug, not a
   refinement: comparing every listing to same-size peers made big parcels look like bargains
-  because in Pinal, commercial land asks ~$239k/ac under 20 acres and ~$25k/ac over 100 — a
-  10x spread driven purely by size. A current-use label like Agricultural maps to the
+  because in Pinal, small commercial parcels ask many times more per acre than large ones — a
+  large spread driven purely by size. A current-use label like Agricultural maps to the
   residential/commercial product it would actually exit as (`_EXIT_TYPE_CANDIDATES`), taking
   the cheaper candidate so the test is never flattered.
 - **No two CoStar exports have the same columns, and the header is not always row 1.** Every
@@ -390,14 +390,14 @@ Four rules that must survive any edit:
   2026-07-28 from the firm's own budgets and settlement statements — see
   `docs/PORTFOLIO_STANDARD.md` for every source path. The invented `cost_load` (0.35 of
   purchase) is gone: entitlement is priced **per lot** in every budget the firm has produced
-  and falls with project size ($8,891/lot at 48 lots → $2,000/lot at 220), so a percentage of
-  purchase price was the wrong *shape*. `lots_per_acre` fell 8.0 → 3.5; nothing supported 8.
+  and falls meaningfully with project size, so a percentage of purchase price was the wrong
+  *shape*. `lots_per_acre` fell substantially from its old value; nothing supported the old one.
   Carry is charged at a measured tax rate over the *observed* hold, and is a floor.
   Non-residential rows carry no entitlement figure because none exists, so `Cost_Basis` states
   on each that the required exit is understated — uniform treatment, so ranking within a type
   is unaffected.
-- **Horizontal development stays out of the arithmetic on purpose.** Measured at
-  $70–99k/acre but **only in Pinal County**, and the firm sells entitled rather than improved
+- **Horizontal development stays out of the arithmetic on purpose.** Measured on a real
+  per-acre basis but **only in Pinal County**, and the firm sells entitled rather than improved
   land, so it applies only where the exit comp is improved. Quoted as context on wide-headroom
   rows. Applying a Pinal figure to a Texas listing would be inventing again.
 - **Say what the portfolio can't tell you.** Every run returns `evidence_coverage` per state.

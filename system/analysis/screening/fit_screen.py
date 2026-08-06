@@ -49,16 +49,16 @@ full record and every source path.
 What changed and why:
 
   * `cost_load` -- an invented 0.35 of purchase price -- is gone. Entitlement is
-    priced PER LOT in every budget the firm has ever produced, and falls with
-    project size ($8,891/lot at 48 lots, $2,000/lot at 220). A percentage of
-    purchase price was the wrong SHAPE, not just the wrong value.
-  * `lots_per_acre` fell from 8.0 to 3.5. Nothing in the record supported 8;
-    the two most recent deals are 3.33 and 3.50.
+    priced PER LOT in every budget the firm has ever produced, and falls
+    meaningfully with project size. A percentage of purchase price was the
+    wrong SHAPE, not just the wrong value.
+  * `lots_per_acre` fell substantially from its old value. Nothing in the
+    record supported the old one; the two most recent deals are both lower.
   * Carry is now charged, at a measured property-tax rate, over the OBSERVED
     hold rather than the underwritten one. It is a floor -- insurance,
     management and maintenance have no per-acre figure on record.
   * Horizontal development stays OUT of the arithmetic, deliberately. It is
-    measured ($70-99k/acre) but only in Pinal County, and the firm sells
+    measured, real, and per-acre, but only in Pinal County, and the firm sells
     entitled rather than improved land, so it applies only when the exit comp
     is improved. It is quoted as context on wide-headroom rows instead.
 
@@ -89,10 +89,41 @@ from config import SCREENING_OUTPUT_DIR
 log = logging.getLogger("vaulter.fit_screen")
 
 
+def _load_cost_assumptions() -> dict:
+    """
+    Real $/lot and $/acre figures live in system/data/cost_assumptions.json,
+    gitignored -- this repo is public, and those are the firm's real numbers.
+    Never raises: a missing file is a normal, expected state (a fresh clone of
+    the public repo with no local firm data), not an error. Every ASSUMPTIONS
+    key sourced from here degrades to None when the file is absent, and every
+    use site below treats a None the same as "no record" -- declared, never
+    invented. See docs/PORTFOLIO_STANDARD.md (also gitignored) for how each
+    real figure was measured.
+    """
+    import json
+    path = Path(__file__).resolve().parents[2] / "data" / "cost_assumptions.json"
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+
+
+_COST = _load_cost_assumptions()
+
+
 # ─── Assumptions ──────────────────────────────────────────────────────────────
 # EVERY number here is an assumption, not a ratified rule. They are collected in
 # one place precisely so a partner can argue with them. See §8 of
 # docs/COMPANY_PROFILE.md for what is and isn't established.
+#
+# Real $/lot and $/acre figures (entitlement anchors, horizontal development,
+# the large-ask and exit-path reference figures) are NOT hardcoded here -- this
+# file is public, those are the firm's real numbers, and they live in the
+# gitignored system/data/cost_assumptions.json instead, loaded above. The
+# actual measured values and their sourcing are identical to before; only
+# where they're stored changed. Absent that file, every one of them is None,
+# and every use site below reports the cost as "no record" rather than
+# guessing a substitute.
 
 ASSUMPTIONS = {
     # Vaulter is an opportunistic / value-add predevelopment land investor. It
@@ -109,6 +140,11 @@ ASSUMPTIONS = {
     "moic_target_low":  2.5,
     "moic_target_high": 3.0,
 
+    # The firm's own average asset value, used only as a reference point on an
+    # unusually large ask (see add_cautions) and in the report's headline
+    # figures. Real figure lives in the gitignored cost_assumptions.json.
+    "avg_asset_value_millions": _COST.get("avg_asset_value_millions"),
+
     # Residential lot yield, lots per acre. MEASURED across five deals, and the
     # single largest correction in this file: the previous value of 8.0 was
     # roughly double anything in the record. Dated 2025-06: 3.33; dated
@@ -122,38 +158,33 @@ ASSUMPTIONS = {
 
     # Entitlement soft cost -- engineering, studies, city submittal fees, legal.
     # MEASURED from the firm's own budget workbooks -- see
-    # docs/PORTFOLIO_STANDARD.md for the full record and every source path.
-    # This is priced PER LOT and falls with project size, which is why the
-    # previous "% of purchase price" was the wrong SHAPE, not merely the wrong
-    # value: entitlement cost tracks lots created and plan sheets a
-    # jurisdiction demands, not what the land cost. Anchors below are
+    # docs/PORTFOLIO_STANDARD.md (gitignored) for the full record and every
+    # source path. This is priced PER LOT and falls with project size, which
+    # is why the previous "% of purchase price" was the wrong SHAPE, not
+    # merely the wrong value: entitlement cost tracks lots created and plan
+    # sheets a jurisdiction demands, not what the land cost. Anchors below are
     # interpolated by lot count; see _entitlement_per_lot.
     #
-    #   Project A (invoiced actual) 220 lots  $440,083   ~$2,000/lot
-    #   Project B (budgeted)        116 lots  $396,255    $3,416/lot
-    #   Project C (budgeted)         48 lots  $426,776    $8,891/lot
-    #
-    # All Arizona. A California project (~$914/lot) is TTM stage only and
-    # excluded as a different scope. Where actuals exist they came in UNDER
-    # budget. Project B's own workbook puts entitlement at 3.3% of gross lot
-    # revenue ($301,738 against $9,043,650).
-    "entitlement_per_lot_anchors": ((48, 8891), (116, 3416), (220, 2000)),
+    # Three real Arizona projects, one an invoiced actual, at three different
+    # scales -- per-lot cost falls meaningfully as lot count rises. A
+    # California project at a different scope (TTM stage only) was excluded.
+    # Where actuals exist they came in UNDER budget. The real anchor values
+    # themselves live in the gitignored system/data/cost_assumptions.json.
+    "entitlement_per_lot_anchors": _COST.get("entitlement_per_lot_anchors"),
 
     # Annual carry as a fraction of purchase price. MEASURED, but PARTIAL --
-    # this is property tax only. One property ran $14,577 on an $820,000
-    # purchase in 2018 (1.78%), grown to $17,206 by 2023. Another ran far less
-    # (~$55/lot/yr) off a very low 2011 basis, so this is the high end of two
-    # observations.
+    # this is property tax only, from a real observed property-tax history,
+    # grown over several years. Another property ran far less off a very low
+    # basis, so this rate is the high end of two observations.
     #
     # NOT included, because no figure is on record: insurance, management, site
-    # maintenance and any interest. One closing memo PROJECTED management at a
-    # flat $64,800/yr and maintenance ~$33,000/yr, but those are pro forma, not
-    # actuals, and do not scale per acre. Carry here is therefore a FLOOR.
+    # maintenance and any interest. One closing memo PROJECTED management and
+    # maintenance costs, but those are pro forma, not actuals, and do not scale
+    # per acre. Carry here is therefore a FLOOR.
     "carry_rate_annual": 0.0178,
 
     # Horizontal development -- streets, sewer, water, grading, walls. MEASURED
-    # at $70,000-$99,000/acre across four engineer's estimates on two parcels,
-    # ALL PINAL COUNTY.
+    # across four engineer's estimates on two parcels, ALL PINAL COUNTY.
     #
     # DELIBERATELY NOT IN THE ARITHMETIC, for two reasons:
     #   1. The firm sells entitled, not improved, land -- the buyer pays this.
@@ -165,12 +196,13 @@ ASSUMPTIONS = {
     # It is REPORTED as context on wide-headroom rows instead. See add_pricing.
     #
     # These costs are rising fast and the low end is stale: one project's water
-    # estimate went $743,675 (Oct 2023) -> $1,516,636 (Dec 2025) on identical
-    # design, with the 2025 unit prices taken from actual homebuilder bids of
-    # June 2025. The other project rose 10% over 17 months.
-    "horizontal_per_acre_low":   70000,
-    "horizontal_per_acre_high":  99000,
-    "horizontal_evidence_scope": "Pinal County, AZ (n=4 estimates, 2 parcels)",
+    # estimate roughly doubled over about two years on identical design, with
+    # the newer unit prices taken from actual homebuilder bids. The other
+    # project rose meaningfully over a much shorter window. Real figures live
+    # in the gitignored system/data/cost_assumptions.json.
+    "horizontal_per_acre_low":   _COST.get("horizontal_per_acre_low"),
+    "horizontal_per_acre_high":  _COST.get("horizontal_per_acre_high"),
+    "horizontal_evidence_scope": _COST.get("horizontal_evidence_scope", "no local cost data"),
 
     # Hold period. Underwritten: 30-60 months across five models (30, 36, 54
     # and 60 months across four of them). Actual: 5.9-15.1 years across six
@@ -235,10 +267,13 @@ def _entitlement_per_lot(lots: float) -> float:
     Entitlement soft cost per lot, interpolated by project size from the three
     measured Arizona anchors. Larger projects spread fixed costs over more lots.
 
-    Flat outside the measured range rather than extrapolated -- a 900-lot
-    project is not $0/lot, and a 10-lot one is not $40,000/lot.
+    Flat outside the measured range rather than extrapolated -- a very large
+    project doesn't get an implausibly tiny per-lot figure, and a very small
+    one doesn't get an implausibly large one.
     """
     anchors = ASSUMPTIONS["entitlement_per_lot_anchors"]
+    if anchors is None:
+        return float("nan")  # no local cost data -- declared as "no record" downstream, never invented
     if not (lots and lots == lots and lots > 0):
         return float("nan")
     if lots <= anchors[0][0]:
@@ -358,9 +393,9 @@ _CONCEPT_RULES = {
         # punctuation into spaces before these run, so the old `/\s*(sf|ac|unit|
         # room)` could never match anything -- the slash was already gone.
         # Measured consequence: a `Price/Acre` column normalises to "price acre",
-        # dodged the avoid list, and won the asking-price slot with a median of
-        # $261,360 -- a per-acre figure used as the total purchase price, with
-        # every downstream number wrong and nothing to show for it.
+        # dodged the avoid list, and won the asking-price slot -- a per-acre
+        # figure used as the total purchase price, with every downstream
+        # number wrong and nothing to show for it.
         "avoid":  [r"\bper\b", r"\b(sf|ac|acre|acres|unit|units|room|rooms)\b",
                    r"last|prior|previous|sold", r"rent", r"assessed|tax"],
         "numeric": True, "lo": 1000, "hi": 5_000_000_000,
@@ -582,8 +617,8 @@ def normalise_columns(df: pd.DataFrame) -> tuple[pd.DataFrame, list[dict]]:
         df["Secondary Type"] = _text(df["Secondary Type"]).str.split(",").str[0].str.strip()
 
     # A missing land type must SAY it is missing. Left blank it rendered as an
-    # empty gap in every summary line -- "60ac, , $0.5M" -- which reads as a
-    # formatting fault rather than as absent data. "Unknown" is also the key the
+    # empty gap in every summary line, which reads as a formatting fault
+    # rather than as absent data. "Unknown" is also the key the
     # peer-group tables already use internally, so nothing downstream changes.
     # Real: 9 of 50 rows on the Tucson export have no Proposed Land Use.
     if "Secondary Type" in df.columns:
@@ -750,8 +785,8 @@ def add_size_context(df: pd.DataFrame) -> pd.DataFrame:
 #
 # Getting this wrong was a real, measured error. An earlier version compared
 # every listing to same-type peers in the same submarket regardless of size. In
-# Pinal County, commercial land asks ~$239k/ac under 20 acres and ~$25k/ac over
-# 100 acres -- a 10x spread driven purely by parcel size. A 293-acre assemblage
+# Pinal County, small commercial parcels ask many times more per acre than
+# large ones -- a large spread driven purely by parcel size. A 293-acre assemblage
 # was therefore scored against 9-acre retail pads and looked like a bargain when
 # it wasn't. Land price per acre falls steeply with parcel size in every market;
 # any per-acre comparison that ignores size is meaningless.
@@ -927,8 +962,7 @@ def add_pricing(df: pd.DataFrame, moic: float) -> pd.DataFrame:
     Two paths, because the profile (§4) is explicit that they differ:
 
       * RESIDENTIAL exits per LOT. Reported as an implied $/lot at the target
-        multiple, cross-checked against the firm's own 2023 models ($25,000 and
-        $45,673/lot).
+        multiple, cross-checked against the firm's own 2023 models.
       * EVERYTHING ELSE exits per acre of smaller entitled parcel.
 
     Both are scored on the same measure -- Exit_Headroom, the ratio of what the
@@ -970,10 +1004,16 @@ def add_pricing(df: pd.DataFrame, moic: float) -> pd.DataFrame:
     invested_per_acre = ask_per_acre + entitlement_per_acre + carry_per_acre
     required_exit = invested_per_acre * moic
 
+    # A missing local cost file (see ASSUMPTIONS) means no entitlement figure
+    # exists for ANY row, not just non-residential -- same "declared, never
+    # invented" treatment, just applied uniformly instead of by land type.
+    have_entitlement_data = ASSUMPTIONS["entitlement_per_lot_anchors"] is not None
     cost_basis = pd.Series(
-        ["purchase + entitlement + property-tax carry" if r else
+        ["purchase + entitlement + property-tax carry" if (r and have_entitlement_data) else
          "purchase + property-tax carry ONLY — no entitlement cost on record for "
-         "non-residential, so the required exit below is understated"
+         "non-residential, so the required exit below is understated" if have_entitlement_data else
+         "purchase + property-tax carry ONLY — no local entitlement cost data available, "
+         "so the required exit below is understated"
          for r in is_resi], index=df.index)
 
     levels = _band_price_table(df, ask_per_acre)
@@ -1017,12 +1057,15 @@ def add_pricing(df: pd.DataFrame, moic: float) -> pd.DataFrame:
             # range and its scope instead of celebrating the number.
             lo = ASSUMPTIONS["horizontal_per_acre_low"]
             hi = ASSUMPTIONS["horizontal_per_acre_high"]
+            scope = ASSUMPTIONS["horizontal_evidence_scope"]
+            cost_note = (f"not costed here and measured ${lo:,}–${hi:,}/acre in {scope}, rising"
+                         if lo is not None and hi is not None
+                         else "not costed here, and no local cost figure is on record")
             scores.append(75)
             verdicts.append(
                 f"Exit market pays {h:.1f}x what this needs — implausibly wide; the exit comp is "
                 f"likely improved land while this is raw. Streets, sewer, water and grading are "
-                f"not costed here and measured ${lo:,}–${hi:,}/acre in "
-                f"{ASSUMPTIONS['horizontal_evidence_scope']}, rising"
+                f"{cost_note}"
             )
         elif h >= 2.0:
             scores.append(100); verdicts.append(f"Exit market pays {h:.1f}x what this needs — wide headroom")
@@ -1167,8 +1210,10 @@ def add_cautions(df: pd.DataFrame) -> pd.DataFrame:
                       "the firm; verify site-specific mitigation cost")
         if pd.notna(st) and st > 0:
             c.append(f"{int(st)} structure(s) on site — verify if income or demo cost")
-        if pd.notna(pr) and pr > 20_000_000:
-            c.append(f"${pr/1e6:.0f}M ask — well above the firm's ~$3.5M average per asset")
+        large_ask_threshold = _COST.get("large_ask_threshold")
+        large_ask_text = _COST.get("large_ask_reference_text")
+        if large_ask_threshold and large_ask_text and pd.notna(pr) and pr > large_ask_threshold:
+            c.append(f"${pr/1e6:.0f}M ask — {large_ask_text}")
         past = passed_on_caution(sta, co)
         if past:
             c.append(past)
@@ -1331,7 +1376,9 @@ MISSION = ("Opportunistic value-add predevelopment land investor: buys raw or "
 
 # How each land type actually exits, and what the firm's own record says it
 # fetched. Residential figures are settlement statements; the $/sf figures are
-# the firm's own models on live deals.
+# the firm's own models on live deals. The real reference figures live in the
+# gitignored system/data/cost_assumptions.json; a generic shape-only sentence
+# is used in its absence rather than a stale or invented number.
 #
 # Matched by PATTERN, in order, because `Proposed Land Use` does not use the
 # five words this used to look for. Substring-matching "residential" left
@@ -1342,14 +1389,14 @@ MISSION = ("Opportunistic value-add predevelopment land investor: buys raw or "
 # the export already did.
 _EXIT_PATH = (
     (_RESIDENTIAL_PAT,
-     "exits as lots — the firm's own sold $37k–$45k/lot, 2020–24"),
+     _COST.get("exit_path_residential_text", "exits as lots")),
     (r"industrial|warehouse|distribution|manufactur|truck\s*stop|storage\s*yard",
-     "exits per sq ft — the firm's own industrial models run ~$1.50/sf on interstate frontage"),
+     _COST.get("exit_path_industrial_text", "exits per sq ft")),
     (r"agricultur|pasture|ranch\b|farm|timber|open\s*space",
      "would exit as residential or commercial, not as farmland"),
     (r"commercial|retail|office|medical|health|restaurant|fast\s*food|hotel|"
      r"store|service\s*station|auto|bank|car\s*wash|mixed\s*use",
-     "exits per sq ft, not per lot — the firm's own commercial models run ~$7.00/sf"),
+     _COST.get("exit_path_commercial_text", "exits per sq ft, not per lot")),
 )
 _EXIT_PATH_UNKNOWN = "exit product depends on what it gets entitled for"
 

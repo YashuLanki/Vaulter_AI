@@ -86,6 +86,11 @@ system/data/pending_settings/*
 # rebuildable from the team's own property summaries, never checked in)
 system/data/portfolio_comparison_index.json
 
+# ── Real cost/pricing figures behind fit_screen.py's ASSUMPTIONS -- ──
+# the firm's real $/lot and $/acre figures; fit_screen.py loads this at
+# import time and degrades to "no record" if it's absent, never invents one
+system/data/cost_assumptions.json
+
 # ── Keep folder structure via .gitkeep ────────────────────────────
 !system/data/logs/.gitkeep
 !system/data/processed/.gitkeep

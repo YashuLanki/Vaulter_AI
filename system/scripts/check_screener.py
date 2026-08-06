@@ -529,7 +529,7 @@ def main() -> int:
           "the understated-exit caveat is suppressed where there is no headroom")
 
     # ── 9. A blank land type is named, not left as a hole in the line ─────────
-    # "60ac, , $0.5M" -- an empty gap reads as a formatting fault. 9 of 50 rows
+    # An empty gap in a summary line reads as a formatting fault. 9 of 50 rows
     # on the real Tucson export have no Proposed Land Use.
     print("\n9. A missing land type says Unknown")
     blank_type = filler.copy()
@@ -603,20 +603,31 @@ def main() -> int:
           (sm["Indicative_Lots"] >= 1).all(),
           f"lots {list(sm['Indicative_Lots'])}")
 
-    sweep = [fs._entitlement_per_lot(n) for n in range(1, 400)]
-    check("entitlement per lot never rises with project size, and stays inside the anchors",
-          all(a >= b for a, b in zip(sweep, sweep[1:]))
-          and max(sweep) == 8891 and min(sweep) == 2000,
-          f"1 lot ${sweep[0]:,.0f} -> 399 lots ${sweep[-1]:,.0f}, monotone")
-    check("a zero or negative lot count does not poison the arithmetic with NaN",
-          fs._entitlement_per_lot(0) != fs._entitlement_per_lot(0)
-          and fs._entitlement_per_lot(48) == 8891,
-          "0 lots -> NaN (and add_pricing floors the count at 1 before asking)")
+    # Expected values come from the real, gitignored cost_assumptions.json --
+    # never hardcoded here, since that file is the single source of truth and
+    # this is a public, tracked test file. Absent that file, these two checks
+    # are skipped rather than asserting against a stale or fabricated number.
+    anchors = fs.ASSUMPTIONS.get("entitlement_per_lot_anchors")
+    if anchors:
+        sweep = [fs._entitlement_per_lot(n) for n in range(1, 400)]
+        expected_max = max(y for _, y in anchors)
+        expected_min = min(y for _, y in anchors)
+        check("entitlement per lot never rises with project size, and stays inside the anchors",
+              all(a >= b for a, b in zip(sweep, sweep[1:]))
+              and max(sweep) == expected_max and min(sweep) == expected_min,
+              f"1 lot ${sweep[0]:,.0f} -> 399 lots ${sweep[-1]:,.0f}, monotone")
+        check("a zero or negative lot count does not poison the arithmetic with NaN",
+              fs._entitlement_per_lot(0) != fs._entitlement_per_lot(0)
+              and fs._entitlement_per_lot(48) == anchors[0][1],
+              "0 lots -> NaN (and add_pricing floors the count at 1 before asking)")
+    else:
+        print("  SKIP  entitlement-per-lot checks -- no local cost_assumptions.json present")
 
     # ── 12. A column that means something else must not be taken for it ───────
     # `_norm` turns punctuation into spaces before the avoid patterns run, so
     # `/\s*(sf|ac|unit)` could never match: "Price/Acre" normalised to
-    # "price acre" and won the asking-price slot with a median of $261,360.
+    # "price acre" and won the asking-price slot with a real, plausible-looking
+    # per-acre price.
     print("\n12. Per-unit and wrong-unit columns are refused, not guessed at")
     # Synthetic, and deliberately independent of whichever export was handed in:
     # the point is the column NAME and the magnitude of its values, not the

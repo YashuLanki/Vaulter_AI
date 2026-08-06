@@ -222,8 +222,8 @@ entitlement get it there?"*
 
 The mechanism matters: **you buy at large-parcel pricing and exit at smaller entitled-parcel
 pricing.** A first version compared each listing to same-type peers in the same submarket
-regardless of size, and that was wrong — in Pinal, commercial land asks ~$239k/ac under 20
-acres and ~$25k/ac over 100, a 10x spread driven purely by parcel size, so 293-acre
+regardless of size, and that was wrong — in Pinal, small commercial parcels ask many times
+more per acre than large ones, a spread driven purely by parcel size, so 293-acre
 assemblages were being scored against 9-acre retail pads and looked like bargains. The fix
 compares each parcel to the band it would exit *as*. On the sample export this dropped Tier 1
 from 22 listings to 12 and moved the previously top-ranked parcel to rank 17.
@@ -259,9 +259,9 @@ figure with the document it came from — and the screener was rewritten against
 
 | Was | Is | Source |
 |---|---|---|
-| `cost_load`, a flat **0.35 of purchase price** covering entitlement and carry | Gone. Entitlement is priced **per lot** and falls with project size: $8,891/lot at 48 lots, $3,416 at 116, $2,000 at 220, interpolated between | Three Arizona budget workbooks — one an invoiced actual |
+| `cost_load`, a flat **0.35 of purchase price** covering entitlement and carry | Gone. Entitlement is priced **per lot** and falls meaningfully with project size, interpolated between measured anchors | Three Arizona budget workbooks — one an invoiced actual |
 | `lots_per_acre` **8.0** | **3.5**, with 2.5–4.2 reported alongside anything derived from it | Five measured deals: 3.33, 3.50, 4.20, 2.50 and one outlier excluded. The two most recent deals are the two lowest |
-| Carry folded into the 35% | Charged separately at a measured **1.78%/yr property tax**, over the **observed** hold, not the underwritten one | One Arizona property, $14,577 on $820,000 in 2018 |
+| Carry folded into the 35% | Charged separately at a measured **1.78%/yr property tax**, over the **observed** hold, not the underwritten one | One real Arizona property's tax history |
 
 Three things about that table matter more than the numbers in it.
 
@@ -274,7 +274,7 @@ of the exit test. `COMPANY_PROFILE.md` §7's "7–9" is stale for the same reaso
 corrected there, because that document is an unratified draft nobody has signed off — see §4.
 
 **Horizontal development is deliberately still out of the arithmetic.** Streets, utilities and
-grading are measured — $70–99k/acre — but only in Pinal County, and the firm sells *entitled*
+grading are measured, real, and per-acre — but only in Pinal County, and the firm sells *entitled*
 rather than *improved* land, so the cost applies only when the exit comp happens to be improved
 land. Putting a Pinal figure into a Texas row would be inventing a number to avoid admitting an
 absence. Instead it is quoted as context on wide-headroom rows, and anything above 4x headroom
@@ -662,10 +662,11 @@ Still genuinely open:
    the same if/elif chain, shadows the precise signal. This is a standard question — §5 of the
    profile documents the firm buying through flood repeatedly — not a code question. Do not
    ship the label-quoting version.
-5. **Is `$8,891/lot` the right entitlement floor for a genuinely small project?** It is the
-   figure from the smallest measured project, and `PORTFOLIO_STANDARD.md` (local-only) §5.5
-   flags that same project's 0.63 lots/acre estate-lot density as an outlier. The anchors are
-   flat below 48 lots, so every small project pays the outlier's rate.
+5. **Is the smallest anchor's entitlement figure the right floor for a genuinely small
+   project?** It is the figure from the smallest measured project, and
+   `PORTFOLIO_STANDARD.md` (local-only) §5.5 flags that same project's 0.63 lots/acre
+   estate-lot density as an outlier. The anchors are flat below the smallest measured
+   project's lot count, so every small project pays the outlier's rate.
 6. **Should a sub-20-acre listing be in the headroom test at all?** Its exit band maps to its
    own band, so it is scored against a median it is part of, and its entire modelled lift has
    to come from entitlement already being in place. It does not occur on either real export

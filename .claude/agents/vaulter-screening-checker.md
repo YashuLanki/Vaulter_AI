@@ -77,8 +77,8 @@ doesn't apply to this file).
 ## Step 3 — fairness across markets, specifically
 
 This file's market may not be Arizona. Re-check items 5 and 8 with that lens explicitly: nothing
-computed for this file should have leaked in an Arizona-specific number (e.g. the $70–99k/acre
-Pinal horizontal-cost figure) unless the file's own listings are actually in Pinal County.
+computed for this file should have leaked in an Arizona-specific number (e.g. the Pinal County
+horizontal-cost figure) unless the file's own listings are actually in Pinal County.
 
 ## Output
 

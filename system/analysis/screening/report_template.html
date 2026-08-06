@@ -224,8 +224,8 @@ figcaption{font-size:12.5px;color:var(--ink-3);margin-top:10px;max-width:70ch}
 .d-sub{font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-3);
   margin:0 0 9px;font-weight:600}
 /* Each label and its value must be ONE grid item. As two, an odd column count
-   split every pair across a row boundary — "Size / 42 ac / Asking price" then
-   "$1.20M / Price per acre / …" — and the sheet is exactly the width where
+   split every pair across a row boundary — a label ended up on one row and
+   its value on the next — and the sheet is exactly the width where
    auto-fit lands on three columns. */
 .d-facts{display:grid;grid-template-columns:repeat(auto-fit,minmax(132px,1fr));
   gap:10px 16px;margin-top:16px}
@@ -697,8 +697,10 @@ const sized  = top3.filter(x=>x.acres!=null).length;
 
 document.getElementById("f-cap").textContent = priced
   ? "$" + (DATA.capitalTop3/1e6).toFixed(1) + "M" : "—";
+const avgAsset = DATA.assumptions.avg_asset_value_millions;
 document.getElementById("f-cap-l").textContent =
-  priced>=3 ? "to acquire all three, against a $3.5M average per asset"
+  priced>=3 ? (avgAsset!=null ? `to acquire all three, against a $${avgAsset}M average per asset`
+                               : "to acquire all three")
   : priced   ? `for the ${priced} of the top three that state an asking price`
              : "none of the top three states an asking price";
 
@@ -1123,9 +1125,9 @@ document.addEventListener("keydown", e=>{
 const LABEL={
   moic_target_high:["Return target","3&times; on invested capital. Stated by the firm; no document sets it as policy"],
   moic_target_low:["Lower bound","2.5&times;. Recent models come out 2.2&ndash;3.4&times;"],
-  entitlement_per_lot_anchors:["Entitlement cost","Measured per lot, and it falls with scale: $8,891/lot at 48 lots, $3,416 at 116, $2,000 at 220. From three Arizona budgets"],
+  entitlement_per_lot_anchors:["Entitlement cost","Measured per lot from three real Arizona budgets, and falls meaningfully with scale"],
   carry_rate_annual:["Carry","1.78% of purchase a year, property tax only. A floor &mdash; insurance, management and maintenance have no figure on record"],
-  horizontal_per_acre_low:["Roads and utilities","$70,000&ndash;$99,000 an acre, and rising. Deliberately not costed here: the firm sells entitled land, not built-out land, and the evidence is Pinal County only"],
+  horizontal_per_acre_low:["Roads and utilities","Measured, real, and rising. Deliberately not costed here: the firm sells entitled land, not built-out land, and the evidence is Pinal County only"],
   hold_years_underwritten:["Modelled hold","30&ndash;60 months across five recent models"],
   hold_years_actual:["Observed hold","6&ndash;15 years across six completed deals &mdash; and 21 properties bought 2011&ndash;15 are still held"],
   lots_per_acre:["Lot yield","3.5 an acre, residential only. Measured range 2.5&ndash;4.2; the two most recent deals are 3.33 and 3.50"],
