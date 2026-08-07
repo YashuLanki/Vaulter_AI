@@ -38,6 +38,8 @@ that for you, since Claude Desktop can't be restarted from inside its
 own MCP server process.
 """
 
+import base64
+import hashlib
 import json
 import shutil
 import subprocess
@@ -172,6 +174,29 @@ def apply_pending_update(project_root: Path = None) -> dict:
             "applied": False,
             "reason": f"the staged update record points to a missing file ({zip_path.name}) "
                       f"-- it will be re-downloaded on the next check",
+        }
+
+    # Re-verify here too, not just at staging time -- belt and suspenders.
+    # _check_and_stage_update() already checked the signature before writing
+    # ready.json, but this is the step that actually overwrites project
+    # files, so it re-checks against the signature stored in ready.json
+    # rather than trusting that nothing touched the staged zip in between.
+    from core.release_signing import verify_bytes, PUBLIC_KEY_PATH
+
+    signature_b64 = pending.get("signature")
+    verified = False
+    if signature_b64 and PUBLIC_KEY_PATH.exists():
+        try:
+            digest = hashlib.sha256(zip_path.read_bytes()).digest()
+            verified = verify_bytes(digest, base64.b64decode(signature_b64))
+        except Exception:
+            verified = False
+    if not verified:
+        return {
+            "applied": False,
+            "reason": f"the staged package for version {version} failed signature "
+                      f"verification at apply time -- refusing to apply it. Delete "
+                      f"{zip_path} and the pending update record, then let it re-download.",
         }
 
     updated, deleted = apply_update(project_root, zip_path)

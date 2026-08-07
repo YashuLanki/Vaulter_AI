@@ -238,16 +238,47 @@ def _check_and_stage_update() -> None:
 
     local_zip = PENDING_UPDATE_DIR / zip_filename
     _shutil.copy2(remote_zip, local_zip)
+
+    # Verify BEFORE trusting this download at all -- anyone with write access
+    # to the shared update folder could otherwise get every instance to run
+    # arbitrary code just by placing a zip there. A hash stored in that same
+    # writable folder wouldn't help (an attacker who can write the zip can
+    # just as easily rewrite the hash next to it); this checks the signature
+    # against a key that never lives in the shared folder. See
+    # core/release_signing.py. Fails CLOSED: no public key, no signature
+    # field, or a genuine mismatch all refuse to stage, the same "missing
+    # input blocks rather than silently passes" rule check_no_leaks.py uses.
+    import base64 as _base64
+    import hashlib as _hashlib
+    from core.release_signing import verify_bytes, PUBLIC_KEY_PATH
+
+    signature_b64 = remote.get("signature")
+    verified = False
+    if signature_b64 and PUBLIC_KEY_PATH.exists():
+        try:
+            digest = _hashlib.sha256(local_zip.read_bytes()).digest()
+            verified = verify_bytes(digest, _base64.b64decode(signature_b64))
+        except Exception:
+            verified = False
+
+    if not verified:
+        local_zip.unlink(missing_ok=True)
+        log.warning(f"[UPDATE] Version {remote_version} FAILED signature verification -- "
+                    f"refusing to stage it. This could mean a corrupted download, a "
+                    f"missing {PUBLIC_KEY_PATH.name}, or tampering. Not applying.")
+        return
+
     ready_path.write_text(json.dumps({
         "version": remote_version,
         "zip_filename": zip_filename,
         "downloaded_at": _dt.datetime.now().isoformat(timespec="seconds"),
         "notes": remote.get("notes", ""),
         "current_version_at_download": current_version,
+        "signature": signature_b64,
     }, indent=2))
-    log.info(f"[UPDATE] Staged version {remote_version} (currently running {current_version}) -- "
-             f"apply it with the apply_pending_update tool, or as a fallback "
-             f"`python system/scripts/apply_update.py`.")
+    log.info(f"[UPDATE] Staged version {remote_version} (currently running {current_version}), "
+             f"signature verified -- apply it with the apply_pending_update tool, or as a "
+             f"fallback `python system/scripts/apply_update.py`.")
 
 
 def _check_and_stage_org_settings() -> None:

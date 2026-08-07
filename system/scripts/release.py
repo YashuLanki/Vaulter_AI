@@ -33,6 +33,8 @@ the mechanism is deliberately notify-and-stage, not fully automatic.
 """
 
 import argparse
+import base64
+import hashlib
 import json
 import subprocess
 import sys
@@ -42,6 +44,8 @@ from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).parent.parent.resolve()
 sys.path.insert(0, str(PROJECT_ROOT))
+
+PRIVATE_KEY_PATH = PROJECT_ROOT / "confidentials" / "release_signing_key.pem"
 
 # Never include these in a published package -- secrets, local data,
 # virtual environments, and git/OS metadata are all machine-specific or
@@ -107,7 +111,22 @@ def _build_package(version: str) -> Path:
     return zip_path
 
 
-def _write_marker(channel: str, version: str, zip_filename: str, notes: str) -> None:
+def _sign_package(zip_path: Path) -> str:
+    """
+    Signs the package's SHA-256 hash with the private release-signing key
+    and returns the signature, base64-encoded so it's safe to embed in
+    the JSON marker. Every instance verifies this against the public key
+    (system/release_public_key.pem, tracked) before trusting a download --
+    see core/release_signing.py for why this has to be asymmetric.
+    """
+    from core.release_signing import sign_bytes
+
+    digest = hashlib.sha256(zip_path.read_bytes()).digest()
+    signature = sign_bytes(digest, PRIVATE_KEY_PATH)
+    return base64.b64encode(signature).decode("ascii")
+
+
+def _write_marker(channel: str, version: str, zip_filename: str, notes: str, signature: str) -> None:
     from config import UPDATES_DIR
     from core import safe_io
 
@@ -117,6 +136,7 @@ def _write_marker(channel: str, version: str, zip_filename: str, notes: str) -> 
         "zip_filename": zip_filename,
         "published_at": datetime.now().isoformat(timespec="seconds"),
         "notes": notes,
+        "signature": signature,
     })
     print(f"  Updated {marker_path.name} — channel \"{channel}\" now points to {version}.")
 
@@ -127,7 +147,8 @@ def publish(notes: str) -> None:
     print(f"  Version: {version}")
 
     zip_path = _build_package(version)
-    _write_marker("canary", version, zip_path.name, notes)
+    signature = _sign_package(zip_path)
+    _write_marker("canary", version, zip_path.name, notes, signature)
 
     print()
     print(f"Published. Only instances with VAULTER_UPDATE_CHANNEL=canary will pick this up.")

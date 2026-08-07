@@ -33,6 +33,13 @@ mcp[cli]>=1.9,<2    # MCP server framework (local stdio, launched by Claude Desk
                     # install picked up 2.0.0 unpinned and the connector failed
                     # to start (found 2026-08-04 on a real bare-machine reinstall).
 
+# ── Auto-update integrity (scripts/release.py, core/release_signing.py) ─
+cryptography        # Ed25519 signing/verification for update packages --
+                    # every instance verifies a downloaded update against a
+                    # public key before staging it, so write access to the
+                    # shared update folder alone isn't enough to get an
+                    # instance to run arbitrary code.
+
 # ── External Tools (install separately, not via pip) ───────────────
 # Tesseract OCR  : https://github.com/UB-Mannheim/tesseract/wiki
 # Poppler        : https://github.com/oschwartz10612/poppler-windows/releases

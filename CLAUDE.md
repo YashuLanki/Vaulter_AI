@@ -327,6 +327,25 @@ would have — the human decision just happens in chat instead of a terminal. Th
 step that can't be automated at all: fully quitting and reopening Claude Desktop afterward,
 since an MCP server can't restart its own parent application.
 
+**Every published package is signed, and every instance verifies before trusting a download
+(2026-08-07).** Before this, anyone with write access to the shared OneDrive update folder —
+every teammate, by design — could place a zip there and every instance would download and (on
+a human "yes") apply it: one compromised account meant arbitrary code execution everywhere. A
+hash living in that same writable folder wouldn't have fixed this — an attacker who can write
+the zip can just as easily rewrite the hash next to it. The fix is asymmetric:
+`system/scripts/release.py` signs the package's SHA-256 digest with an Ed25519 private key that
+never leaves the releasing machine and never touches the shared folder
+(`system/confidentials/release_signing_key.pem`, gitignored, made once by
+`system/scripts/generate_release_key.py`); every instance verifies against the public half
+(`system/release_public_key.pem`, tracked — not secret, ships with every install). Verification
+happens twice: once in `mcp_server.py::_check_and_stage_update` before a download is ever
+written to `ready.json` (so a bad package is never even offered to the user as "ready to
+apply"), and again in `apply_update.py::apply_pending_update` right before files actually get
+overwritten. Both fail **closed** — a missing public key, a missing signature field, or a
+genuine mismatch all refuse rather than silently proceeding, the same rule
+`.claude/hooks/check_no_leaks.py` uses when its own name list goes missing. See
+`system/core/release_signing.py` for the primitive itself.
+
 `system/scripts/apply_update.py`'s `PRESERVED_DIR_NAMES` must always match `system/scripts/release.py`'s
 `EXCLUDED_DIR_NAMES` exactly — the apply step trusts that anything under those paths was
 never in the package to begin with, so it never deletes or overwrites them.
