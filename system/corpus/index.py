@@ -102,7 +102,7 @@ def _corpus_root() -> Path:
             "The firm's document library isn't available on this machine. "
             "Expected it at: "
             f"{CORPUS_DIR if CORPUS_DIR else '<OneDrive not found>'}. "
-            "Check that OneDrive is running and syncing the 'Vaulter LLC - shaw' "
+            "Check that OneDrive is running and syncing the firm's document "
             "library, or set VAULTER_CORPUS_DIR in confidentials/.env."
         )
     return CORPUS_DIR

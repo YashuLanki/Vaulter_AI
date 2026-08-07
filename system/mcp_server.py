@@ -29,8 +29,8 @@ your own machine. Claude Desktop or Claude Code are required.
 
 The privacy boundary is now enforced by scope rather than by isolation. The
 old design kept each person's email in their own local database. There is no
-email ingestion any more; instead, `config.CORPUS_DIR` points at the
-"Vaulter LLC - shaw" library specifically and never at the OneDrive account
+email ingestion any more; instead, `config.CORPUS_DIR` points at the firm's
+own SharePoint library specifically and never at the OneDrive account
 root above it, which holds that individual's own Desktop, Documents, and
 Teams chat files. `corpus.resolve_in_corpus` enforces this on every path.
 
@@ -710,7 +710,7 @@ for every listing."""
             issues.append(
                 "The firm's document library isn't synced on this machine, so document "
                 "search and property lookups won't return anything. Check that OneDrive "
-                "is signed in and syncing the 'Vaulter LLC - shaw' library."
+                "is signed in and syncing the firm's document library."
             )
         else:
             lines.append(f"Document library: connected ({CORPUS_DIR.name})")
@@ -1475,7 +1475,7 @@ for every listing."""
 
             if not CORPUS_AVAILABLE:
                 return ("The firm's document library isn't synced on this machine, so there's "
-                        "no folder to open. Check that OneDrive is syncing 'Vaulter LLC - shaw'.")
+                        "no folder to open. Check that OneDrive is signed in and syncing.")
 
             matches = _find_property_folders(property_name)
 
@@ -1536,7 +1536,7 @@ for every listing."""
 
             if not CORPUS_AVAILABLE:
                 return ("The firm's document library isn't synced on this machine, so there's "
-                        "no file to open. Check that OneDrive is syncing 'Vaulter LLC - shaw'.")
+                        "no file to open. Check that OneDrive is signed in and syncing.")
 
             folders = _find_property_folders(property_name)
             if not folders:

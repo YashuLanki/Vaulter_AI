@@ -27,7 +27,7 @@ tool surface, the keyless geo swap, zero required API keys.
 intelligence, `.msg` support, and Phase 3 moving in-conversation.
 
 Key fact to keep in mind: the firm's library is **already a synced local folder**
-(`config.CORPUS_DIR`), ~493k files, searched by filename via a SQLite index. Reading it needs
+(`config.CORPUS_DIR`), a large number of files, searched by filename via a SQLite index. Reading it needs
 no connector and never did.
 
 ## Delegation map

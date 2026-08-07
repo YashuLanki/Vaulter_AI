@@ -450,7 +450,7 @@ def _hunt_for_shared_folder(onedrive_root: Path, corpus_dir) -> Path | None:
     and record it.
 
     Bounded to two levels deliberately, and the document library is skipped
-    outright: it holds ~493,000 OneDrive placeholder files, and walking it here
+    outright: it holds a huge number of OneDrive placeholder files, and walking it here
     would take minutes and hydrate files nobody asked for.
     """
     name = "Vaulter AI Shared"
@@ -596,7 +596,7 @@ def build_corpus_index() -> bool:
         print(f"  ⚠ The document library isn't on this machine yet.")
         print(f"     Expected it at: {config.CORPUS_DIR}")
         print("     Open OneDrive, sign in with your Vaulter account, and make sure the")
-        print("     'Vaulter LLC - shaw' library is set to sync. Then re-run this wizard.")
+        print("     firm's document library is set to sync. Then re-run this wizard.")
         return False
 
     print(f"  Library: {config.CORPUS_DIR}")
@@ -693,7 +693,7 @@ def _schedule_weekly_refresh() -> None:
                VLT_RUNNER=str(runner),
                VLT_ARG=f'"{target}" index-corpus',
                VLT_TASK=task,
-               VLT_DESC=("Rebuilds Vaulter AI's list of documents in the shaw library. "
+               VLT_DESC=("Rebuilds Vaulter AI's list of documents in the firm's library. "
                          "Reads file names and dates only - never opens or downloads "
                          "documents, so it uses no disk space."))
     try:

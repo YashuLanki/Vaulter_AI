@@ -87,7 +87,7 @@ def cmd_index_corpus():
 
     if not CORPUS_AVAILABLE:
         print(f"The document library isn't available at: {CORPUS_DIR}")
-        print("Check that OneDrive is syncing the 'Vaulter LLC - shaw' library,")
+        print("Check that OneDrive is syncing the firm's document library,")
         print("or set VAULTER_CORPUS_DIR in confidentials/.env.")
         return
 

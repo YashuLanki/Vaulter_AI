@@ -27,7 +27,7 @@ already noted in the old §9:
 > `C:\Users\<user>\OneDrive - <firm's account>\<firm's SharePoint library name>`
 
 A connector was never the only way to reach those documents — it was one way. OneDrive already
-puts all ~493,000 of them on disk. So document access survived the verdict intact, and the
+puts all of them on disk. So document access survived the verdict intact, and the
 deletions went ahead on their own merits.
 
 What the verdict actually cost:
@@ -114,7 +114,7 @@ Claude reporting "the firm has no records on X" when it only means "no filename 
 
 | | |
 |---|---|
-| Files in the library | **493,150** |
+| Files in the library | **hundreds of thousands** |
 | JSON index — first attempt | **122 MB**, 467s to build. Rejected. |
 | SQLite index — shipped | 122s to build, sub-second queries |
 | Index contents | names, sizes, mtimes. **No file contents, ever.** |

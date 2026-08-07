@@ -62,7 +62,7 @@ def read_document(rel_path: str, max_chars: int = 200_000) -> tuple[str, dict]:
     Read one document out of the library and return (text, metadata).
 
     `rel_path` is corpus-relative and is resolved through the scope guard, so
-    this cannot be pointed at anything outside the shaw library.
+    this cannot be pointed at anything outside the document library.
 
     Args:
         rel_path:  path relative to CORPUS_DIR, as returned by corpus.search

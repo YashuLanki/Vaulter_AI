@@ -385,7 +385,7 @@ Both auto-detect the firm's OneDrive account otherwise.
 ```bash
 python system/main.py index-corpus
 ```
-Reads filenames only. Takes a couple of minutes over ~493,000 files.
+Reads filenames only. Takes a couple of minutes over a large library.
 
 #### Connect to Claude Desktop
 1. Open Claude Desktop → Settings → Developer → Edit Config

@@ -2,7 +2,7 @@
 corpus/
 -------
 Read-only access to the firm's SharePoint document library, synced locally
-by OneDrive (`config.CORPUS_DIR` -- the "Vaulter LLC - shaw" folder).
+by OneDrive (`config.CORPUS_DIR` -- the firm's own SharePoint library folder).
 
 This package replaces the old `ingestion/` + `analysis/rag_engine.py` stack.
 The previous design copied documents into `data/watched_folder/`, extracted

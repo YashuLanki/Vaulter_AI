@@ -66,10 +66,9 @@ docs/agents/*/memory.md
 
 # ── Corpus index (generated, machine-specific, and sensitive) ──────
 # corpus/index.py builds this SQLite index of the firm's SharePoint
-# library. It holds no file CONTENTS -- but it does hold ~493,000
+# library. It holds no file CONTENTS -- but it does hold a large number of
 # file and folder NAMES, and those names alone disclose plenty:
-# entity names, deal names, counterparties, and live litigation
-# ("Hoffman v. Forshpan Documents"). It is also rebuildable in ~2
+# entity names, deal names, counterparties, and live litigation. It is also rebuildable in ~2
 # minutes via `python main.py index-corpus`, so there is nothing to
 # gain by committing it and a real disclosure risk if we do.
 system/data/corpus_index.db

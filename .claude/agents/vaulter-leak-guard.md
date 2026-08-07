@@ -24,16 +24,28 @@ folder.
 
 For each file, classify:
 - **Architecture/code** — safe. Don't flag well-written logic as a risk because it's substantial.
-- **Real firm-specific data** — any named real deal, a dollar figure tied to an actual closed
-  transaction, a real seller/buyer/entity name, a real address belonging to the firm's actual
-  portfolio, a real CoStar export filename or broker relationship. Flag this regardless of which
-  file it's in. The authoritative list of real names is
+- **Real firm-specific data** — any named real deal, ANY dollar figure or financial figure at all
+  (not just one tied to a closed transaction — a per-lot cost, a per-acre cost, an average deal
+  size, an exit-price benchmark are all in scope, whether or not a specific deal is named), a real
+  seller/buyer/entity name, a real address belonging to the firm's actual portfolio, a real
+  pathname of any kind (a real Windows username, a real OneDrive account/tenant name, a real
+  SharePoint/document-library display name — genuinely no pathname should be named beyond the
+  repo's own relative, generic code paths like `system/mcp_server.py`), a real CoStar export
+  filename or broker relationship, or a specific count that reveals the real system's scale (a
+  document/file count, a deal count, a property count tied to a specific date). Flag this
+  regardless of which file it's in — comments, docstrings, print/error strings, and skill/agent
+  instructions all count, not just prose docs. The authoritative list of real names is
   `.claude/hooks/leak_patterns.txt` (gitignored) — read it to know what to look for, and never
   quote its entries into a tracked file, including this one.
 - **Mixed** — the common case. A paragraph explaining a real architecture decision by citing the
   real example that drove it. Don't recommend deleting the paragraph; recommend keeping the
   architecture point and genericizing the specific (e.g. "a parcel with significant floodplain
   coverage was still acquired" instead of naming the deal and the acreage).
+
+**Why this matters beyond "it's private": anything specific enough to identify or characterize
+the real deployment is reconnaissance value for someone looking to attack this system (see Part
+E5) — a real file count, a real folder name, or a real dollar figure narrows down what a specific
+guess or exploit needs to work, even when no single one of them looks dangerous alone.**
 
 Check specifically, since these are already confirmed dense with real specifics:
 `docs/PORTFOLIO_STANDARD.md`, `docs/COMPANY_PROFILE.md`, `docs/jurisdictions/coolidge-az.md`,
@@ -103,7 +115,7 @@ both just updates both. Real tamper-resistance needs a signature whose private k
 the shared folder).
 
 **E2 — prompt injection through the document library.** `read_document` feeds corpus file text
-straight into a Claude conversation, and the library holds ~493,000 files including archived
+straight into a Claude conversation, and the library holds hundreds of thousands of files including archived
 correspondence *written by third parties*. A document containing instructions aimed at the model
 is a real vector. Check that tool descriptions frame document text as data, never as instructions,
 and that nothing auto-reads documents in bulk without a human choosing the file.

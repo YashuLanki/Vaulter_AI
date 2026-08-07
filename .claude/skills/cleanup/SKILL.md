@@ -22,7 +22,7 @@ list their contents as candidates.
 
 | Path | Why |
 |---|---|
-| **`config.CORPUS_DIR`** (the firm's synced document library) | **The firm's actual documents.** ~493,000 real business records — deeds, title policies, closing memos. A deletion here is unrecoverable business data loss, and it syncs to everyone. This system is read-only there, always. |
+| **`config.CORPUS_DIR`** (the firm's synced document library) | **The firm's actual documents.** Hundreds of thousands of real business records — deeds, title policies, closing memos. A deletion here is unrecoverable business data loss, and it syncs to everyone. This system is read-only there, always. |
 | **`config.SHARED_DIR`** (`Vaulter AI Shared`) | Team-shared screening output. Deleting propagates to every colleague via OneDrive. |
 | Anything else under `OneDrive - *` | Same reasoning. Cleanup operates on the **repo**, never on synced folders. |
 | `system/confidentials/` | Live credentials. `.env.template` may be *edited*, never deleted. |

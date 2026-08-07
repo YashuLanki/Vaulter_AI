@@ -86,7 +86,7 @@ in onboarding and the one most likely to be skipped. `corpus/index.py` skips
 `Vaulter AI Shared` by name in `_SKIP_DIR_NAMES`, so nothing in it is ever indexed and
 screening workbooks can never surface in a document search. **It sits inside the library
 on disk but is not part of the document corpus** — this system's own space, walled off.
-Verified on a real rebuild: 493,514 firm documents indexed, zero of our files among them.
+Verified on a real rebuild: hundreds of thousands of firm documents indexed, zero of our files among them.
 Do not remove that skip entry without moving the folder back out. `_detect_shared_dir`
 uses the in-library location only if it already exists and never creates it there — one
 person sets it up deliberately rather than every install writing into the firm's document
@@ -134,7 +134,7 @@ resolves and re-checks every path and raises `OutsideCorpus` on anything that es
 path by string-joining onto `CORPUS_DIR` yourself.
 
 **Search matches names, not contents — and this is load-bearing, not a shortcut.** The
-library is ~493,000 files synced as OneDrive Files On-Demand *placeholders*: filenames
+library is hundreds of thousands of files synced as OneDrive Files On-Demand *placeholders*: filenames
 are local, file bytes are not, and opening one downloads it. Grepping the corpus would
 download the entire library. So `system/corpus/index.py` caches names/sizes/mtimes in a SQLite
 index (`system/data/corpus_index.db`, built by `system/main.py index-corpus`) and searches that;
