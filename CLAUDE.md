@@ -346,6 +346,15 @@ genuine mismatch all refuse rather than silently proceeding, the same rule
 `.claude/hooks/check_no_leaks.py` uses when its own name list goes missing. See
 `system/core/release_signing.py` for the primitive itself.
 
+**The three pieces are not interchangeable, worth being precise about.** The private key is the
+only thing that can *create* a valid signature, and only one machine ever has it. A signature is
+not a fixed value either — it's freshly produced from that specific release's own file contents
+each time `release.py` runs, so two different releases have two different signatures even though
+the same private key made both. The public key does the opposite job from the private key: it
+can *check* a signature against the file it claims to belong to, but holding it gives you no way
+to produce a new valid signature yourself — which is exactly why it's safe to ship publicly with
+every install while the private key never leaves the one machine authorized to publish.
+
 `system/scripts/apply_update.py`'s `PRESERVED_DIR_NAMES` must always match `system/scripts/release.py`'s
 `EXCLUDED_DIR_NAMES` exactly — the apply step trusts that anything under those paths was
 never in the package to begin with, so it never deletes or overwrites them.
