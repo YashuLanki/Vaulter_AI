@@ -229,6 +229,77 @@ def compare_listing_row(state, county, land_type_text, acres, top_n: int = 3,
     return find_similar_deals(facts, top_n=top_n, index=index)
 
 
+# ─── Describing a match in one line ───────────────────────────────────────────
+# The screening workbook and HTML report get ONE short string per listing, so
+# whatever goes here has to earn its space. Before 2026-08-10 it was just
+# "<name> (still held)" -- which told an analyst nothing: it could not
+# distinguish an entitlement play from a finished-lot buy, and "still held"
+# covered "never tried to sell", "marketed seven years unsuccessfully", and
+# "investors already got their capital back" with the same two words.
+
+_PLAN_PHRASE = {
+    "subdivide":             "subdivided into lots",
+    "rezone":                "rezoned",
+    "entitle-only":          "entitled without subdividing",
+    "annex":                 "annexed",
+    "acquire-finished-lots": "bought already-finished lots",
+    "hold-only":             "held, no value-add plan",
+    "assemble-resell":       "assembled to resell",
+    "recapitalization":      "recapitalized",
+    "unclear":               "approach not established",
+}
+
+_OUTCOME_PHRASE = {
+    "still-held":           "still held",
+    "sold":                 "sold",
+    "pending-sale":         "sale pending",
+    "pending-acquisition":  "not yet owned",
+    "transferred-not-sold": "transferred, not sold",
+    "unclear":              "outcome unclear",
+}
+
+# The provenance markers written into notes by the 2026-08-10 verification pass.
+# Stripped from the displayed note and turned into a compact flag instead.
+_VERIFIED_MARK = re.compile(r"\[approach independently verified[^\]]*\]", re.I)
+_UNVERIFIED_MARK = re.compile(r"\[[^\]]*not yet independently re-read[^\]]*\]", re.I)
+
+# Prices must never reach the screening column. This tool compares
+# characteristics and history, never price -- check_screener.py asserts it. A
+# note is free text a human wrote, so strip defensively rather than trusting
+# that no future note ever mentions a figure.
+_PRICE = re.compile(r"\$\s?[\d,]+(?:\.\d+)?\s*[MmKk]?")
+
+
+def summarize_match(m: dict, note_chars: int = 95) -> str:
+    """
+    One compact line for a matched deal: what the firm did, how it turned out,
+    whether that's independently verified, and the shortest useful slice of the
+    note explaining it.
+
+    Never raises and never emits a price -- a match with missing fields simply
+    says less.
+    """
+    name = str(m.get("property_name") or "").strip() or "(unnamed)"
+    plan = _PLAN_PHRASE.get((m.get("plan_type") or "").strip().lower())
+    outcome = _OUTCOME_PHRASE.get((m.get("outcome_status") or "").strip().lower())
+
+    note = str(m.get("notes") or "")
+    verified = bool(_VERIFIED_MARK.search(note))
+    note = _UNVERIFIED_MARK.sub("", _VERIFIED_MARK.sub("", note))
+    note = _PRICE.sub("", note)
+    note = re.sub(r"\s+", " ", note).strip(" ;,.-")
+
+    if len(note) > note_chars:
+        cut = note[:note_chars].rsplit(" ", 1)[0]
+        note = cut.rstrip(" ;,.-") + "..."
+
+    bits = [b for b in (plan, outcome) if b]
+    head = f"{name} — {', '.join(bits)}" if bits else name
+    if verified:
+        head += " [verified]"
+    return f"{head}: {note}" if note else head
+
+
 def find_similar_deals(facts: dict, top_n: int = 5, index: list[dict] = None) -> dict:
     """
     Compares `facts` (a listing or off-market property's characteristics)
@@ -284,6 +355,12 @@ def find_similar_deals(facts: dict, top_n: int = 5, index: list[dict] = None) ->
             "filename": record.get("filename"),
             "score": score,
             "reasons": reasons,
+            # plan_type travels with the match so a caller can say what the
+            # firm actually DID, not just what happened. Two deals can match on
+            # geography and size and imply opposite lessons -- an entitlement
+            # play vs a finished-lot buy -- and without this the caller cannot
+            # tell them apart.
+            "plan_type": record.get("plan_type", "unclear"),
             "outcome_status": record.get("outcome_status", "unclear"),
             "notes": record.get("notes", ""),
             "era_note": era_note(record.get("entry_year")),

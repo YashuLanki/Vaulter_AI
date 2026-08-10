@@ -1233,7 +1233,8 @@ def add_portfolio_comparison(df: pd.DataFrame) -> pd.DataFrame:
     216 listings against a ~49-deal index is fast arithmetic either way, but
     there is no reason to re-read the same file 216 times.
     """
-    from analysis.screening.portfolio_comparison import compare_listing_row, load_index
+    from analysis.screening.portfolio_comparison import (
+        compare_listing_row, load_index, summarize_match)
 
     index = load_index()
     if not index:
@@ -1250,9 +1251,12 @@ def add_portfolio_comparison(df: pd.DataFrame) -> pd.DataFrame:
         if not r["matches"]:
             out.append("")
             continue
-        parts = [f"{m['property_name']} ({m['outcome_status'].replace('-', ' ')})"
-                  for m in r["matches"]]
-        out.append("Most similar in our history: " + "; ".join(parts))
+        # What the firm DID and how it went, not just a name -- see
+        # summarize_match. Two deals can match on geography and size and imply
+        # opposite lessons (an entitlement play vs a finished-lot buy), which
+        # the old name-and-outcome line could not express.
+        parts = [summarize_match(m) for m in r["matches"]]
+        out.append("Most similar in our history — " + " | ".join(parts))
     return _attach(df, {"Portfolio_Comparison": out})
 
 
