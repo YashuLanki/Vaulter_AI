@@ -667,6 +667,8 @@ search about them proves nothing. Route by question:
 - A specific property ("what do we know about X?") -> get_property_summary
 - Deals the firm passed on, rejected, lost, or never closed ("which deals did
   we pass up on in Arizona?") -> get_passed_on_deals
+- Why the team pursued or skipped something they screened ("why did we go
+  after that one?") -> get_screening_decisions
 - "Have we done anything like this before?" -> compare_to_portfolio_history
 - The active portfolio, stages, cities -> get_portfolio_list / get_property_info
 - An actual firm document (a deed, a memo, a survey) -> search_documents,
@@ -728,7 +730,16 @@ verify_listings adds free federal ground truth (flood over the parcel area,
 road access, incorporated status, terrain) on the top-ranked few.
 open_screening_dashboard opens the single self-contained HTML report written
 alongside the workbook: the shortlist, a map, and a click-through detail card
-for every listing."""
+for every listing.
+
+AFTER A SCREEN, CAPTURE WHAT THEY DECIDE. When the user says what they're
+going to do about listings they just screened -- "we're pursuing that one
+even though it ranked low", "skip this whole county", "too small for us" --
+offer to save it with record_screening_decision. Don't wait to be asked, and
+don't nag: offer once, save it if they say yes. This is the only record of
+whether the screener's ranking matches what the firm actually chooses, and a
+decision made in a meeting and never written down is simply lost. It changes
+no score -- it's a diary, not a dial."""
     )
 
     @mcp.tool()
@@ -1523,6 +1534,138 @@ for every listing."""
             return preamble + "\n\n" + "\n\n".join("## " + s for s in picked)
         except Exception as e:
             return f"Could not read the passed-on-deals record: {e}"
+
+    def _decisions_file(source_file: str) -> Path:
+        """
+        The notes file for one screening run, named to match that run's own
+        workbook: fit_screen_<export>.md beside fit_screen_<export>.xlsx.
+        Kept in its own folder rather than alongside the workbooks -- a
+        re-run regenerates the workbook, and human judgment must never be
+        overwritten by that.
+        """
+        from config import SCREENING_DECISIONS_DIR
+        stem = Path(source_file).stem or "unknown_export"
+        return Path(SCREENING_DECISIONS_DIR) / f"fit_screen_{stem}.md"
+
+    @mcp.tool()
+    def record_screening_decision(source_file: str, decision_text: str,
+                                  decided_by: str = "") -> str:
+        """
+        Save what the team DECIDED about a screened export, in their own
+        words -- especially when they disagreed with the ranking.
+
+        Use this whenever someone says what they're going to do about
+        listings they just screened: "we're pursuing the Signal Peak one
+        even though it ranked low, the seller's motivated", "skip
+        everything in that county for now", "this whole file is too small
+        for us". Offer to save it; don't make them ask.
+
+        WHY IT MATTERS: the screener's ranking has never been checked
+        against what the firm actually chose to do. These notes are the only
+        record of that, and they're what a future person reads when they ask
+        "why do we keep passing on parcels like this?". A judgment made in a
+        meeting and never written down is gone.
+
+        This NEVER changes any ranking or score. It is a diary, not a dial --
+        the same rule the passed-on-deals record carries. If a pattern
+        eventually emerges, a HUMAN decides whether the screener should
+        change; nothing here feeds back into scoring automatically.
+
+        Appends a dated, attributed entry -- it never edits or deletes what's
+        already there, so a bad note is just an extra line a human can remove.
+
+        Args:
+            source_file:   the CoStar export this decision is about, e.g.
+                           "CostarExport.xlsx" -- the note is filed to match
+                           that run's workbook
+            decision_text: what was decided and why, in the team's own words
+            decided_by:    who decided, if known (a name, or leave blank)
+        """
+        import datetime as _dt
+        try:
+            if not source_file.strip():
+                return "Which screening run is this about? I need the export filename."
+            if not decision_text.strip():
+                return "The decision text is empty -- nothing was saved."
+
+            path = _decisions_file(source_file)
+            path.parent.mkdir(parents=True, exist_ok=True)
+
+            if not path.exists():
+                header = (
+                    f"# Screening decisions — {Path(source_file).name}\n\n"
+                    f"What the team decided about the listings in this export, in their own\n"
+                    f"words. Paired with `{path.stem}.xlsx` in the screening output folder.\n\n"
+                    f"**This is a record, not a rule.** Nothing here changes any ranking or\n"
+                    f"score. It exists so a decision made in a meeting is still readable\n"
+                    f"months later — and so the firm can eventually see whether the\n"
+                    f"screener's ranking matches what it actually chose to do. If a pattern\n"
+                    f"shows up here, a person decides what to do about it.\n"
+                )
+                path.write_text(header, encoding="utf-8")
+
+            today = _dt.date.today().isoformat()
+            who = f" — {decided_by.strip()}" if decided_by.strip() else ""
+            entry = f"\n## {today}{who}\n\n{decision_text.strip()}\n"
+            with path.open("a", encoding="utf-8") as f:
+                f.write(entry)
+
+            log.info(f"[MCP] Screening decision recorded: {path.name} "
+                     f"(+{len(decision_text):,} chars)")
+            return (f"Saved to {path.name}, in the shared screening_decisions folder. "
+                    f"The whole team sees it, and it stays put even if this export gets "
+                    f"screened again.")
+        except Exception as e:
+            return f"Could not record the decision: {e}"
+
+    @mcp.tool()
+    def get_screening_decisions(source_file: str = "") -> str:
+        """
+        Read what the team decided about past screening runs.
+
+        Call this when someone asks why a listing was pursued or skipped,
+        what was decided about an export, or wants the reasoning behind an
+        earlier call. Also worth reading BEFORE presenting a fresh screen of
+        a file that's been screened before -- the team may have already
+        formed a view on it.
+
+        Like the passed-on-deals record, this is context for a conversation,
+        never an automated input to ranking.
+
+        Args:
+            source_file: optional -- one export's notes, e.g.
+                         "CostarExport.xlsx". Leave blank to list every
+                         export that has decisions recorded.
+        """
+        try:
+            from config import SCREENING_DECISIONS_DIR
+
+            folder = Path(SCREENING_DECISIONS_DIR)
+            existing = sorted(folder.glob("*.md")) if folder.is_dir() else []
+
+            if source_file.strip():
+                path = _decisions_file(source_file)
+                if not path.exists():
+                    have = ", ".join(p.stem for p in existing) or "none yet"
+                    return (f"No decisions have been recorded for '{source_file}' yet. "
+                            f"Exports that DO have notes: {have}")
+                return path.read_text(encoding="utf-8", errors="replace")
+
+            if not existing:
+                return ("No screening decisions have been recorded yet. When someone "
+                        "says what they're doing about a screened listing -- pursuing "
+                        "it, skipping it, and why -- offer to save it with "
+                        "record_screening_decision.")
+
+            lines = ["Screening runs with recorded decisions:", ""]
+            for p in existing:
+                entries = p.read_text(encoding="utf-8", errors="replace").count("\n## ")
+                lines.append(f"  {p.stem}  ({entries} entr{'y' if entries == 1 else 'ies'})")
+            lines.append("")
+            lines.append("Ask for one by its export name to read the decisions in full.")
+            return "\n".join(lines)
+        except Exception as e:
+            return f"Could not read screening decisions: {e}"
 
     @mcp.tool()
     def get_portfolio_list(group_by: str = "state") -> str:

@@ -6,7 +6,7 @@ Read this alongside portfolio_comparison.py, which it's a close cousin of but
 deliberately separate from: that module compares a listing to the firm's own
 completed deals (what it bought and what happened). This one compares a
 listing to what the firm has PASSED ON or LOST, sourced from
-Vaulter AI Shared/output/property_summaries/_passed-on-deals.md.
+Vaulter AI Shared/property_summaries/_passed-on-deals.md.
 
 ## Why this is a short, explicit table, not a pattern-miner over that file
 

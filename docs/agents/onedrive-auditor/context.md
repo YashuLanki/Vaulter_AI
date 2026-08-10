@@ -24,7 +24,7 @@ coverage should mean more entries, not duplicates of the same lookup. Don't flag
 growth; only flag genuinely stale or duplicate-content entries within it. `system/updates/` and
 `system/org_settings/` were empty as of 2026-07-29 (never exercised for real yet) — check whether the
 same "old zip never cleaned up after a newer version is released" risk in `system/scripts/release.py`
-has since become real. `output/property_summaries/` (added 2026-07-30) is also expected to grow — one
+has since become real. `property_summaries/` (added 2026-07-30, moved to the top level 2026-08-10) is also expected to grow — one
 file per property that's ever been researched, named `<slug>.md`. That's normal; the bug pattern
 to actually check for here is a property with **more than one** file (a slug-generation mismatch
 producing two summaries for the same property instead of one merged file), not the folder having

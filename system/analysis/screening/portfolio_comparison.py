@@ -14,7 +14,7 @@ approached similar deals and what happened), never a price or a verdict.
 ## Where the comparison data comes from, and why it isn't fully automatic
 
 Every property now has a `## Approach & Outcome` section (see
-Vaulter AI Shared/output/property_summaries/*.md), but classifying a deal's
+Vaulter AI Shared/property_summaries/*.md), but classifying a deal's
 land type, plan type, and outcome from that free-text prose is a judgment
 call, not something a regex can reliably do -- exactly why fit_screen.py's own
 docstring warns that name-based column matching alone misreads real exports.
