@@ -638,6 +638,22 @@ synced locally. This includes:
 - Closing memos, entity records, and firm-wide templates
 - Inbound CoStar exports and broker listing spreadsheets
 
+WHERE ANSWERS LIVE. The team keeps curated knowledge OUTSIDE the document
+library, in the shared folder -- which is deliberately excluded from
+search_documents so this system's own output never surfaces as a firm record.
+That means document search CANNOT find any of the following, and an empty
+search about them proves nothing. Route by question:
+- A specific property ("what do we know about X?") -> get_property_summary
+- Deals the firm passed on, rejected, lost, or never closed ("which deals did
+  we pass up on in Arizona?") -> get_passed_on_deals
+- "Have we done anything like this before?" -> compare_to_portfolio_history
+- The active portfolio, stages, cities -> get_portfolio_list / get_property_info
+- An actual firm document (a deed, a memo, a survey) -> search_documents,
+  then read_document
+Never answer "the firm has no record of that" just because search_documents
+came back empty -- for everything above the first line, the record was never
+in that index to begin with.
+
 ASKED ABOUT A SPECIFIC PROPERTY? CALL get_property_summary FIRST.
 The team keeps one shared, cited summary per property. It costs a few hundred
 tokens and usually answers the question outright, with file and page citations.
@@ -1135,7 +1151,13 @@ for every listing."""
                     f"No documents matched '{query}'{where}.\n\n"
                     "Remember this matches file and folder NAMES, not document text. "
                     "Try fewer or broader terms, or use browse_documents to look "
-                    "around the folder structure."
+                    "around the folder structure.\n\n"
+                    "Also note: the team's curated knowledge is deliberately NOT in "
+                    "this index -- per-property summaries live behind "
+                    "get_property_summary, and the record of deals the firm passed "
+                    "on or lost lives behind get_passed_on_deals. If the question "
+                    "is about one of those, use that tool rather than concluding "
+                    "no record exists."
                 )
             return _format_hits(hits, f"{len(hits)} document(s) matching '{query}':")
         except Exception as e:
@@ -1416,6 +1438,70 @@ for every listing."""
                       "this property.")
         except Exception as e:
             return f"Could not update the summary: {e}"
+
+    @mcp.tool()
+    def get_passed_on_deals(state: str = "") -> str:
+        """
+        Read the team's researched record of deals the firm passed on, lost,
+        or never closed -- optionally just one state's section.
+
+        USE THIS whenever the question is about deals the firm decided NOT to
+        do: "which deals did we pass on", "why did X fall through", "have we
+        walked away from anything like this". This record is NOT in
+        search_documents (the shared folder is deliberately excluded from the
+        document index), so an empty document search does NOT mean no record
+        exists -- this tool is the only way to reach it. That exact wrong
+        conclusion has been given to a user before; don't repeat it.
+
+        The record's own first rule travels with it: this is CONTEXT, never a
+        filter. A past "no" is information for a conversation -- never a
+        reason to auto-reject a new deal that looks similar.
+
+        Args:
+            state: optional -- a state name or two-letter code (e.g.
+                   "Arizona" or "AZ") to return just that section. Leave
+                   blank for the whole record.
+        """
+        try:
+            from config import PROPERTY_SUMMARIES_DIR
+
+            record = Path(PROPERTY_SUMMARIES_DIR) / "_passed-on-deals.md"
+            if not record.is_file():
+                return ("The passed-on-deals record isn't on this machine yet. It lives "
+                        "in the team's shared folder -- check that OneDrive is syncing. "
+                        "If it is syncing and the file genuinely doesn't exist, the "
+                        "record hasn't been built yet; say so plainly rather than "
+                        "concluding the firm never passed on anything.")
+
+            text = record.read_text(encoding="utf-8", errors="replace")
+            if not state.strip():
+                return text
+
+            # Full names in the section headings; accept the two-letter code too.
+            codes = {"az": "arizona", "ca": "california", "co": "colorado",
+                     "tx": "texas", "nm": "new mexico"}
+            wanted = codes.get(state.strip().lower(), state.strip().lower())
+
+            # The preamble (everything before the first section) carries the
+            # context-never-a-filter warning and always travels with a filtered
+            # answer, so a state slice can't be mistaken for a screening input.
+            parts = text.split("\n## ")
+            preamble, sections = parts[0], parts[1:]
+
+            picked = [s for s in sections if wanted in s.splitlines()[0].lower()]
+            if not picked:
+                # A state with no dead-deal archive of its own (e.g. Montana,
+                # Utah) is still covered inside a section body -- return the
+                # section that mentions it rather than a bare "not found".
+                picked = [s for s in sections if wanted in s.lower()]
+            if not picked:
+                headings = "; ".join(s.splitlines()[0].strip() for s in sections)
+                return (f"No section of the passed-on-deals record covers '{state}'. "
+                        f"The record's sections are: {headings}")
+
+            return preamble + "\n\n" + "\n\n".join("## " + s for s in picked)
+        except Exception as e:
+            return f"Could not read the passed-on-deals record: {e}"
 
     @mcp.tool()
     def get_portfolio_list(group_by: str = "state") -> str:

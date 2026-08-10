@@ -214,7 +214,7 @@ boundary is "is this your own computer, logged in as you." claude.ai (the web ap
 be used with this server: it runs in the cloud and can only reach a network address, never
 a process on someone's own machine. Claude Desktop or Claude Code are required.
 
-**25 tools.** Don't maintain this list by hand — it drifted to 19 entries with one duplicated
+**26 tools.** Don't maintain this list by hand — it drifted to 19 entries with one duplicated
 and two missing. Get the truth from the code:
 
 ```bash
@@ -225,8 +225,11 @@ python -c "import asyncio; from mcp_server import create_mcp_server; \
 Grouped by what they're for: **health & updates** — `check_system_health`,
 `apply_pending_update`, `apply_pending_settings`, `get_pending_setup_details`.
 **Documents** — `search_documents`, `read_document`, `browse_documents`.
+**Team knowledge** (shared-folder files, deliberately outside the document index — each of
+these tools is the ONLY door to its record; see "Where answers live" in the server's own
+instructions) — `get_property_summary`, `update_property_summary`, `get_passed_on_deals`.
 **Portfolio** — `get_property_info`, `get_portfolio_list`, `get_properties_by_stage`,
-`open_property_files`, `open_property_document`, `update_property_summary`.
+`open_property_files`, `open_property_document`.
 **Screening** — `screen_listings`, `get_screening_rules`,
 `test_screener`, `verify_listings`, `open_screening_dashboard`, `open_costar_folder`,
 `compare_to_portfolio_history`.
