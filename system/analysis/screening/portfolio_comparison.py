@@ -46,8 +46,22 @@ from analysis.screening.market_eras import era_note
 # ══════════════════════════════════════════════════════════════════
 
 LAND_TYPES = {"residential", "commercial", "industrial", "mixed-use", "agricultural", "unclear"}
+# `acquire-finished-lots` added 2026-08-10, and it is not a cosmetic split.
+# A blind re-read of the firm's own documents found that every property then
+# filed as `hold-only` had in fact been bought as ALREADY-PLATTED or FINISHED
+# lots -- the firm did no entitlement work because none was needed; the value-add
+# was the acquisition itself (price, timing, a distressed seller). Filing that
+# under a label that reads as "no plan" actively misled: ask the system "have we
+# done a distressed finished-lot package before?" and it answered with deals
+# that looked like the firm had done nothing. This is also one of the firm's
+# most profitable documented patterns, so hiding it was expensive.
+#
+# `hold-only` is deliberately KEPT, for a genuine buy-raw-land-and-sit case.
+# As of this writing no property in the portfolio is one -- worth knowing in
+# itself.
 PLAN_TYPES = {"rezone", "subdivide", "entitle-only", "annex", "hold-only",
-              "assemble-resell", "recapitalization", "unclear"}
+              "acquire-finished-lots", "assemble-resell", "recapitalization",
+              "unclear"}
 OUTCOME_STATUSES = {"sold", "still-held", "pending-sale", "transferred-not-sold",
                      "pending-acquisition", "unclear"}
 

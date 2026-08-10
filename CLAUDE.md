@@ -534,12 +534,32 @@ an export already sitting on an existing machine doesn't become invisible after 
 Built 2026-08-06 to answer a specific ask from a team meeting: "name the projects that are
 similar, how did we approach those, and can that method be applied to this listing." Deliberately
 **characteristics-only** — location, land type, plan type (rezone/subdivide/entitle-only/annex/
-hold-only/assemble-resell/recapitalization), and size. It never compares price and never issues a
+acquire-finished-lots/hold-only/assemble-resell/recapitalization), and size. It never compares price and never issues a
 pursue/don't-pursue verdict; both of those need either a human or the still-open peer-pricing
 decision for standalone properties (on hold as of this writing). What it returns: the 3-5 most
 similar past deals, why each matched, what actually happened (still held / sold / pending), and —
 via `market_eras.py`'s hand-authored, publicly-sourced timeline — what broader market conditions
 each was bought into, so a person can judge whether that playbook still applies today.
+
+**`acquire-finished-lots` exists because the taxonomy was hiding the firm's own best pattern
+(added 2026-08-10).** A blind re-read of source documents — 11 properties, the reader told
+nothing about the existing label and barred from opening the summary — found that **every**
+property then filed as `hold-only` had actually been bought as already-platted or finished lots.
+The firm did no entitlement work because none was needed; the value-add was the acquisition
+itself (price, timing, a distressed seller). Filed under a label that reads as "no plan," that
+pattern was invisible: ask "have we done a distressed finished-lot package before?" and the
+system answered with deals where the firm apparently did nothing. It is also one of the firm's
+most profitable documented patterns, and it's the subject of an open question for a senior
+partner (stated strategy is buy-raw-and-entitle; much of the realised money came from buying
+platted lots cheap). `hold-only` is deliberately kept for a genuine buy-raw-and-sit case — as of
+this writing **no property in the portfolio is one**, which is worth knowing in itself.
+
+That same re-read corrected three labels that had captured a **corporate event instead of the
+land activity** — an entity consolidation and a refinancing were both recorded as the "approach"
+while the land underneath was being subdivided — and stood one brand-new acquisition down to
+`unclear` rather than assert a strategy its own operating agreement says hasn't been approved
+yet. The measured lesson: classifications carrying **no source citation were wrong 2 times in 3**,
+against 1 in 8 for cited ones. Treat an uncited `plan_type` as a hypothesis.
 
 **The comparison index is agent-curated, not deterministically derived, and that's deliberate.**
 Every property now has an `## Approach & Outcome` section, but classifying a deal's land type or

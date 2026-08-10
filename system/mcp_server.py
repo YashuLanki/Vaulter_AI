@@ -2398,8 +2398,10 @@ no score -- it's a diary, not a dial."""
             land_type: one of residential, commercial, industrial, mixed-use,
                        agricultural — leave blank if unclear
             plan_type: one of rezone, subdivide, entitle-only, annex,
-                       hold-only, assemble-resell, recapitalization — leave
-                       blank if unclear
+                       acquire-finished-lots (bought already-platted lots
+                       rather than creating them — the value-add is the
+                       acquisition itself), hold-only, assemble-resell,
+                       recapitalization — leave blank if unclear
             acres: parcel size, if known
             top_n: how many matches to return (default 5)
         """
