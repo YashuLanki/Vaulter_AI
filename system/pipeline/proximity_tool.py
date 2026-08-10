@@ -572,6 +572,11 @@ def run_proximity_search(property_name: str,
         if stored["precision"] == "city":
             location_note += (" — WARNING: only the town was identified for this "
                               "property, so distances below are indicative, not exact")
+        elif stored["precision"] == "section":
+            location_note += (" — NOTE: this is the centroid of the survey section the "
+                              "parcel sits in, not the parcel itself (up to ~0.7 miles "
+                              "out). Any other property in the same section shares this "
+                              "exact point, so their results will be identical")
     else:
         # DELIBERATE REFUSAL -- do NOT add a geocode-the-name fallback here.
         #
@@ -881,6 +886,9 @@ def compare_proximity(property_names: list,
         note = f"owned — {stored['precision']} precision"
         if stored["precision"] == "city":
             note += ", only the town was identified so its distances are indicative"
+        elif stored["precision"] == "section":
+            note += (", located to the survey section rather than the parcel — another "
+                     "property in the same section would compare identically")
         sites.append({"label": name, "lat": stored["lat"], "lon": stored["lon"],
                       "note": note})
 

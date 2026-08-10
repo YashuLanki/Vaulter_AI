@@ -42,17 +42,28 @@ FIELDNAMES = [
     "longitude",
     "address",         # the real address/legal description this came from
     "source",          # e.g. "title commitment p.3", "ALTA survey", "geocoded name"
-    "precision",       # parcel | intersection | city -- see below
+    "precision",       # parcel | section | intersection | city -- see below
     "updated",
 ]
 
 # How much to trust a coordinate:
-#   parcel        -- from a deed, survey, APN or legal description. Trustworthy.
+#   parcel        -- from a deed, survey, APN or legal description, resolved to
+#                    THIS parcel specifically. Trustworthy.
+#   section       -- resolved only to the PLSS section (or equivalent block) the
+#                    parcel sits in, so the point is the section centroid rather
+#                    than the parcel's own. A section is one square mile, so the
+#                    error is up to ~0.7 miles -- immaterial for a 5-mile radius
+#                    search, but two parcels in the SAME section share one point
+#                    and their proximity results will be byte-identical. Added
+#                    2026-08-10: ten properties in four groups were labelled
+#                    `parcel` while sharing a coordinate, which overstated what
+#                    was actually known and made same-section properties look
+#                    distinguishable when they aren't.
 #   intersection  -- the named cross-streets were resolved. Good enough for a
 #                    5-mile radius search.
 #   city          -- only the town was identifiable. A proximity search from
 #                    this is indicative, NOT accurate -- callers should say so.
-PRECISION_LEVELS = ("parcel", "intersection", "city")
+PRECISION_LEVELS = ("parcel", "section", "intersection", "city")
 
 
 def coords_path(data_dir: Path) -> Path:
