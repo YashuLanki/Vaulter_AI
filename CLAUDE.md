@@ -828,6 +828,8 @@ mistakes.
   design had the problems it had, but its Priority 0–2 roadmap is superseded: those problems
   lived in code that no longer exists.
 
-Known gap: `read_document` handles PDF/Word/Excel/CSV/text but **not `.msg`**, and the library
-holds a great deal of archived correspondence in that format. Adding `extract-msg` would unlock
-it — an open decision, see REBUILD_PLAN §7.
+`read_document` handles PDF/Word/Excel/CSV/text but **not `.msg` — and that is a settled
+decision, not a gap.** REBUILD_PLAN §7 closed it 2026-07-29, and the project owner re-confirmed
+it directly on 2026-08-10 with the reason stated plainly: **the firm does not want archived
+Outlook email readable through this system by its users.** A deliberate privacy boundary, not a
+missing feature — do not propose `extract-msg` or any other email-reading path again.
