@@ -154,3 +154,14 @@ $RECYCLE.BIN/
 .DS_Store
 .AppleDouble
 .LSOverride
+
+# ── Agent scratch files ───────────────────────────────────────────
+# Subagents reading firm documents sometimes dump working files (file
+# listings, extracted text) into whatever directory they start in. One landed
+# in the repo root on 2026-08-11 holding 37KB of real firm file paths; the
+# pre-commit hook caught it, but defence in depth is cheaper than relying on
+# that. Agents are briefed to use a temp dir -- this is the backstop.
+*_all.txt
+*_scratch.txt
+*_extract.txt
+/tmp_*.txt

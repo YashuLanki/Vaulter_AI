@@ -555,17 +555,25 @@ via `market_eras.py`'s hand-authored, publicly-sourced timeline — what broader
 each was bought into, so a person can judge whether that playbook still applies today.
 
 **`acquire-finished-lots` exists because the taxonomy was hiding the firm's own best pattern
-(added 2026-08-10).** A blind re-read of source documents — 11 properties, the reader told
-nothing about the existing label and barred from opening the summary — found that **every**
-property then filed as `hold-only` had actually been bought as already-platted or finished lots.
-The firm did no entitlement work because none was needed; the value-add was the acquisition
-itself (price, timing, a distressed seller). Filed under a label that reads as "no plan," that
-pattern was invisible: ask "have we done a distressed finished-lot package before?" and the
-system answered with deals where the firm apparently did nothing. It is also one of the firm's
-most profitable documented patterns, and it's the subject of an open question for a senior
-partner (stated strategy is buy-raw-and-entitle; much of the realised money came from buying
-platted lots cheap). `hold-only` is deliberately kept for a genuine buy-raw-and-sit case — as of
-this writing **no property in the portfolio is one**, which is worth knowing in itself.
+(added 2026-08-10).** A blind re-read of source documents found properties filed as `hold-only`
+that had actually been bought as already-platted or finished lots — the firm did no entitlement
+work because none was needed, and the value-add was the acquisition itself (price, timing, a
+distressed seller). Filed under a label that reads as "no plan," that pattern was invisible: ask
+"have we done a distressed finished-lot package before?" and the system answered with deals where
+the firm apparently did nothing. `hold-only` is deliberately kept for a genuine buy-raw-and-sit
+case — as of this writing no property in the portfolio is one.
+
+**A correction, and the reason the provenance field exists (2026-08-11).** The original version
+of this note claimed **every** former `hold-only` property had been bought as finished lots. That
+generalisation was made from a sample and was not safe: reading one parcel's own due-diligence
+report, filed three weeks before its closing, found *raw land with an approved-but-unrecorded,
+since-expired plat requiring resubmission and re-engineering* — the opposite of finished lots.
+That parcel is now `entitle-only`, cited. The label had been applied from the property's own
+summary and was correctly carrying `plan_type_source: summary`, so the system was already
+rendering it as unconfirmed rather than fact — which is exactly what that field is for, working
+on its first real test. Treat the finished-lot pattern as **real but per-property**, never as a
+property of the group. The remaining `acquire-finished-lots` records are being re-checked the
+same way.
 
 That same re-read corrected three labels that had captured a **corporate event instead of the
 land activity** — an entity consolidation and a refinancing were both recorded as the "approach"
