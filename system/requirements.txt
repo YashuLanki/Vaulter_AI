@@ -13,7 +13,12 @@ Pillow              # Image handling for OCR
 mammoth             # Word (.docx) text extraction
 openpyxl            # Excel .xlsx reading
 xlrd                # Excel .xls reading (older format)
-pandas              # CSV reading and data handling
+pandas>=2.0,<4      # CSV reading and data handling. UPPER BOUND IS LOAD-BEARING:
+                    # unpinned, a fresh install pulled pandas 3.0, whose string dtype
+                    # stopped turning NaN into "nan" under .astype(str) -- that crashed
+                    # every screen with a blank geography cell. Found 2026-08-11 only by
+                    # a fresh-install test; a dev machine with a working version installed
+                    # can never see this class of bug. Same lesson as mcp<2 below.
 
 # ── CoStar screening (analysis/screening/) ─────────────────────────
 # No API key is needed anywhere: ranking is arithmetic, ground truth is

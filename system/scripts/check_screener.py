@@ -752,6 +752,36 @@ def main() -> int:
     check("Fit_Tier is identical whether or not the caution fired",
           d_weld["Fit_Tier"].equals(d_other["Fit_Tier"]))
 
+    # ── 16. A blank geography cell does not crash the screen ────────────────
+    # Found 2026-08-11 by a fresh-install test, NOT by this suite or by any
+    # real export: pandas is unpinned, resolved to 3.0, and 3.0's string dtype
+    # stopped turning NaN into the literal text "nan" under .astype(str). Every
+    # geography column is joined with " / " to build the peer-group key, so a
+    # single empty County Name / Submarket Cluster threw
+    # `TypeError: expected str instance, float found` and took the whole screen
+    # down. Real CoStar exports routinely have some blank geography cells; the
+    # one on this machine happens not to, which is exactly why neither this
+    # suite nor months of live use ever hit it.
+    print("\n16. Blank geography cells do not crash the screen")
+    holey = src.copy()
+    for col in ("County Name", "Submarket Cluster", "Submarket", "Market"):
+        if col in holey.columns and len(holey) > 3:
+            holey.loc[holey.index[:2], col] = float("nan")
+    try:
+        r_holey = _run(holey, full, tmp, "blank_geo")
+        d_holey = r_holey["dataframe"]
+        check("a screen survives blank County/Submarket/Market cells",
+              len(d_holey) == len(holey),
+              f"{len(d_holey)} rows out of {len(holey)} in")
+        check("rows with a blank geography cell still get a Fit_Score",
+              d_holey["Fit_Score"].notna().all())
+        check("the blank never reaches output as the literal text 'nan'",
+              not d_holey.astype(str).apply(
+                  lambda c: c.str.contains(r"\bnan\b", case=False, na=False)).any().any())
+    except Exception as e:
+        check("a screen survives blank County/Submarket/Market cells", False,
+              f"{type(e).__name__}: {e}")
+
     passed = sum(1 for _, ok, _ in RESULTS if ok)
     print(f"\n{passed}/{len(RESULTS)} checks passed")
     return 0 if passed == len(RESULTS) else 1

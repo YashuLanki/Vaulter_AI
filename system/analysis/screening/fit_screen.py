@@ -890,7 +890,13 @@ def _band_price_table(df: pd.DataFrame, ppa: pd.Series) -> dict:
     ):
         if not all(c in df.columns for c in cols):
             continue
-        geo = df[cols].astype(str).agg(" / ".join, axis=1)
+        # fillna("") before astype(str), not after: pandas 3.0's string dtype
+        # stopped stringifying NaN to the literal text "nan" on .astype(str)
+        # (it stays a real missing value instead), so a row with any blank
+        # geography column crashed .agg(" / ".join, ...) with "expected str
+        # instance, float found" -- found 2026-08-11 testing a fresh install's
+        # unpinned pandas, which resolved to 3.0.5.
+        geo = df[cols].fillna("").astype(str).agg(" / ".join, axis=1)
         table = {}
         for key, idx in pd.DataFrame({"g": geo, "k": kind, "b": band}).groupby(
                 ["g", "k", "b"]).groups.items():
@@ -1022,7 +1028,8 @@ def add_pricing(df: pd.DataFrame, moic: float) -> pd.DataFrame:
     geo_cols = {"cluster": ["Submarket Cluster"], "submarket": ["Submarket Name"],
                 "county": ["County Name"], "market": ["Market Name"]}
     geo_series = {
-        lvl: df[cols].astype(str).agg(" / ".join, axis=1) if all(c in df.columns for c in cols) else None
+        # fillna("") first -- see _band_price_table's identical fix above for why.
+        lvl: df[cols].fillna("").astype(str).agg(" / ".join, axis=1) if all(c in df.columns for c in cols) else None
         for lvl, cols in geo_cols.items()
     }
 
