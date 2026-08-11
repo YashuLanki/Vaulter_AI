@@ -2421,6 +2421,21 @@ no score -- it's a diary, not a dial."""
                 lines.append(f"{i}. {m['property_name']}")
                 lines.append(f"   Why it matched: {', '.join(m['reasons'])}")
                 lines.append(f"   What happened: {m['outcome_status'].replace('-', ' ')} — {m['notes']}")
+                # How far to trust the stated approach. Measured 2026-08-10:
+                # an approach with no recorded source was wrong 2 times in 3,
+                # against 1 in 8 for one re-read from documents. Saying so is
+                # the same discipline the screener uses everywhere else --
+                # report confidence, never present a guess as a finding.
+                _src = m.get("plan_type_source", "unrecorded")
+                if _src == "documents":
+                    lines.append("   Approach: independently re-read from the original documents.")
+                elif _src == "summary":
+                    lines.append("   Approach: taken from this property's own written summary, "
+                                  "not independently re-read.")
+                else:
+                    lines.append("   Approach: TREAT AS PROVISIONAL — no source was recorded for "
+                                  "how this was classified. Confirm against the documents before "
+                                  "relying on it.")
                 if m["era_note"]:
                     lines.append(f"   {m['era_note']}")
                 lines.append("")

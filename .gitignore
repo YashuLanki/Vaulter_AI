@@ -90,6 +90,20 @@ system/data/portfolio_comparison_index.json
 # import time and degrades to "no record" if it's absent, never invents one
 system/data/cost_assumptions.json
 
+# ── Property ID registry (real property names + every alias) ──────
+# pipeline/property_registry.py's durable internal IDs. The IDs themselves are
+# meaningless, but the file maps each one to the real property name and every
+# spelling of it across the firm's four data sources -- so it is exactly as
+# confidential as the Project Master. Rebuildable from those sources at any
+# time; never checked in.
+system/data/property_ids.json
+
+# ── Local backups of real-data files ──────────────────────────────
+# system/data/backups/ holds point-in-time copies of the coordinates table,
+# comparison index and ID registry -- all real firm data, same rule as the
+# originals above.
+system/data/backups/*
+
 # ── Keep folder structure via .gitkeep ────────────────────────────
 !system/data/logs/.gitkeep
 !system/data/processed/.gitkeep

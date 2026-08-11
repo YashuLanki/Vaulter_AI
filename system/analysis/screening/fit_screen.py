@@ -234,13 +234,18 @@ ASSUMPTIONS = {
 
 # What finished lots have actually fetched from homebuilders. MEASURED from
 # settlement statements; reported as context, never scored, and Arizona-only.
-# Finished-lot sales to homebuilders, from the firm's own settlement
-# statements. Buyer names genericized -- this repo is public; the real
-# names are in docs/EVIDENCE_APPENDIX.md (local-only).
-EXIT_LOT_COMPS = (
-    ("National homebuilder A", "Nov 2020", 45000),
-    ("National homebuilder B", "Jun 2024", 37267),
-    ("Regional lot buyer",     "Sep 2024", 38000),
+#
+# The PRICES live in the gitignored cost file, not here. An earlier pass
+# genericized the buyer names but left the real per-lot figures as literals in
+# this public file -- caught 2026-08-11. A real sale price is firm-confidential
+# whether or not the buyer is named beside it, so it now follows the same rule
+# as every other real figure in this module: loaded from
+# system/data/cost_assumptions.json, and absent that file the screen simply
+# reports it has no record rather than inventing a substitute.
+EXIT_LOT_COMPS = tuple(
+    (c.get("buyer", "unknown"), c.get("date", ""), c.get("price_per_lot"))
+    for c in (_COST.get("exit_lot_comps") or ())
+    if c.get("price_per_lot") is not None
 )
 
 # Weights for the composite fit score. Proximity dominates because §7 calls it

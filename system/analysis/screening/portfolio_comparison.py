@@ -301,8 +301,16 @@ def summarize_match(m: dict, note_chars: int = 95) -> str:
 
     bits = [b for b in (plan, outcome) if b]
     head = f"{name} — {', '.join(bits)}" if bits else name
-    if verified:
+
+    # Say how much to trust the approach, every time. "[verified]" and
+    # "[unconfirmed]" are the two ends worth flagging; a plain summary-derived
+    # classification is the unremarkable middle and gets no tag, so the marks
+    # stay meaningful instead of decorating every line.
+    source = (m.get("plan_type_source") or "").strip().lower()
+    if verified or source == "documents":
         head += " [verified]"
+    elif source == "unrecorded" and plan:
+        head += " [unconfirmed]"
     return f"{head}: {note}" if note else head
 
 
@@ -367,6 +375,13 @@ def find_similar_deals(facts: dict, top_n: int = 5, index: list[dict] = None) ->
             # play vs a finished-lot buy -- and without this the caller cannot
             # tell them apart.
             "plan_type": record.get("plan_type", "unclear"),
+            # How the plan_type was arrived at: "documents" (independently
+            # re-read from source), "summary" (taken from the property's own
+            # written summary), or "unrecorded" (never written down). Measured
+            # 2026-08-10: an unrecorded classification was wrong 2 times in 3,
+            # against 1 in 8 for a cited one -- so this travels with the match
+            # and callers present an unrecorded one as provisional.
+            "plan_type_source": record.get("plan_type_source", "unrecorded"),
             "outcome_status": record.get("outcome_status", "unclear"),
             "notes": record.get("notes", ""),
             "era_note": era_note(record.get("entry_year")),

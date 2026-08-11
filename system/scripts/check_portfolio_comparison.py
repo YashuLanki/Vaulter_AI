@@ -138,6 +138,68 @@ def main() -> int:
         bad_outcome = [r["filename"] for r in real_index if r.get("outcome_status") not in pc.OUTCOME_STATUSES]
         check("every real record has a recognized outcome_status",
               bad_outcome == [], f"bad rows: {bad_outcome}")
+
+        # Provenance, added 2026-08-11. A classification with no recorded
+        # source was measured wrong 2 times in 3; the point of the field is
+        # that a reader is TOLD that, so a record silently losing it is a
+        # regression worth failing on.
+        SOURCES = {"documents", "summary", "unrecorded"}
+        bad_src = [r["filename"] for r in real_index
+                   if r.get("plan_type_source") not in SOURCES]
+        check("every real record records how its plan_type was derived",
+              bad_src == [], f"bad rows: {bad_src}")
+        check("an unrecorded-provenance match is flagged as unconfirmed",
+              "[unconfirmed]" in pc.summarize_match(
+                  {"property_name": "X", "plan_type": "subdivide",
+                   "outcome_status": "still-held", "notes": "n",
+                   "plan_type_source": "unrecorded"}))
+        check("a document-verified match is flagged as verified",
+              "[verified]" in pc.summarize_match(
+                  {"property_name": "X", "plan_type": "subdivide",
+                   "outcome_status": "still-held", "notes": "n",
+                   "plan_type_source": "documents"}))
+        check("a summary-derived match carries neither tag",
+              not any(t in pc.summarize_match(
+                  {"property_name": "X", "plan_type": "subdivide",
+                   "outcome_status": "still-held", "notes": "n",
+                   "plan_type_source": "summary"})
+                  for t in ("[verified]", "[unconfirmed]")))
+
+        # ── Property ID registry ────────────────────────────────────────
+        # Added 2026-08-11. Its only job is that every name in every data
+        # source resolves to exactly one property, so the checks are: does it
+        # cover the whole portfolio, and does every source name resolve. The
+        # build caught a real merge on first run (a project and its later
+        # phase share a name stem), so the distinctness case is asserted
+        # explicitly rather than assumed.
+        try:
+            import config as _cfg
+            import portfolio as _pf
+            from pipeline import property_registry as _reg
+
+            registry = _reg.load_registry(_cfg.DATA_DIR)
+            if not registry:
+                print("  SKIP  property-ID checks — no registry built on this machine")
+            else:
+                active, _sold = _pf.load_properties()
+                canon = {r["canonical_name"] for r in registry.values()}
+                missing = [p["name"] for p in active if p["name"] not in canon]
+                check("every active property has its own ID",
+                      missing == [], f"missing: {missing}")
+                check("no two properties share an ID",
+                      len(canon) == len(registry))
+                unresolved = [r["property_name"] for r in real_index
+                              if _reg.resolve(_cfg.DATA_DIR, r["property_name"],
+                                              registry=registry) is None]
+                check("every comparison-index name resolves to a property",
+                      unresolved == [], f"unresolved: {unresolved}")
+                a = _reg.resolve(_cfg.DATA_DIR, "Mesquite Trails", registry=registry)
+                b = _reg.resolve(_cfg.DATA_DIR, "Mesquite Trails Ph 2, 3, 4", registry=registry)
+                check("a project and its later phase get distinct IDs",
+                      a is not None and b is not None and a != b,
+                      f"{a} vs {b}")
+        except Exception as e:
+            check("property-ID registry checks ran", False, f"{type(e).__name__}: {e}")
         r_real = pc.find_similar_deals(
             {"state": "AZ", "county": "Pinal", "land_type": "residential", "plan_type": "subdivide", "acres": 50},
             index=real_index)

@@ -141,6 +141,51 @@ def _write_marker(channel: str, version: str, zip_filename: str, notes: str, sig
     print(f"  Updated {marker_path.name} — channel \"{channel}\" now points to {version}.")
 
 
+KEEP_RELEASES = 3
+
+
+def _prune_old_packages() -> None:
+    """
+    Delete superseded release zips, keeping the newest KEEP_RELEASES.
+
+    Nothing ever removed these, so they accumulated one per release forever --
+    and this folder is synced to every teammate, so everyone downloads all of
+    them. Measured 2026-08-11: 10 zips, 2.3 MB, of which 2 were live.
+
+    Three, not one, deliberately. An instance may be part-way through
+    downloading a package when a new release lands, and a version still
+    referenced by EITHER channel marker must survive regardless of age --
+    canary and general routinely point at different versions during a staged
+    rollout, which is the whole point of having two channels.
+    """
+    from config import UPDATES_DIR
+    from core import safe_io
+
+    keep_names = set()
+    for channel in ("canary", "general"):
+        data = safe_io.load_json(UPDATES_DIR / f"latest_version_{channel}.json")
+        if data and data.get("zip_filename"):
+            keep_names.add(data["zip_filename"])
+
+    zips = sorted(UPDATES_DIR.glob("vaulter_ai_*.zip"),
+                  key=lambda p: p.stat().st_mtime, reverse=True)
+    keep_names.update(p.name for p in zips[:KEEP_RELEASES])
+
+    removed = 0
+    for p in zips:
+        if p.name in keep_names:
+            continue
+        try:
+            p.unlink()
+            removed += 1
+        except OSError as e:
+            # A locked file (OneDrive mid-sync) is not a failure worth aborting
+            # a release for -- it just gets cleaned up on the next publish.
+            print(f"  (could not remove {p.name}: {e})")
+    if removed:
+        print(f"  Cleaned up {removed} superseded package(s); kept {len(keep_names)}.")
+
+
 def publish(notes: str) -> None:
     print("Vaulter AI — publishing a new version to the CANARY channel")
     version = _get_version()
@@ -149,6 +194,7 @@ def publish(notes: str) -> None:
     zip_path = _build_package(version)
     signature = _sign_package(zip_path)
     _write_marker("canary", version, zip_path.name, notes, signature)
+    _prune_old_packages()
 
     print()
     print(f"Published. Only instances with VAULTER_UPDATE_CHANNEL=canary will pick this up.")
