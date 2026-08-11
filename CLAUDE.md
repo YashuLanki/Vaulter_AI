@@ -571,9 +571,42 @@ since-expired plat requiring resubmission and re-engineering* — the opposite o
 That parcel is now `entitle-only`, cited. The label had been applied from the property's own
 summary and was correctly carrying `plan_type_source: summary`, so the system was already
 rendering it as unconfirmed rather than fact — which is exactly what that field is for, working
-on its first real test. Treat the finished-lot pattern as **real but per-property**, never as a
-property of the group. The remaining `acquire-finished-lots` records are being re-checked the
-same way.
+on its first real test.
+
+**All eight were then re-checked against source documents, and the generalisation failed for
+three of them — 5 confirmed, 3 wrong.** Every one of the three is part of the same
+multi-parcel project family, and their failure modes differ: one was raw land whose plat was
+drafted but never executed (the seller's own file names it `...UNRECORDED.pdf`, signature blocks
+blank); one was raw land where **no plat, current or expired, was ever found** — its "271 platted
+& engineered lots" traces to an internal broker memo built on a *conceptual lot grid drawn over an
+aerial photo*, not a recorded instrument; the third is the parcel above. The five that held up are
+evidenced about as well as this question can be: an engineer's report dated the closing day, an
+issued owner's title policy, a deed listing 53 individual lot numbers against a 2005 plat, and one
+property corroborated by five independent primary sources including the city's own acceptance of
+public improvements.
+
+The lesson is not "the label was wrong" but **where the label came from**. Every confirmation
+rests on a recorded instrument or a professional's contemporaneous report; every failure rests on
+marketing or broker language that had propagated into the record unchallenged. When classifying a
+deal, weight a recorded plat, title policy, ALTA survey or Phase I over any internal memo
+describing what land *will be* — and treat a lot count with no recorded instrument behind it as a
+claim, not a fact.
+
+**Extended to the whole portfolio (2026-08-11).** Every one of the 49 records is now provenance-
+tagged, and the 31 that carried no source were re-read from documents the same way: 20 confirmed,
+7 corrected, 2 correctly left as-is (one genuinely `unclear` — a pre-LOI deal naming Vaulter in
+no document reviewed — one where the only candidate source document was confirmed to be about a
+*different* deal and the reader wrote nothing rather than force a match). **48 of 49 classifications
+now rest on a document; one still rests on its own summary.** Two corrections were substantial
+enough to change the firm's own stated value-add mechanism for that deal, not just its label —
+in both cases, recorded plats showed most of the lot inventory had already been platted by a
+*prior* owner, with the firm's real work being infrastructure entitlement on the remainder, not
+the ground-up subdivision its label implied. Where a reader found text asserting something a
+recorded instrument disproved, it deleted that text in place and replaced it with the correct fact
+and a citation — never left both standing side by side, except in the small number of cases where
+two real sources genuinely disagree and neither is shown wrong (those stay visible, flagged, for a
+human to adjudicate). Full findings, corrections and citations live in each property's own summary
+in `Vaulter AI Shared/property_summaries/`, dated 2026-08-11.
 
 That same re-read corrected three labels that had captured a **corporate event instead of the
 land activity** — an entity consolidation and a refinancing were both recorded as the "approach"
