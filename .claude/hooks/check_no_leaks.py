@@ -181,14 +181,31 @@ def main() -> None:
         message = _git("log", "--format=%B", rng)
     else:
         # Every -m/--message value in the command. Covers -m "x",
-        # --message=x, and the heredoc form ( -m "$(cat <<'EOF' ... EOF )" )
-        # this project uses in practice, whose body is part of `cmd` verbatim
-        # by the time the hook sees it.
+        # --message=x, the heredoc form ( -m "$(cat <<'EOF' ... EOF )" ) this
+        # project uses in practice, AND a fused short-flag cluster like
+        # `-am "x"` or `-qam "x"` -- git parses those identically to `-a -m
+        # "x"`, but a bare literal "-m" search does NOT match the substring
+        # "-m" inside "-am" (the 'a' sits between the dash and the 'm'), so
+        # the message was silently never extracted at all. Found 2026-08-11
+        # by testing the hook adversarially rather than trusting the read:
+        # `git commit -am "<real name>"` sailed through as ALLOW while the
+        # same content via `-a -m "<real name>"` correctly DENIED. `\b` after
+        # `m` stops this matching into an unrelated word (nothing in git's
+        # own flag set collides, since -m/--message is the only message flag).
         message = "\n".join(
-            re.findall(r"(?:-m|--message[= ])\s*(.+?)(?=\s+-[a-zA-Z-]|\s*$)",
+            re.findall(r"(?:-[a-zA-Z]*m\b|--message[= ])\s*(.+?)(?=\s+-[a-zA-Z-]|\s*$)",
                        cmd, re.S)
         )
 
+    # KNOWN OPEN GAP, found 2026-08-11 alongside the -am fix above, not yet
+    # closed: this hook inspects `git diff --cached` as it stands BEFORE the
+    # bash command actually runs. A command that stages and commits in one
+    # breath -- `git add <file> && git commit -m "clean"`, or `git commit -a`
+    # itself, which stages at commit time -- can carry content this hook
+    # never sees, because the file isn't staged yet at the moment the index
+    # is inspected. Closing this needs scanning the on-disk content of
+    # whatever `git add`/`-a` would stage, not just what's already staged --
+    # a real fix, deliberately not rushed in alongside the -am fix above.
     if not diff and not names and not message.strip():
         _decision(True)
 

@@ -193,11 +193,26 @@ def main() -> int:
                                               registry=registry) is None]
                 check("every comparison-index name resolves to a property",
                       unresolved == [], f"unresolved: {unresolved}")
-                a = _reg.resolve(_cfg.DATA_DIR, "Mesquite Trails", registry=registry)
-                b = _reg.resolve(_cfg.DATA_DIR, "Mesquite Trails Ph 2, 3, 4", registry=registry)
-                check("a project and its later phase get distinct IDs",
-                      a is not None and b is not None and a != b,
-                      f"{a} vs {b}")
+                # Finds its own test case from the registry rather than naming a
+                # real property here -- this file is public. The bug this guards
+                # against (a project and its later-phase sibling sharing a name
+                # stem being merged into one ID) is structural, not tied to any
+                # one property, so any real pair with that shape proves the point.
+                names = [rec["canonical_name"] for rec in registry.values()]
+                stem_pair = None
+                for n in names:
+                    longer = [m for m in names if m != n and m.startswith(n)]
+                    if longer:
+                        stem_pair = (n, longer[0])
+                        break
+                if stem_pair:
+                    a = _reg.resolve(_cfg.DATA_DIR, stem_pair[0], registry=registry)
+                    b = _reg.resolve(_cfg.DATA_DIR, stem_pair[1], registry=registry)
+                    check("a project and its later phase get distinct IDs",
+                          a is not None and b is not None and a != b,
+                          f"ids: {a} vs {b}")
+                else:
+                    print("  SKIP  no name-stem pair found in the current registry to test against")
         except Exception as e:
             check("property-ID registry checks ran", False, f"{type(e).__name__}: {e}")
         r_real = pc.find_similar_deals(
