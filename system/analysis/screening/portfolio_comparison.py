@@ -93,7 +93,56 @@ ASSUMPTIONS = {
     "min_score_to_report": 5,
 }
 
-INDEX_PATH = Path(__file__).resolve().parents[2] / "data" / "portfolio_comparison_index.json"
+INDEX_FILENAME = "portfolio_comparison_index.json"
+INDEX_PATH = Path(__file__).resolve().parents[2] / "data" / INDEX_FILENAME
+
+
+def index_path() -> Path:
+    """
+    This machine's own copy if it has one, otherwise the team's shared
+    "Smartsheet Portfolio" folder -- same local-then-shared pattern as
+    property_coordinates.coords_path(), and for the same reason. Added
+    2026-08-11: this index has no shared-folder path at all until now, so a
+    freshly-installed teammate had no way to ever receive it (nothing rebuilds
+    it automatically -- it's agent-curated, not derived from a formula), and
+    an existing local copy simply goes stale forever with no update path. The
+    live install on THIS machine was found 5 days stale (Aug 6) while a
+    same-day re-verification pass had just moved 44 of 49 records from
+    unsourced to document-cited -- a gap this closes going forward.
+
+    Falls back to the LOCAL path when neither exists, deliberately: a caller
+    building a new index writes it to their own machine first, not silently
+    into the folder the whole team reads -- publishing to the team is a
+    separate, deliberate step (see publish_index() below).
+    """
+    if INDEX_PATH.exists():
+        return INDEX_PATH
+    try:
+        from config import SMARTSHEET_PORTFOLIO_DIR
+        shared = SMARTSHEET_PORTFOLIO_DIR / INDEX_FILENAME
+        if shared.exists():
+            return shared
+    except Exception:
+        pass  # unreachable shared folder just means "use the local path"
+    return INDEX_PATH
+
+
+def publish_index(index: list[dict] = None) -> Path:
+    """
+    Copies this machine's local index into the shared team folder, so a
+    teammate who has never built one gets the team's real, current index
+    instead of an empty comparison on every screen. Local always wins on
+    READ (see index_path()) -- this is the separate, explicit WRITE step that
+    makes a fresh copy available to whoever has none yet.
+    """
+    from config import SMARTSHEET_PORTFOLIO_DIR
+    data = index if index is not None else load_index(INDEX_PATH)
+    dest = SMARTSHEET_PORTFOLIO_DIR / INDEX_FILENAME
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    tmp = dest.with_suffix(".json.tmp")
+    tmp.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+    tmp.replace(dest)
+    return dest
 
 
 def _size_band(acres) -> str | None:
@@ -122,8 +171,12 @@ def load_index(path: Path = None) -> list[dict]:
     file doesn't exist yet -- callers should treat that as "no comparison
     data available" and say so, the same way an unevidenced market in
     fit_screen.py still ranks normally rather than raising.
+
+    Resolves local-then-shared via index_path() unless a specific path is
+    given (callers that pass INDEX_PATH explicitly, e.g. a rebuild script,
+    still target the local file only).
     """
-    p = path or INDEX_PATH
+    p = path or index_path()
     if not p.exists():
         return []
     try:
