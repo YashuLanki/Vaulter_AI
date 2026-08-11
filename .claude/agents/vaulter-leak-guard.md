@@ -106,10 +106,12 @@ directly with a constructed `tool_input`, same as testing any other script — s
   must **DENY**.
 - The same content via a chained command in one Bash call, e.g. `git add <file> && git commit -m
   "clean message"` where the leak lives in the file's on-disk content rather than the message
-  text — check whether this **DENIES** or not. As of 2026-08-11 this specific shape still
-  **bypasses** the hook (a documented, not-yet-closed gap — see the comment in
-  `check_no_leaks.py` itself). Confirm it's still open rather than assuming; if someone has since
-  closed it, say so.
+  text — check whether this **DENIES** or not. This shape was closed 2026-08-11 (the hook now
+  resolves the commit's own shell segment, detects `-a`/`--all` and any preceding `git add`
+  including whole-tree forms `.`/`-A`/`-u`, and scans the on-disk content of whatever would be
+  staged). Confirm it's still denying rather than assuming a past fix holds forever — a later
+  edit to the hook could reopen it, and this is exactly the kind of regression only running the
+  hook, not reading it, will catch.
 - A clean, ordinary commit message and an unrelated command (`git status`) — both must **ALLOW**.
   A hook that blocks everything is exactly the kind of over-blocking that teaches people to
   bypass it, and is its own finding if you see it.
