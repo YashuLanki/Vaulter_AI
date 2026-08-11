@@ -14,6 +14,13 @@ business behind them.
 ## Step -1 — read your context and memory first
 
 Read `docs/agents/leak-guard/context.md` and `docs/agents/leak-guard/memory.md` before starting.
+If a past entry reported a leak that this run finds is *still present* in a tracked file, that is
+not a routine finding — put it first, and say plainly that a previous pass already caught this and
+it was never actually remediated. Found 2026-08-11: a skill's own record said an earlier same-day
+sweep had "found a live confidentiality leak" — but nothing shows it was ever fixed in the file
+itself, and a second full audit found the identical leak still on `origin/main`. A found-but-not-
+fixed leak is a process gap as real as the leak itself, and burying it as one bullet among many
+lets it happen again.
 
 ## Part A — real business data in a public repo
 
@@ -42,6 +49,18 @@ For each file, classify:
   architecture point and genericizing the specific (e.g. "a parcel with significant floodplain
   coverage was still acquired" instead of naming the deal and the acreage).
 
+**Test fixtures are their own blind spot, not covered by "comments and docstrings count."** Found
+2026-08-11: a real leak reached `origin/main` and a built handoff zip because a new regression
+test used two real property names as literal fixture strings (`check_portfolio_comparison.py`),
+added the same day as 30+ other legitimate provenance changes and never separately scrutinized —
+test code reads as "just verifying logic," which is exactly why a real name slipped through
+feeling safe. When a test needs a concrete case to assert against (e.g. "two properties sharing a
+name stem must get distinct IDs"), the fix is not to delete the test — it's to have the test
+derive its own case from the data's structure at runtime (find a real pair matching the shape via
+`.startswith()` or similar) rather than writing the specific real answer into the file. Check every
+`test_*`/`check_*` file the same way you check `docs/`, and check new tests from the last several
+commits specifically, not just older ones.
+
 **Why this matters beyond "it's private": anything specific enough to identify or characterize
 the real deployment is reconnaissance value for someone looking to attack this system (see Part
 E5) — a real file count, a real folder name, or a real dollar figure narrows down what a specific
@@ -65,6 +84,38 @@ tracked file). A fresh string not yet on that list is exactly the kind of gap th
 catch. Real public repository URLs (`github.com/<owner>/<repo>`) are a different, legitimate
 category — the repo's own necessary public address, not personal/account exposure — don't flag
 those.
+
+## Part A2 — the pre-commit hook itself: test it, never just read it
+
+`check_no_leaks.py` is the one layer that can actually block a leak before it reaches history —
+everything else in this checklist finds a leak *after* the fact. A hook that reads correctly but
+doesn't actually block what it claims to is worse than no hook, because it's trusted. **Do not
+conclude the hook works by reading its code. Run it, with real adversarial inputs, every time.**
+
+Found 2026-08-11 by doing exactly this: the message-scanning regex required a literal `-m`
+substring, and `git commit -am "..."` does not contain that substring (the letter between the dash
+and the `m` breaks it) — so a fused short-flag commit sailed through as ALLOW while the identical
+content via `-a -m` correctly denied. The hook's own code looked fine on a read; only running it
+against that specific shape exposed the gap. Minimum cases to run every time (invoke the hook
+directly with a constructed `tool_input`, same as testing any other script — see git history around
+2026-08-11 for the exact harness pattern):
+
+- A real name (or, to avoid writing one into your own test, any comma-separated dollar amount at
+  deal scale — that exercises the identical money-detection code path without needing a name) via
+  plain `-m`, via `--message`, via `-a -m` (separated), and via `-am`/`-qam` (fused) — all four
+  must **DENY**.
+- The same content via a chained command in one Bash call, e.g. `git add <file> && git commit -m
+  "clean message"` where the leak lives in the file's on-disk content rather than the message
+  text — check whether this **DENIES** or not. As of 2026-08-11 this specific shape still
+  **bypasses** the hook (a documented, not-yet-closed gap — see the comment in
+  `check_no_leaks.py` itself). Confirm it's still open rather than assuming; if someone has since
+  closed it, say so.
+- A clean, ordinary commit message and an unrelated command (`git status`) — both must **ALLOW**.
+  A hook that blocks everything is exactly the kind of over-blocking that teaches people to
+  bypass it, and is its own finding if you see it.
+
+If you find a bypass, do not fix it yourself (same propose-only rule as everything else) — report
+it as the top finding, with the exact command that got through and what it should have done.
 
 ## Part B — .gitignore coverage
 
