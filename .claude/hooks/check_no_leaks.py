@@ -64,6 +64,28 @@ SECRET_PATTERNS = [
      "credential assigned to a secret-looking name"),
 ]
 
+# Money. Added 2026-08-11 on the project owner's instruction: keep deal names,
+# property names, AND dollar amounts out of the public repo, not just names.
+#
+# A real transaction figure is confidential whether or not a property is named
+# beside it -- an earlier pass genericized three buyers but left their real
+# per-lot prices sitting in the code, which is exactly the gap this closes.
+#
+# Deliberately narrow, because over-blocking teaches people to bypass the hook.
+# It fires on a currency-marked figure at deal scale -- thousands-separated, or
+# written with a magnitude suffix -- and NOT on bare numbers, version strings,
+# or percentages. Real figures belong in the gitignored cost file and
+# docs/EVIDENCE_APPENDIX.md; a genericized reference ("a mid-seven-figure
+# basis") is always available when prose needs one.
+#
+# Note the comment above carries no example figures, deliberately: the first
+# draft of this block illustrated the rule with literal amounts and the hook
+# promptly blocked its own commit. Describe the shape, never write one out.
+MONEY_PATTERNS = [
+    (r"\$\s?\d{1,3}(?:,\d{3})+(?:\.\d+)?", "a real dollar figure"),
+    (r"\$\s?\d+(?:\.\d+)?\s*[MmKk]\b", "a dollar figure in shorthand"),
+]
+
 
 def _decision(allow: bool, reason: str = "") -> None:
     print(json.dumps({
@@ -189,6 +211,14 @@ def main() -> None:
     for pat, label in SECRET_PATTERNS:
         if re.search(pat, added):
             findings.append(f"looks like a {label}")
+
+    for pat, label in MONEY_PATTERNS:
+        for hit in re.findall(pat, added):
+            findings.append(
+                f"{label} ({hit.strip()}) — real figures go in the gitignored cost file "
+                f"or docs/EVIDENCE_APPENDIX.md, never in tracked code or a commit message"
+            )
+            break   # one example per pattern is enough to make the point
 
     name_pats, have_list = _load_name_patterns()
     if not have_list:

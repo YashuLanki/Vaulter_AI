@@ -697,9 +697,17 @@ const sized  = top3.filter(x=>x.acres!=null).length;
 
 document.getElementById("f-cap").textContent = priced
   ? "$" + (DATA.capitalTop3/1e6).toFixed(1) + "M" : "—";
-const avgAsset = DATA.assumptions.avg_asset_value_millions;
+// A RANGE, not a point: two of the firm's own sources give different averages
+// and neither has been ratified, so the report shows the spread rather than
+// silently picking a side. Still null-safe -- a public clone with no local
+// cost data has neither figure and simply says less.
+const avgLo = DATA.assumptions.avg_asset_value_millions_low;
+const avgHi = DATA.assumptions.avg_asset_value_millions_high;
+const avgAsset = (avgLo!=null && avgHi!=null)
+  ? (avgLo === avgHi ? `$${avgLo}M` : `$${avgLo}–${avgHi}M`)
+  : null;
 document.getElementById("f-cap-l").textContent =
-  priced>=3 ? (avgAsset!=null ? `to acquire all three, against a $${avgAsset}M average per asset`
+  priced>=3 ? (avgAsset!=null ? `to acquire all three, against a typical ${avgAsset} per asset`
                                : "to acquire all three")
   : priced   ? `for the ${priced} of the top three that state an asking price`
              : "none of the top three states an asking price";

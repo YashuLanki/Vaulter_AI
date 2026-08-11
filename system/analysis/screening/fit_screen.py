@@ -143,7 +143,14 @@ ASSUMPTIONS = {
     # The firm's own average asset value, used only as a reference point on an
     # unusually large ask (see add_cautions) and in the report's headline
     # figures. Real figure lives in the gitignored cost_assumptions.json.
-    "avg_asset_value_millions": _COST.get("avg_asset_value_millions"),
+    # A RANGE, not a point, and deliberately so. Two of the firm's own sources
+    # disagree on the average capital per project and nobody has reconciled
+    # them (2026-08-11, pending a partner). Publishing one number would assert
+    # a reconciliation that has not happened -- the same reason the screener
+    # reports pricing confidence instead of a single confident figure.
+    "avg_asset_value_millions_low": _COST.get("avg_asset_value_millions_low"),
+    "avg_asset_value_millions_high": _COST.get("avg_asset_value_millions_high"),
+    "avg_asset_value_note": _COST.get("avg_asset_value_note"),
 
     # Residential lot yield, lots per acre. MEASURED across five deals, and the
     # single largest correction in this file: the previous value of 8.0 was
