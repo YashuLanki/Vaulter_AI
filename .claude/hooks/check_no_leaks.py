@@ -32,6 +32,7 @@ unexpected falls through to "allow" with a warning on stderr.
 
 import json
 import re
+import shlex
 import subprocess
 import sys
 from pathlib import Path
@@ -118,6 +119,147 @@ def _git(*args: str) -> str:
         return ""
 
 
+def _command_segment(cmd: str, start: int) -> str:
+    """
+    The text of ONE shell command starting at `start`, ending at the next
+    unquoted `;`, `&&`, `||`, `|`, or newline -- so a commit message value
+    containing those characters (the heredoc form this project uses wraps
+    its whole body in one pair of double quotes) is never mistaken for the
+    boundary between two chained commands. Quote-tracking alone is enough
+    for that case: once inside the outer "..." the heredoc's own `<<'EOF'`
+    marker and everything between it and the closing EOF is just more
+    quoted text, never inspected character-by-character for structure.
+    """
+    i = start
+    quote = None
+    while i < len(cmd):
+        c = cmd[i]
+        if quote:
+            if c == quote and cmd[i - 1:i] != "\\":
+                quote = None
+        elif c in ("'", '"'):
+            quote = c
+        elif cmd[i:i + 2] in ("&&", "||") or c in (";", "|", "\n"):
+            break
+        i += 1
+    return cmd[start:i]
+
+
+def _commit_stages_everything_tracked(segment: str) -> bool:
+    """
+    Does THIS git invocation's own segment pass -a/--all to commit? Token
+    split on whitespace outside quotes is enough here (unlike the message
+    regex, we only need to know a flag is PRESENT, not capture a value) --
+    -a/--all take no argument of their own. Matches a fused cluster like
+    -am/-qam too, since git parses those identically to -a -m.
+    """
+    try:
+        tokens = shlex.split(segment, posix=True)
+    except ValueError:
+        tokens = segment.split()
+    for t in tokens:
+        if t == "--all":
+            return True
+        if t.startswith("-") and not t.startswith("--") and "a" in t[1:]:
+            return True
+    return False
+
+
+def _git_add_targets(segment: str) -> tuple[list[str], bool]:
+    """
+    Path-like arguments to any `git add` call within this command segment,
+    plus whether it used a whole-tree form (`.`, `-A`/`--all`, `-u`/
+    `--update`) that needs a broader fallback than a specific path list.
+    """
+    targets, whole_tree = [], False
+    for m in re.finditer(r"\bgit\s+add\s+([^\n;&|]*?)(?=&&|\|\||[;\n|]|$)", segment):
+        try:
+            tokens = shlex.split(m.group(1), posix=True)
+        except ValueError:
+            tokens = m.group(1).split()
+        for t in tokens:
+            if t in (".", "-A", "--all", "-u", "--update"):
+                whole_tree = True
+            elif t.startswith("-"):
+                continue  # an option, not a path
+            else:
+                targets.append(t)
+    return targets, whole_tree
+
+
+def _pending_stage_content(cmd: str, git_write_start: int, is_push: bool) -> tuple[str, list[str]]:
+    """
+    Content that a chained `git add ...` or a `-a`/`--all` commit flag would
+    stage, that `git diff --cached` cannot see -- this hook runs BEFORE the
+    bash command it gates actually executes, so anything not staged yet at
+    that moment is invisible to `--cached`. Found 2026-08-11:
+    `git add <file> && git commit -m "clean"` and `git commit -a` both
+    reached this hook as ALLOW despite carrying real content, because the
+    file's on-disk change was never staged at inspection time.
+
+    Returns (text_to_scan, path_list): text_to_scan folds into the same
+    name/money/secret scan as a diff's added lines; path_list folds into
+    the same FORBIDDEN_PATHS check as --cached's file names.
+
+    Deliberately reads whole-file on-disk CONTENT rather than computing a
+    diff for these paths -- simpler, and a strict superset of what a diff
+    would show, so this can under-block (miss a chained command shape not
+    yet handled) but never under-scan a path it does recognize.
+
+    Push is out of scope: nothing is staged by a push itself, and the
+    commits it's about to push were already scanned as commits when they
+    were made (or are pre-existing history, already public).
+    """
+    if is_push:
+        return "", []
+
+    # -a/--all is scoped to the COMMIT's own segment -- checking anywhere in
+    # cmd would misfire on an unrelated `-a` in some other chained command.
+    commit_segment = _command_segment(cmd, git_write_start)
+    paths: list[str] = []
+
+    if _commit_stages_everything_tracked(commit_segment):
+        # -a/--all stages every MODIFIED tracked file (not new untracked
+        # ones) -- git status --porcelain's "M" lines in the unstaged column
+        # are exactly that set.
+        status = _git("status", "--porcelain")
+        for line in status.splitlines():
+            if len(line) > 3 and line[1] == "M":
+                paths.append(line[3:].strip())
+
+    # `git add` is the OPPOSITE case: it stages ahead of the commit, so it
+    # sits BEFORE this match in the string, not inside the commit's own
+    # segment. Search everything up to the commit/push invocation, not the
+    # invocation itself -- searching only commit_segment here was the actual
+    # bug on first attempt: `git add x && git commit ...` was never matched
+    # because "git add x" isn't part of the *commit's own* segment at all.
+    add_targets, whole_tree = _git_add_targets(cmd[:git_write_start] + commit_segment)
+    paths.extend(add_targets)
+    if whole_tree:
+        # `git add .` / `-A` / `-u` stages every changed path, tracked or
+        # new -- porcelain's full first-two-columns state covers both.
+        status = _git("status", "--porcelain")
+        for line in status.splitlines():
+            if len(line) > 3 and line[:2].strip():
+                paths.append(line[3:].strip())
+
+    text_parts = []
+    seen = set()
+    for rel in paths:
+        rel = rel.strip().strip('"')
+        if not rel or rel in seen:
+            continue
+        seen.add(rel)
+        p = REPO / rel
+        if p.is_file():
+            try:
+                text_parts.append(p.read_text(encoding="utf-8", errors="replace"))
+            except OSError:
+                pass  # unreadable file just contributes nothing to scan
+
+    return "\n".join(text_parts), sorted(seen)
+
+
 def _load_name_patterns() -> tuple[list[str], bool]:
     """(patterns, list_was_found). Absent list is a warning, not a pass."""
     if not PATTERNS_FILE.exists():
@@ -197,21 +339,21 @@ def main() -> None:
                        cmd, re.S)
         )
 
-    # KNOWN OPEN GAP, found 2026-08-11 alongside the -am fix above, not yet
-    # closed: this hook inspects `git diff --cached` as it stands BEFORE the
-    # bash command actually runs. A command that stages and commits in one
-    # breath -- `git add <file> && git commit -m "clean"`, or `git commit -a`
-    # itself, which stages at commit time -- can carry content this hook
-    # never sees, because the file isn't staged yet at the moment the index
-    # is inspected. Closing this needs scanning the on-disk content of
-    # whatever `git add`/`-a` would stage, not just what's already staged --
-    # a real fix, deliberately not rushed in alongside the -am fix above.
-    if not diff and not names and not message.strip():
+    # Closed 2026-08-11: content a chained `git add` or a `-a`/`--all` commit
+    # flag would stage, that --cached above cannot see yet because this hook
+    # runs before the bash command actually executes. See
+    # _pending_stage_content's own docstring for the two real cases this
+    # closes (chained add-then-commit; plain `commit -a`) and why whole-file
+    # content is scanned rather than a diff.
+    pending_text, pending_paths = _pending_stage_content(cmd, m.start(), is_push)
+
+    if not diff and not names and not message.strip() and not pending_text and not pending_paths:
         _decision(True)
 
     findings = []
 
-    for path in [p.strip() for p in names.splitlines() if p.strip()]:
+    all_paths = [p.strip() for p in names.splitlines() if p.strip()] + pending_paths
+    for path in all_paths:
         for pat in FORBIDDEN_PATHS:
             if re.search(pat, path):
                 findings.append(f"{path} is confidential and must not be tracked")
@@ -222,8 +364,9 @@ def main() -> None:
     added = "\n".join(l[1:] for l in diff.splitlines()
                       if l.startswith("+") and not l.startswith("+++"))
 
-    # The message is scanned on exactly the same footing as added diff lines.
-    added += "\n" + message
+    # The message and any not-yet-staged content are scanned on exactly the
+    # same footing as added diff lines.
+    added += "\n" + message + "\n" + pending_text
 
     for pat, label in SECRET_PATTERNS:
         if re.search(pat, added):
