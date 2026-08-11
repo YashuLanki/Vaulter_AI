@@ -142,7 +142,32 @@ def main() -> None:
         diff = _git("diff", "--cached")
         names = _git("diff", "--cached", "--name-only", "--diff-filter=ACMR")
 
-    if not diff and not names:
+    # THE COMMIT MESSAGE IS PART OF PUBLIC HISTORY TOO, and until 2026-08-11
+    # nothing checked it. Measured failure, not hypothetical: three commits
+    # that day (cf6ebd2, 8a4cd68, 7c05a4e) named real properties in their
+    # message prose while their diffs were clean and correctly genericized --
+    # including, with some irony, the message of the commit whose whole
+    # purpose was removing those same names from a tracked file. A message is
+    # as permanent and as public as a diff, so it gets scanned identically.
+    #
+    # Extracted BEFORE the empty-diff early-exit below, deliberately: the
+    # first version of this fix sat after it and therefore never ran for the
+    # case it was written for. A message can leak with an empty staged diff.
+    if is_push:
+        # No -m to read on a push, so take the messages of the commits
+        # actually being pushed. Body included, not just the subject line.
+        message = _git("log", "--format=%B", rng)
+    else:
+        # Every -m/--message value in the command. Covers -m "x",
+        # --message=x, and the heredoc form ( -m "$(cat <<'EOF' ... EOF )" )
+        # this project uses in practice, whose body is part of `cmd` verbatim
+        # by the time the hook sees it.
+        message = "\n".join(
+            re.findall(r"(?:-m|--message[= ])\s*(.+?)(?=\s+-[a-zA-Z-]|\s*$)",
+                       cmd, re.S)
+        )
+
+    if not diff and not names and not message.strip():
         _decision(True)
 
     findings = []
@@ -157,6 +182,9 @@ def main() -> None:
     # not the leak, and scanning the whole hunk would block every redaction.
     added = "\n".join(l[1:] for l in diff.splitlines()
                       if l.startswith("+") and not l.startswith("+++"))
+
+    # The message is scanned on exactly the same footing as added diff lines.
+    added += "\n" + message
 
     for pat, label in SECRET_PATTERNS:
         if re.search(pat, added):

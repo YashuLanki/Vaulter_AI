@@ -287,6 +287,12 @@ def summarize_match(m: dict, note_chars: int = 95) -> str:
     verified = bool(_VERIFIED_MARK.search(note))
     note = _UNVERIFIED_MARK.sub("", _VERIFIED_MARK.sub("", note))
     note = _PRICE.sub("", note)
+    # Removing a price mid-sentence leaves debris: "sold 2014 for $4M, ~2yr
+    # hold" became "sold 2014 for , ~2yr hold". Tidy the orphaned preposition
+    # and doubled punctuation rather than shipping a sentence with a hole in it.
+    note = re.sub(r"\b(for|at|of)\s+(?=[,;.]|\s|$)", "", note)
+    note = re.sub(r"\s*([,;])\s*(?=[,;])", "", note)
+    note = re.sub(r"\s+([,;.])", r"\1", note)          # no space before punctuation
     note = re.sub(r"\s+", " ", note).strip(" ;,.-")
 
     if len(note) > note_chars:

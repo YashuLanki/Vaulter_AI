@@ -1409,7 +1409,7 @@ _EXIT_PATH_UNKNOWN = "exit product depends on what it gets entitled for"
 PRE_PURSUIT_CHECKS = (
     "Before pursuing any of these, verify three things the export cannot show: "
     "who is selling and why (both of the firm's best outcomes were bought from "
-    "banks — an FDIC receivership and an RBC repossession), whether the land is "
+    "banks — a federal receivership and a lender repossession), whether the land is "
     "already platted (three of the best were), and whether water is secured (in "
     "Pinal that decides whether a site is entitleable at all, and one agreement "
     "in the record took 18 months to sign)."
