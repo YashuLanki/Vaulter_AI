@@ -188,6 +188,19 @@ it fails silently. **By coordinate** (`run_proximity_for_listing`) takes a rank 
 and uses the CoStar export's own coordinates; the refusal does not apply because nothing is being
 guessed. Both produce the same format, so a candidate and an owned property compare directly.
 
+**`property_coordinates.csv` records how precisely each point is known, not just where it is
+(`precision`: `parcel` / `section` / `intersection` / `city`), because the failure mode here is
+silent — a wrong or overstated coordinate points a 5-mile radius search at the wrong place and
+nothing about the output looks wrong.** A re-check of all 49 properties on 2026-08-10 found
+coverage complete and every point inside its correct state, but ten properties in four groups
+were labelled `parcel` while sharing one identical coordinate with another property in the same
+group (real groupings in `docs/EVIDENCE_APPENDIX.md`). Checking each group's legal description
+confirmed the parcels genuinely sit inside the same PLSS section, so the point itself was fine —
+up to ~0.7 miles off, immaterial at a 5-mile radius — but the label overstated what was actually
+known. Added `section` as its own precision level rather than silently leaving this as `parcel`,
+and `proximity_tool.py` now says so out loud: two properties in the same section return
+byte-identical results, and a user comparing them needs to know why.
+
 ### The portfolio (`system/portfolio.py`)
 Reads the Smartsheet Project Master export. CSV and .xlsx only — the PDF/OCR parsing path
 was dropped in the rebuild. Note only .xlsx can represent a sold deal (strikethrough via
@@ -601,6 +614,20 @@ so the "pick the first band it's under" logic found nothing. Not a rare shape �
 export routinely has rows with no `Land Area (AC)` value. Fixed by checking for `NaN` explicitly
 before banding; `check_screener.py`'s own section 14 and `check_portfolio_comparison.py` both now
 assert this specific case doesn't crash.
+
+**`summarize_match()` renders one compact line per matched deal for the `Portfolio_Comparison`
+column and the report's detail view — approach, outcome, a verification flag, and the shortest
+useful slice of the note.** Before 2026-08-10 the column was just `"<name> (<outcome>)"` repeated
+for each match — three names and the same two words, with no way to tell an entitlement play from
+a finished-lot purchase even though those imply opposite lessons for the listing in front of the
+reader. `find_similar_deals()` did not even return `plan_type` on a match, so the approach was
+invisible to every caller, not just this one. It now reads (real example in
+`docs/EVIDENCE_APPENDIX.md`) `"<name> — bought already-finished lots, still held [verified]:
+13-year hold against a 3-4yr plan..."`. The `[verified]` flag surfaces the 2026-08-10
+blind-verification markers (see above) so a reader can tell independently-confirmed history from
+a summary's own wording. Prices are stripped defensively with a regex guard before the string is
+built — one existing note mentions a sale figure, and `check_screener.py` asserts price never
+reaches this column, since the tool compares characteristics and history, never price.
 
 ### Passed-on-deal patterns (`system/analysis/screening/passed_on_patterns.py`)
 
