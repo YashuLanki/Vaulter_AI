@@ -210,8 +210,42 @@ def classify_land_type(text) -> str:
     return "unclear"
 
 
+# Language that means the land is ALREADY platted / already lots. Whole words,
+# because "lot" appears inside "lots of frontage" and worse.
+_FINISHED_LOT_PATTERN = re.compile(
+    r"\b(finished lots?|platted lots?|recorded (?:final )?plat|final plat recorded|"
+    r"fully platted|paper lots?|improved lots?|entitled lots?|lot package|"
+    r"\d+\s+(?:finished|platted|recorded|improved|entitled)\s+lots?)\b",
+    re.I,
+)
+
+
+def looks_like_finished_lots(*texts) -> bool:
+    """
+    Does this listing describe land that is ALREADY subdivided into lots?
+
+    This is NOT a guess at what the firm would do with it -- that stays out of
+    scope for an unowned listing, for the reason compare_listing_row explains.
+    It is an observation about the state of the asset: land that is already
+    platted cannot be "entitled" again, so the firm's own finished-lot
+    acquisitions are the relevant precedent rather than its entitlement plays,
+    and those are the most profitable pattern the portfolio actually documents.
+
+    Deliberately narrow. It only fires on explicit language, never on a bare
+    "lot", and a listing with nothing to say returns False -- which on a
+    typical CoStar export is EVERY row. Measured 2026-08-11: the real 216-row
+    export carries no platting language in any column at all, so this is
+    dormant there and correctly changes nothing.
+    """
+    for t in texts:
+        s = str(t or "").strip()
+        if s and s.lower() != "nan" and _FINISHED_LOT_PATTERN.search(s):
+            return True
+    return False
+
+
 def compare_listing_row(state, county, land_type_text, acres, top_n: int = 3,
-                         index: list[dict] = None) -> dict:
+                         index: list[dict] = None, extra_text=()) -> dict:
     """
     Same as find_similar_deals(), but for a single CoStar listing row: takes
     the listing's own raw State/County/land-use-text/acreage, classifies the
@@ -226,6 +260,15 @@ def compare_listing_row(state, county, land_type_text, acres, top_n: int = 3,
         "land_type": classify_land_type(land_type_text),
         "acres": acres,
     }
+    # The ONE exception to "never pass a plan_type for a listing", added
+    # 2026-08-11. Normally the firm hasn't decided an approach for something it
+    # doesn't own, so asserting one would misrepresent an unmade decision. But
+    # land that is ALREADY platted is a fact about the asset, not a decision
+    # about it -- and without this the firm's eight finished-lot acquisitions,
+    # its best-documented profitable pattern, can never surface as precedent
+    # for the one kind of listing they actually apply to.
+    if looks_like_finished_lots(land_type_text, *extra_text):
+        facts["plan_type"] = "acquire-finished-lots"
     return find_similar_deals(facts, top_n=top_n, index=index)
 
 
@@ -247,6 +290,18 @@ _PLAN_PHRASE = {
     "assemble-resell":       "assembled to resell",
     "recapitalization":      "recapitalized",
     "unclear":               "approach not established",
+}
+
+# "still held" covers three completely different situations -- nobody ever
+# tried to sell, it was marketed for years and nobody bought, or the investors
+# already got their capital back without a sale. As one label it teaches a
+# reader nothing, so where a property's own record evidences which, say it.
+# Deliberately only populated where evidenced: 10 of 38 as of 2026-08-11, and
+# the other 28 stay plain "still held" rather than being assigned a story.
+_DISPOSITION_PHRASE = {
+    "never-marketed":   "still held, never marketed",
+    "marketed-unsold":  "still held, marketed without a buyer",
+    "capital-returned": "still held, but capital already returned",
 }
 
 _OUTCOME_PHRASE = {
@@ -281,7 +336,8 @@ def summarize_match(m: dict, note_chars: int = 95) -> str:
     """
     name = str(m.get("property_name") or "").strip() or "(unnamed)"
     plan = _PLAN_PHRASE.get((m.get("plan_type") or "").strip().lower())
-    outcome = _OUTCOME_PHRASE.get((m.get("outcome_status") or "").strip().lower())
+    outcome = (_DISPOSITION_PHRASE.get((m.get("disposition_detail") or "").strip().lower())
+               or _OUTCOME_PHRASE.get((m.get("outcome_status") or "").strip().lower()))
 
     note = str(m.get("notes") or "")
     verified = bool(_VERIFIED_MARK.search(note))
@@ -383,6 +439,10 @@ def find_similar_deals(facts: dict, top_n: int = 5, index: list[dict] = None) ->
             # and callers present an unrecorded one as provisional.
             "plan_type_source": record.get("plan_type_source", "unrecorded"),
             "outcome_status": record.get("outcome_status", "unclear"),
+            # Which kind of "still held" this is, where the record evidences
+            # it. Absent for most properties, and absent means unknown -- not
+            # "nothing happened".
+            "disposition_detail": record.get("disposition_detail"),
             "notes": record.get("notes", ""),
             "era_note": era_note(record.get("entry_year")),
         })

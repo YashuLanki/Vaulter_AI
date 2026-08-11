@@ -615,6 +615,32 @@ export routinely has rows with no `Land Area (AC)` value. Fixed by checking for 
 before banding; `check_screener.py`'s own section 14 and `check_portfolio_comparison.py` both now
 assert this specific case doesn't crash.
 
+**Three fields were added 2026-08-11 to stop the index stating more than it knows.**
+`plan_type_source` records how each classification was arrived at — `documents` (independently
+re-read from source), `summary` (taken from the property's own write-up), or `unrecorded` (never
+written down). This is not bookkeeping: the blind re-read measured `unrecorded` classifications
+wrong **2 times in 3**, against 1 in 8 for cited ones, so an unrecorded one now renders as
+`[unconfirmed]` everywhere and `compare_to_portfolio_history` says outright to confirm it before
+relying on it. `disposition_detail` splits `still-held` — which covered "never marketed",
+"marketed for years, no buyer", and "capital already returned" under one label — but **only where
+the property's own note evidences which**; 10 of 38 as of this writing, and the other 28 stay
+plain rather than being assigned a story. And `pipeline/property_registry.py` gives every property
+a durable internal ID (never shown to a user) with every observed spelling recorded as an alias,
+because the same property is named four different ways across the four files describing it —
+harmless only while nothing joins them by name. Its first build merged a project with its
+later phase (48 IDs for 49 properties), so the canonical source now matches **exactly**, never by
+substring; one alias whose extra words sit mid-name can't be matched by any rule and is recorded
+by hand, which is the argument for a registry over re-deriving the link each run.
+
+**`looks_like_finished_lots()` is the one exception to "never pass a plan_type for a listing".**
+Land already platted is a *fact about the asset*, not a guess at what the firm would do with it,
+and without it the eight `acquire-finished-lots` deals — the best-documented profitable pattern in
+the portfolio — could never surface as precedent for the one kind of listing they apply to. It
+fires only on explicit language, never a bare "lot". The real 216-row export carries no platting
+language in any column, so it is **dormant there and correctly changes nothing**;
+`check_screener.py` §17 proves on synthetic platted data that it changes which deals are cited
+while leaving `Fit_Score` and `Fit_Tier` byte-identical.
+
 **`summarize_match()` renders one compact line per matched deal for the `Portfolio_Comparison`
 column and the report's detail view — approach, outcome, a verification flag, and the shortest
 useful slice of the note.** Before 2026-08-10 the column was just `"<name> (<outcome>)"` repeated
@@ -733,7 +759,7 @@ pattern without a name for it at the time. Generic version of this framework cal
 one defines the objective, which tools or subagents to use, the expected output, and how to
 handle edge cases, in plain language — the same way you'd brief a colleague. `screening-run`,
 `vaulter-screening-pipeline`, `proximity-mapping`, `document-research`, `commit_git`, `cleanup`,
-`recap`, `vaulter-rebuild`, and `mcp-health-check` are all Layer 1. This is this project's
+`recap`, `vaulter-rebuild`, `mcp-health-check`, and `full-sweep` are all Layer 1. This is this project's
 "workflows/" — there is no separate directory by that name, and one should not be created; the
 skill *is* the workflow doc.
 

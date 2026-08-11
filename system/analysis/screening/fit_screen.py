@@ -1257,9 +1257,24 @@ def add_portfolio_comparison(df: pd.DataFrame) -> pd.DataFrame:
     kinds = _text(_col(df, "Secondary Type", default=""))
     acres = _num(_col(df, "Land Area (AC)"))
 
+    # Any free-text column may be where a broker mentions the land is already
+    # platted -- there is no standard column for it, exactly as there is no
+    # standard column for anything else in a CoStar export. Gather whatever
+    # descriptive text this particular file happens to have rather than
+    # assuming a name; absent all of them, the finished-lot check simply never
+    # fires, which is the correct behaviour and what the real 216-row export
+    # does today.
+    _DESC_HINTS = ("proposed land use", "property name", "description",
+                   "comments", "listing", "title", "secondary type", "zoning")
+    desc_cols = [c for c in df.columns
+                 if any(h in str(c).lower() for h in _DESC_HINTS)]
+    desc = [_text(df[c]) for c in desc_cols] or [pd.Series([""] * len(df), index=df.index)]
+
     out = []
-    for st, co, kind, ac in zip(states, counties, kinds, acres):
-        r = compare_listing_row(st, co, kind, ac, top_n=3, index=index)
+    for i, (st, co, kind, ac) in enumerate(zip(states, counties, kinds, acres)):
+        extra = tuple(col.iloc[i] for col in desc)
+        r = compare_listing_row(st, co, kind, ac, top_n=3, index=index,
+                                extra_text=extra)
         if not r["matches"]:
             out.append("")
             continue

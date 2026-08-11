@@ -782,6 +782,34 @@ def main() -> int:
         check("a screen survives blank County/Submarket/Market cells", False,
               f"{type(e).__name__}: {e}")
 
+    # ── 17. Finished-lot routing is informational only ──────────────────────
+    # Added 2026-08-11. A listing whose own text says the land is already
+    # platted gets compared against the firm's finished-lot acquisitions rather
+    # than its entitlement plays -- the one case where a plan_type is passed
+    # for an unowned listing, because "already platted" is a fact about the
+    # asset, not a guess at what the firm would do. It must never touch the
+    # ranking. Two copies of the same file, identical but for the platting
+    # language, must score identically row for row.
+    print("\n17. Finished-lot routing never moves the score")
+    plat = src.copy()
+    plat["Proposed Land Use"] = "Residential - 118 platted lots ready to build"
+    noplat = src.copy()
+    noplat["Proposed Land Use"] = "Residential"
+    r_plat = _run(plat, full, tmp, "platted")
+    r_noplat = _run(noplat, full, tmp, "notplatted")
+    d_p, d_n = r_plat["dataframe"], r_noplat["dataframe"]
+    check("Fit_Score is identical with and without platting language",
+          d_p["Fit_Score"].reset_index(drop=True).equals(
+              d_n["Fit_Score"].reset_index(drop=True)),
+          "the routing is informational; it must not rank")
+    check("Fit_Tier is identical with and without platting language",
+          d_p["Fit_Tier"].reset_index(drop=True).equals(
+              d_n["Fit_Tier"].reset_index(drop=True)))
+    check("platting language does change which past deals are cited",
+          d_p["Portfolio_Comparison"].str.contains("already-finished lots", na=False).sum()
+          > d_n["Portfolio_Comparison"].str.contains("already-finished lots", na=False).sum(),
+          "otherwise the routing is doing nothing at all")
+
     passed = sum(1 for _, ok, _ in RESULTS if ok)
     print(f"\n{passed}/{len(RESULTS)} checks passed")
     return 0 if passed == len(RESULTS) else 1
