@@ -24,6 +24,7 @@ What these checks protect against, found once already during development:
     "no comparison data" result.
 """
 
+import os
 import sys
 from pathlib import Path
 
@@ -262,8 +263,139 @@ def main() -> int:
         check("the active-deal stage list is non-empty and holds real stage names",
               bool(_m.ACTIVE_DEAL_STAGES) and "Acquisition" in _m.ACTIVE_DEAL_STAGES,
               f"{_m.ACTIVE_DEAL_STAGES}")
+
+        check("batching with nothing to look up returns empty, not None",
+              _m._newest_docs_for_many({}) == {})
+
+        _real_idx = _c.CORPUS_INDEX_FILE
+        try:
+            _c.CORPUS_INDEX_FILE = Path(r"C:\nope\definitely_missing_index.db")
+            _batch_blind = _m._newest_docs_for_many({"Anything": _st})
+        finally:
+            _c.CORPUS_INDEX_FILE = _real_idx
+        check("batching with no document list returns None, never an empty result",
+              _batch_blind is None, f"got {_batch_blind!r}")
+
+        # The fast batched path replaced a slow per-property one (4.9s -> 0.3s,
+        # which mattered: it had pushed check_system_health past its 15s bar).
+        # Speed is only worth having if the answer is identical, so prove it
+        # against the real index rather than assuming.
+        if Path(_c.CORPUS_INDEX_FILE).exists():
+            _recs = real_index if isinstance(real_index, list) else list(real_index.values())
+            # An old date so real properties genuinely have newer documents --
+            # otherwise both sides return nothing and the comparison passes
+            # while proving nothing, which is the "fast empty answer" failure
+            # this project has been bitten by three times.
+            _probe = {r["property_name"]: _dt.datetime(2015, 1, 1, tzinfo=_dt.timezone.utc)
+                      for r in _recs[:8] if r.get("property_name")}
+            _batched = _m._newest_docs_for_many(_probe) or {}
+            _one_by_one = {}
+            for _nm, _when in _probe.items():
+                _c2 = _m._newer_readable_docs(_nm, _when)
+                if _c2 and _c2[0] and _c2[1]:
+                    _one_by_one[_nm] = _c2[1][0][0]
+            check("the equivalence probe actually found documents to compare",
+                  len(_batched) > 0,
+                  f"{len(_batched)} of {len(_probe)} probed properties had newer docs")
+            check("batched lookup agrees exactly with the per-property lookup",
+                  _batched == _one_by_one,
+                  f"batched={len(_batched)} single={len(_one_by_one)}"
+                  + ("" if _batched == _one_by_one
+                     else f" DIFF={set(_batched.items()) ^ set(_one_by_one.items())}"))
     except Exception as e:
         check("summary currency checks ran", False, f"{type(e).__name__}: {e}")
+
+    # ── 5. Document-library detection ─────────────────────────────
+    # The library's folder name is deliberately NOT in the code (this repo is
+    # public and the name identifies the firm's SharePoint site), so it is
+    # found by shape instead: OneDrive names a synced library "<Org> - <Site>"
+    # while personal folders are plain single names. That makes detection
+    # load-bearing -- get it wrong and the system either finds nothing or,
+    # far worse, points at the individual's own Desktop/Documents. These run
+    # against throwaway folders, never the real OneDrive.
+    print("\n5. Document-library detection")
+    try:
+        import shutil as _shutil
+        import tempfile as _tempfile
+        sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+        import config as _cf
+
+        def _fake_root(*names):
+            d = Path(_tempfile.mkdtemp(prefix="vlt_cfg_"))
+            for n in names:
+                (d / n).mkdir()
+            return d
+
+        personal = ("Desktop", "Documents", "Pictures",
+                    "Microsoft Teams Chat Files", "Attachments")
+
+        r = _fake_root(*personal, "Acme Co - somelibrary")
+        try:
+            got = _cf._find_corpus_subfolder(r)
+            check("one library among personal folders is found",
+                  got is not None and got.name == "Acme Co - somelibrary",
+                  f"got {got.name if got else None}")
+        finally:
+            _shutil.rmtree(r, ignore_errors=True)
+
+        r = _fake_root(*personal)
+        try:
+            check("no library synced returns None, never a personal folder",
+                  _cf._find_corpus_subfolder(r) is None)
+        finally:
+            _shutil.rmtree(r, ignore_errors=True)
+
+        # Refusing to guess matters more than picking: the wrong library
+        # would silently index someone else's site.
+        r = _fake_root("Desktop", "Acme Co - alpha", "Acme Co - beta")
+        try:
+            check("two libraries: refuses to guess between them",
+                  _cf._find_corpus_subfolder(r) is None)
+        finally:
+            _shutil.rmtree(r, ignore_errors=True)
+
+        r = _fake_root("Desktop", "Acme Co - alpha", _cf.SHARED_SUBFOLDER)
+        try:
+            got = _cf._find_corpus_subfolder(r)
+            check("this system's own shared folder is never mistaken for the library",
+                  got is not None and got.name != _cf.SHARED_SUBFOLDER,
+                  f"got {got.name if got else None}")
+        finally:
+            _shutil.rmtree(r, ignore_errors=True)
+
+        check("the library folder name is not hardcoded in config.py",
+              _cf.CORPUS_SUBFOLDER == "" or bool(os.environ.get("VAULTER_CORPUS_SUBFOLDER")),
+              "it must come from confidentials/.env, never the tracked source")
+
+        # The org's own name is not in the code either, so the account-root
+        # fallback must work for ANY organisation. Env vars are stripped here
+        # so only the glob path can answer -- otherwise this machine's real
+        # OneDrive would satisfy the check without exercising the fallback.
+        _saved_env = {v: os.environ.pop(v, None)
+                      for v in ("OneDriveCommercial", "OneDrive")}
+        _saved_profile = os.environ.get("USERPROFILE")
+        try:
+            r = _fake_root("Documents", "OneDrive - Some Other Org")
+            os.environ["USERPROFILE"] = str(r)
+            got = _cf._detect_onedrive_root()
+            check("the OneDrive account root is found for any organisation, not just ours",
+                  got is not None and got.name == "OneDrive - Some Other Org",
+                  f"got {got.name if got else None}")
+            _shutil.rmtree(r, ignore_errors=True)
+
+            r = _fake_root("Documents")
+            os.environ["USERPROFILE"] = str(r)
+            check("a profile with no OneDrive returns None, not a wrong folder",
+                  _cf._detect_onedrive_root() is None)
+            _shutil.rmtree(r, ignore_errors=True)
+        finally:
+            for v, was in _saved_env.items():
+                if was is not None:
+                    os.environ[v] = was
+            if _saved_profile is not None:
+                os.environ["USERPROFILE"] = _saved_profile
+    except Exception as e:
+        check("document-library detection checks ran", False, f"{type(e).__name__}: {e}")
 
     passed = sum(1 for _, ok, _ in RESULTS if ok)
     print(f"\n{passed}/{len(RESULTS)} checks passed")

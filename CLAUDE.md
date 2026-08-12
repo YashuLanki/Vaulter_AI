@@ -69,6 +69,20 @@ vs Mac, loads `system/confidentials/.env` via `python-dotenv`, and creates all `
 on import. Nothing else in the codebase should hardcode a path or read `os.environ`
 directly for these values.
 
+**The document library's folder name is not in the code, and is found by shape (2026-08-11).**
+It used to be a constant (`CORPUS_SUBFOLDER`) and appeared in ten places in this file's own
+module — real SharePoint site detail in a deliberately public repo, the same category as a real
+Windows username. It now comes from `VAULTER_CORPUS_SUBFOLDER` in `confidentials/.env` when set,
+and otherwise `_find_corpus_subfolder()` detects it: OneDrive names a synced SharePoint library
+`<Org> - <Site>`, while every folder it creates for the individual is a plain single name
+(`Desktop`, `Documents`, `Pictures`, `Microsoft Teams Chat Files`). So "contains ` - `, is not
+`SHARED_SUBFOLDER`, is not a known personal folder" identifies a library without naming one.
+Two libraries synced → it **refuses and asks**, rather than guessing; the warning deliberately
+does not print the folder names, since those are the detail being protected. This was also the
+better design regardless of confidentiality: the exact name was never reliable across machines
+(colleagues see different capitalization, confirmed 2026-07-29). `check_portfolio_comparison.py`
+§5 covers all four shapes against throwaway folders.
+
 `SECRETS_DIR` is the project's own `system/confidentials/` folder on every OS. Windows also checks
 one legacy hardcoded location (`C:\Users\<USERNAME>\Vaulter AI\confidentials`) as a
 fallback, but *only* if that path already has a real `.env` and the project folder doesn't

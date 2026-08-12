@@ -59,53 +59,85 @@ load_dotenv(SECRETS_DIR / ".env", override=True)
 #       person's screening run is visible to everyone instead of sitting only
 #       on their own machine. This system writes here.
 #
-#   CORPUS_DIR ("Vaulter LLC - shaw") -- the firm's actual SharePoint document
-#       library: !PROPERTIES/<STATE>/<Property>/, CLOSING MEMOS, entity files.
+#   CORPUS_DIR -- the firm's actual SharePoint document library:
+#       !PROPERTIES/<STATE>/<Property>/, CLOSING MEMOS, entity files.
 #       This system only ever READS here, never writes.
 #
-# CORPUS_DIR is deliberately the shaw library and NOT the OneDrive account
-# root. The root also contains the individual's own Desktop, Documents,
+# CORPUS_DIR is deliberately the document library itself and NOT the OneDrive
+# account root. The root also contains the individual's own Desktop, Documents,
 # Pictures, and "Microsoft Teams Chat Files" -- personal content that this
-# system must never read or index. Scoping to the shaw subfolder is the
+# system must never read or index. Scoping to the library subfolder is the
 # privacy boundary, and corpus/index.py enforces it on every path it touches.
 #
-# Auto-detects "OneDrive - Vaulter LLC" (standard OneDrive-for-Business
-# naming -- same folder name for everyone, different C:\Users\<name>\ per
-# person). Override either with VAULTER_SHARED_DIR / VAULTER_CORPUS_DIR in
+# Auto-detects "OneDrive - <Org>" (standard OneDrive-for-Business naming --
+# same folder name for everyone, different C:\Users\<name>\ per person).
+# Override either with VAULTER_SHARED_DIR / VAULTER_CORPUS_DIR in
 # confidentials/.env if your OneDrive is named or located differently.
 
 _LOCAL_FALLBACK_DIR = (BASE_DIR / "data" / "shared_fallback_not_synced").resolve()
 
-ONEDRIVE_FOLDER_NAME = "OneDrive - Vaulter LLC"
+# Just the standard OneDrive-for-Business prefix -- the organisation's own
+# name is deliberately not here (see CORPUS_SUBFOLDER below for why). Real
+# roots are found from OneDrive's own environment variables first, and by
+# "<this prefix> - <Org>" glob only as a fallback.
+ONEDRIVE_PREFIX      = "OneDrive"
 SHARED_SUBFOLDER     = "Vaulter AI Shared"
-CORPUS_SUBFOLDER     = "Vaulter LLC - shaw"
+
+# The document library's own folder name is deliberately NOT written here.
+# This repo is public, and the library's display name identifies the firm's
+# SharePoint site -- real account/tenant detail, the same category as a real
+# Windows username. It is read from confidentials/.env (gitignored) when set,
+# and otherwise detected by SHAPE rather than by name; see
+# _find_corpus_subfolder. Set VAULTER_CORPUS_SUBFOLDER (just the folder name)
+# or VAULTER_CORPUS_DIR (the full path) to pin it explicitly.
+CORPUS_SUBFOLDER = os.getenv("VAULTER_CORPUS_SUBFOLDER", "").strip()
+
+# Folders OneDrive creates for the individual, never a document library.
+# Matched case-insensitively, and by prefix so "Microsoft <app> Chat Files"
+# variants are all covered without listing each one as Microsoft adds them.
+_PERSONAL_ONEDRIVE_FOLDERS = (
+    "desktop", "documents", "pictures", "attachments", "meetings",
+    "recordings", "apps", "microsoft", "music", "videos", "notebooks",
+)
 
 
 def _detect_onedrive_root() -> Path | None:
-    """The synced OneDrive-for-Business account root, or None if not found."""
+    """
+    The synced OneDrive-for-Business account root, or None if not found.
+
+    The organisation's own name is not written here, for the same reason the
+    library's isn't (see CORPUS_SUBFOLDER above) -- it's the tenant identifier,
+    and this repo is public. Not a loss: OneDrive publishes its real root in an
+    environment variable, which is authoritative and beats any hardcoded guess
+    anyway. The name-shaped fallbacks below match the standard
+    OneDrive-for-Business pattern ("OneDrive - <Org>") by glob, so they work
+    for any organisation rather than only this one.
+    """
     candidates = []
     if sys.platform == "win32":
         # OneDrive itself publishes its root in env vars -- the authoritative
         # answer, correct even when the folder lives on another drive, under a
-        # relocated profile, or under a tenant name that isn't exactly
-        # ONEDRIVE_FOLDER_NAME. OneDriveCommercial is the work account
-        # specifically; plain OneDrive can point at a personal account, so it
-        # comes second and only counts if its folder name looks like a
-        # business root ("OneDrive - <org>"). The name-based guess stays as
-        # the last fallback for a machine where OneDrive is synced but the
-        # env vars are missing (e.g. a service context).
+        # relocated profile, or under an unexpected tenant name.
+        # OneDriveCommercial is the work account specifically; plain OneDrive
+        # can point at a personal account, so it comes second and only counts
+        # if its folder name looks like a business root ("OneDrive - <org>").
+        # The glob stays as the last fallback for a machine where OneDrive is
+        # synced but the env vars are missing (e.g. a service context).
         for var in ("OneDriveCommercial", "OneDrive"):
             v = os.environ.get(var, "").strip()
             if v and (var == "OneDriveCommercial" or " - " in Path(v).name):
                 candidates.append(Path(v))
         username = os.environ.get("USERNAME", "YourName")
-        candidates.append(Path(os.environ.get("USERPROFILE", rf"C:\Users\{username}")) / ONEDRIVE_FOLDER_NAME)
+        profile = Path(os.environ.get("USERPROFILE", rf"C:\Users\{username}"))
+        candidates.extend(sorted(profile.glob(f"{ONEDRIVE_PREFIX} - *")))
     else:
         home = Path.home()
-        # Modern OneDrive for Mac syncs under ~/Library/CloudStorage/;
-        # older versions/some configs use ~/<OneDrive folder name> directly.
-        candidates.append(home / "Library" / "CloudStorage" / f"OneDrive-{ONEDRIVE_FOLDER_NAME.replace('OneDrive - ', '').replace(' ', '')}")
-        candidates.append(home / ONEDRIVE_FOLDER_NAME)
+        # Modern OneDrive for Mac syncs under ~/Library/CloudStorage/ with the
+        # spaces stripped ("OneDrive-<Org>"); older versions/some configs use
+        # ~/OneDrive - <Org> directly.
+        candidates.extend(sorted((home / "Library" / "CloudStorage").glob(f"{ONEDRIVE_PREFIX}-*"))
+                          if (home / "Library" / "CloudStorage").is_dir() else [])
+        candidates.extend(sorted(home.glob(f"{ONEDRIVE_PREFIX} - *")))
 
     for candidate in candidates:
         if candidate.exists():
@@ -126,31 +158,59 @@ def _dir_has_content(d: Path) -> bool:
 
 def _find_corpus_subfolder(onedrive_root: Path) -> Path | None:
     """
-    CORPUS_SUBFOLDER's exact name isn't guaranteed to match across every
-    teammate's synced copy -- confirmed 2026-07-29 that colleagues see
-    different capitalization ("shaw" vs "Shaw"), and this machine's own
-    exact "Vaulter LLC - shaw" match is not something to assume elsewhere.
-    Same problem CoStar column resolution already solved: don't index one
-    exact name, match the concept, and refuse rather than guess when it's
-    genuinely ambiguous.
+    The firm's synced SharePoint document library, found by shape not by name.
+
+    Detected rather than hardcoded for two reasons. The first is
+    confidentiality: this repo is public and the library's display name is
+    real tenant detail (found 2026-08-11 sitting in tracked code). The second
+    predates it -- the exact name isn't reliable anyway. Confirmed 2026-07-29
+    that colleagues see different capitalization, so one machine's exact
+    spelling was never safe to assume elsewhere.
+
+    The shape rule: OneDrive names a synced SharePoint library
+    "<Org> - <SiteName>", while every folder it creates for the individual is
+    a plain single name (Desktop, Documents, Pictures, Microsoft Teams Chat
+    Files). So a name containing " - ", excluding this system's own shared
+    folder and the known personal ones, identifies a library without naming
+    any specific one.
+
+    Same discipline as CoStar column resolution and _detect_shared_dir: match
+    the concept, and refuse rather than guess when genuinely ambiguous. A
+    wrong answer here would point the whole system at the wrong folder, or --
+    worse -- at personal content it must never index.
     """
-    exact = onedrive_root / CORPUS_SUBFOLDER
-    if exact.is_dir():
-        return exact
+    # An explicitly configured name always wins, and skips detection entirely.
+    if CORPUS_SUBFOLDER:
+        exact = onedrive_root / CORPUS_SUBFOLDER
+        if exact.is_dir():
+            return exact
+        print(f"WARNING: VAULTER_CORPUS_SUBFOLDER is set to "
+              f"'{CORPUS_SUBFOLDER}' but no such folder exists under "
+              f"{onedrive_root}. Falling back to auto-detection.",
+              file=sys.stderr)
 
     try:
-        candidates = [d for d in onedrive_root.iterdir()
-                      if d.is_dir() and "shaw" in d.name.lower()]
+        candidates = [
+            d for d in onedrive_root.iterdir()
+            if d.is_dir()
+            and " - " in d.name
+            and d.name != SHARED_SUBFOLDER
+            and not d.name.lower().startswith(_PERSONAL_ONEDRIVE_FOLDERS)
+        ]
     except OSError:
         return None
 
     if len(candidates) == 1:
         return candidates[0]
     if len(candidates) > 1:
-        print(f"WARNING: found {len(candidates)} folders under {onedrive_root} "
-              f"matching 'shaw' ({[c.name for c in candidates]}) -- can't tell "
-              f"which is the real document library. Set VAULTER_CORPUS_DIR in "
-              f"confidentials/.env to the correct one.", file=sys.stderr)
+        # Deliberately does NOT print the folder names: this message can reach
+        # a log or a screen share, and the names are the tenant detail being
+        # protected. The count is enough to tell the user to pick one.
+        print(f"WARNING: found {len(candidates)} synced SharePoint libraries "
+              f"under {onedrive_root} -- can't tell which is the firm's "
+              f"document library. Set VAULTER_CORPUS_SUBFOLDER (the folder "
+              f"name) or VAULTER_CORPUS_DIR (the full path) in "
+              f"confidentials/.env to pick one.", file=sys.stderr)
     return None
 
 
@@ -202,8 +262,8 @@ def _detect_shared_dir() -> Path:
         # as "Vaulter AI Shared 1". Preferring a same-prefixed sibling that
         # actually has content is what stops the empty decoy winning forever.
         #
-        # Same shape as _find_corpus_subfolder's handling of "shaw"/"Shaw":
-        # match the concept, and refuse to guess when genuinely ambiguous.
+        # Same shape as _find_corpus_subfolder's own detection: match the
+        # concept, and refuse to guess when genuinely ambiguous.
         try:
             variants = [d for d in ONEDRIVE_ROOT.iterdir()
                         if d.is_dir() and d != exact
@@ -261,7 +321,7 @@ SHARED_DIR_IS_FALLBACK = (SHARED_DIR == _LOCAL_FALLBACK_DIR)
 
 
 # The firm's document library. Read-only, and deliberately NOT mkdir'd:
-# if it isn't there, that means OneDrive isn't syncing the shaw library on
+# if it isn't there, that means OneDrive isn't syncing the document library on
 # this machine, which is a real condition for check_system_health to report
 # -- creating an empty folder would just hide it and make every search
 # silently return nothing.
