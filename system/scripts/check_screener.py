@@ -861,6 +861,54 @@ def main() -> int:
           > d_n["Portfolio_Comparison"].str.contains("already-finished lots", na=False).sum(),
           "otherwise the routing is doing nothing at all")
 
+    # ── 18. Jurisdiction dossiers inform, never rank ──────────────────────────
+    # A city's researched dossier answers what the export cannot -- is this
+    # jurisdiction going anywhere -- but it is prose a human wrote, and letting
+    # prose move a score turns research into arithmetic. Same rule as Cautions
+    # and Portfolio_Comparison, asserted the same way.
+    print("\n18. Jurisdiction dossiers inform, never rank")
+    from analysis.screening import jurisdiction_notes as jn
+
+    check("a dossier is matched to its own city and state",
+          bool(jn.note_for("Coolidge", "AZ", {("coolidge", "az"): "NOTE"})))
+    check("a spelled-out state still matches its code",
+          bool(jn.note_for("Coolidge", "Arizona", {("coolidge", "az"): "NOTE"})))
+    # The dangerous one: same city name, different state. A postal code is NOT
+    # a prefix of the state name ("arizona" starts with "ar" = ARKANSAS), and
+    # an earlier version matched on prefix and would have handed Arizona's
+    # water and impact-fee research to listings in other states.
+    check("the same city name in ANOTHER state gets nothing",
+          not jn.note_for("Coolidge", "TX", {("coolidge", "az"): "NOTE"}))
+    check("Arkansas is never mistaken for Arizona",
+          not jn.note_for("Coolidge", "AR", {("coolidge", "az"): "NOTE"}))
+    check("a row with no state gets nothing rather than a guess",
+          not jn.note_for("Coolidge", "", {("coolidge", "az"): "NOTE"}))
+    check("a city with no dossier gets nothing",
+          not jn.note_for("Buckeye", "AZ", {("coolidge", "az"): "NOTE"}))
+
+    # And the whole point: the note must not be able to move the ranking.
+    jdir = jn.jurisdictions_dir()
+    if jdir and jdir.is_dir() and any(jdir.glob("*.md")):
+        import shutil as _sh
+        hidden = jdir.with_name(jdir.name + "_check_screener_tmp")
+        _sh.move(str(jdir), str(hidden))
+        try:
+            bare = _run(src, full, tmp, "nodossier")["dataframe"]
+        finally:
+            _sh.move(str(hidden), str(jdir))
+        withd = _run(src, full, tmp, "withdossier")["dataframe"]
+        check("Fit_Score is identical with and without dossiers",
+              withd["Fit_Score"].equals(bare["Fit_Score"]),
+              "a dossier is context, never a score input")
+        check("Fit_Tier is identical with and without dossiers",
+              withd["Fit_Tier"].equals(bare["Fit_Tier"]))
+        check("the column exists even when no dossier does",
+              "Jurisdiction_Note" in bare.columns
+              and (bare["Jurisdiction_Note"].astype(str).str.len() == 0).all(),
+              "silence, not a placeholder implying the city was assessed")
+    else:
+        skip("dossiers never move the score", "no dossiers on this machine to test with")
+
     passed = sum(1 for _, ok, _ in RESULTS if ok)
     print(f"\n{passed}/{len(RESULTS)} checks passed")
     return 0 if passed == len(RESULTS) else 1

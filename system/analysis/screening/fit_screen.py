@@ -1294,6 +1294,35 @@ def add_portfolio_comparison(df: pd.DataFrame) -> pd.DataFrame:
     return _attach(df, {"Portfolio_Comparison": out})
 
 
+def add_jurisdiction_notes(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    The city's own researched dossier, for listings in a city that has one.
+
+    Answers the question nothing else here can: *is this jurisdiction going
+    anywhere?* Water and sewer capacity, impact fees, annexation posture and
+    capital plans are what decide whether an entitlement play is even
+    possible, and a CoStar export says none of it.
+
+    NEVER affects Fit_Score or Fit_Tier -- same rule as Cautions and
+    Portfolio_Comparison, and asserted in check_screener.py. Most cities have
+    no dossier and get an empty string; silence is correct, because a
+    placeholder would imply the city was assessed when it was not.
+    """
+    from analysis.screening.jurisdiction_notes import load_dossiers, note_for
+
+    dossiers = load_dossiers()
+    if not dossiers:
+        return _attach(df, {"Jurisdiction_Note": [""] * len(df)})
+
+    cities = _text(_col(df, "City", default=""))
+    states = _text(_col(df, "State", default=""))
+    notes = [note_for(c, s, dossiers) for c, s in zip(cities, states)]
+    covered = sum(1 for n in notes if n)
+    log.info(f"[SCREEN] Jurisdiction dossiers: {len(dossiers)} on file, "
+             f"{covered} of {len(df)} listings covered")
+    return _attach(df, {"Jurisdiction_Note": notes})
+
+
 # ─── Compose ──────────────────────────────────────────────────────────────────
 
 # Tiers are assigned by RANK WITHIN THE EXPORT, not by an absolute score.
@@ -1613,6 +1642,7 @@ def screen(source_path: Path, moic: float = None, write_workbook: bool = True) -
     df = add_cautions(df)
     df = add_vaulter_context(df)
     df = add_portfolio_comparison(df)
+    df = add_jurisdiction_notes(df)
 
     # If the firm owns nothing anywhere near this export, proximity carries no
     # information -- and scoring every listing down for it would make a genuinely

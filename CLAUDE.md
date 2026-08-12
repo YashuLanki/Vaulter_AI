@@ -783,6 +783,38 @@ a summary's own wording. Prices are stripped defensively with a regex guard befo
 built — one existing note mentions a sale figure, and `check_screener.py` asserts price never
 reaches this column, since the tool compares characteristics and history, never price.
 
+### Jurisdiction dossiers (`system/analysis/screening/jurisdiction_notes.py`) — 2026-08-12
+
+**Found by auditing what the screener actually opens, rather than what the comments mention.**
+A 9,000-character researched dossier for one Arizona city had sat in `docs/jurisdictions/` for
+weeks, read by **zero** code — with a section literally headed "What this changes about
+screening <city> listings". `docs/` is also never shipped, so it could never have reached a
+teammate even in principle. This module is the wire that was missing.
+
+It answers the one question nothing else in the screen can: **is this jurisdiction going
+anywhere?** Water and sewer capacity, impact fees, annexation posture and capital plans decide
+whether an entitlement play is possible at all, and a CoStar export says none of it.
+
+* **Dossiers moved to `SHARED_DIR/jurisdictions/<city>-<state>.md`**, beside the property
+  summaries, so the whole team has the same research — the same reasoning that put summaries
+  there rather than in the repo.
+* **`Jurisdiction_Note` never touches `Fit_Score` or `Fit_Tier`.** Same rule as `Cautions` and
+  `Portfolio_Comparison`: a dossier is prose a human wrote, and letting prose move a score turns
+  research into arithmetic. `check_screener.py` §18 proves the score is byte-identical with the
+  dossier folder present and moved away.
+* **It quotes the dossier's own screening section rather than summarising the whole thing** — a
+  summary of research is a new claim, and nothing here invents a signal. A dossier with no such
+  section contributes nothing, which is honest: background research that never reached a
+  conclusion should not sit beside a ranking as though it had.
+* **Silence where there is no dossier.** The real 216-row export spans 30 cities; one dossier
+  covered 11 listings. An empty string, never a placeholder implying the city was assessed.
+
+**One trap worth recording, because it looked right and was dangerous.** Matching a state code
+to a spelled-out name by prefix is wrong: `"arizona"` starts with `"ar"`, which is **Arkansas**.
+An earlier version also fell back to "the only dossier with this city name" and handed Arizona's
+water findings to a listing in Coolidge, *Texas* — same-named towns exist in several states.
+Both are now an explicit code lookup, and both are asserted in §18.
+
 ### Sold-deal precedent (`_sold-deals.md`, `get_sold_deals`) — 2026-08-12
 
 The mirror image of `_passed-on-deals.md`, and requested straight out of a team meeting: the
