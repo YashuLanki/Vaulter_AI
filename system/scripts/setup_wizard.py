@@ -481,13 +481,16 @@ def check_shared_folder() -> bool:
     Make sure this machine can see the TEAM's shared folder, not a private
     empty one.
 
-    Why this step exists: "Vaulter AI Shared" is an ordinary folder inside one
-    person's OneDrive, not a synced SharePoint library like the document
-    library. A teammate only gets it if it's shared with them AND they use
-    OneDrive's "Add shortcut to My files". Without that they silently get an
-    empty folder that this system creates itself, and everything looks
-    connected while being completely isolated -- no portfolio, no shared CoStar
-    exports. Better to say so during setup than let them find out later.
+    Why this step exists: without it a teammate silently gets an empty folder
+    that this system creates itself, and everything looks connected while being
+    completely isolated -- no portfolio, no shared CoStar exports. Better to say
+    so during setup than let them find out later.
+
+    The folder now lives INSIDE the firm's document library (moved 2026-08-03),
+    so it arrives with the library rather than needing to be shared separately.
+    That means when it IS missing, the cause is almost always the library not
+    syncing -- not a missing share. This docstring said the opposite until
+    2026-08-12, and so did the message this function printed.
     """
     _print_header("5. The team's shared folder")
     import config
@@ -519,15 +522,28 @@ def check_shared_folder() -> bool:
             print(f"  ⚠ Found it at {found} but couldn't save that setting ({e}).")
             return False
 
+    # The advice here used to be: get someone to share the folder with you, then
+    # click "Add shortcut to My files" on onedrive.com. That was true when the
+    # shared folder was an ordinary folder in one person's OneDrive. It moved
+    # INSIDE the document library on 2026-08-03 precisely so it reaches everyone
+    # automatically and that manual step disappeared -- so the instructions had
+    # been sending people to perform a step that no longer exists, for a cause
+    # that was no longer the cause. Same failure as the Claude Desktop message:
+    # confidently naming a reason nothing had actually tested.
     print("  ⚠ This machine can't see the team's shared folder yet.")
     print("    Everything else still works — but portfolio questions will come back")
     print("    empty, and you won't see the team's CoStar exports, until it's fixed.")
     print()
-    print("    Whoever set up Vaulter AI needs to share the 'Vaulter AI Shared'")
-    print("    folder with you (Edit access). Then, on onedrive.com:")
-    print("      1. Open 'Shared' in the left sidebar")
-    print("      2. Find 'Vaulter AI Shared'")
-    print("      3. Click 'Add shortcut to My files'")
+    if not config.CORPUS_AVAILABLE:
+        print("    The likely reason: the team's folder lives INSIDE the firm's document")
+        print("    library, and that library isn't syncing to this computer yet. Fix that")
+        print("    first (step 7 below says how) and this usually fixes itself.")
+    else:
+        print(f"    The document library IS syncing, but it has no 'Vaulter AI Shared'")
+        print(f"    folder in it yet:")
+        print(f"      {config.CORPUS_DIR}")
+        print("    That folder is created once, by whoever set Vaulter AI up for the team.")
+        print("    Ask Yashu to confirm it exists — nothing on your side is broken.")
     print()
     print("    Then double-click 'Setup Vaulter AI' again — it will find it")
     print("    automatically, wherever OneDrive puts it.")
@@ -622,10 +638,42 @@ def build_corpus_index() -> bool:
         return False
 
     if not config.CORPUS_AVAILABLE:
-        print(f"  ⚠ The document library isn't on this machine yet.")
-        print(f"     Expected it at: {config.CORPUS_DIR}")
-        print("     Open OneDrive, sign in with your Vaulter account, and make sure the")
-        print("     firm's document library is set to sync. Then re-run this wizard.")
+        # CORPUS_AVAILABLE is False for three different reasons and the old
+        # message asserted one of them. For a machine syncing two SharePoint
+        # libraries it was flatly wrong -- the library IS there, we just
+        # refused to guess which. Telling someone their files are missing when
+        # they can see them is the same mistake the Claude Desktop step made
+        # (a teammate hit that one on 2026-08-12), so each cause now gets the
+        # instruction that actually resolves it.
+        if config.ONEDRIVE_ROOT is None:
+            print("  ⚠ OneDrive doesn't look like it's set up on this computer yet.")
+            print("     Open OneDrive, sign in with your work account, and let it finish")
+            print("     its first sync. Then double-click \"Setup Vaulter AI\" again.")
+        elif config.CORPUS_DIR is None:
+            # Detection found either nothing, or more than one and refused.
+            try:
+                candidates = [d for d in config.ONEDRIVE_ROOT.iterdir()
+                              if d.is_dir() and " - " in d.name
+                              and d.name != config.SHARED_SUBFOLDER
+                              and not d.name.lower().startswith(config._PERSONAL_ONEDRIVE_FOLDERS)]
+            except OSError:
+                candidates = []
+            if len(candidates) > 1:
+                print(f"  ⚠ This computer is syncing {len(candidates)} SharePoint libraries, so "
+                      f"setup can't tell which one holds the firm's documents.")
+                print("     Nothing is wrong with your files -- it just won't guess.")
+                print("     Ask Yashu which folder name to use; it goes in one line of")
+                print("     confidentials/.env and then setup will find it every time.")
+            else:
+                print("  ⚠ The firm's document library isn't syncing to this computer yet.")
+                print("     In OneDrive, make sure the firm's document library is set to")
+                print("     sync (not just visible on the website), let it finish, then")
+                print("     double-click \"Setup Vaulter AI\" again.")
+        else:
+            print("  ⚠ The document library was found, but the folder isn't readable.")
+            print(f"     Expected it at: {config.CORPUS_DIR}")
+            print("     This usually means OneDrive is still setting it up. Wait for it to")
+            print("     finish, then double-click \"Setup Vaulter AI\" again.")
         return False
 
     print(f"  Library: {config.CORPUS_DIR}")
