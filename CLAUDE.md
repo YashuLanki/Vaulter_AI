@@ -345,6 +345,44 @@ over real stdio rather than importing `system/mcp_server.py` and calling a tool 
 because the 2026-07-30 hang never reproduced through the in-process shortcut, only through the
 real transport.
 
+### Setup messages: never name a cause the code didn't test (2026-08-12)
+
+The first real teammate install found four bugs in ten minutes, all the same shape: **the code
+checks a symptom and the message confidently asserts a cause.** This is invisible on the
+maintainer's machine, because a working setup only ever exercises the success path. Only a
+machine in a state yours has never been in reaches these branches.
+
+* **"Claude Desktop isn't installed"** — when she had it. `setup_claude_desktop()` checked
+  Desktop's *settings* folder (`%APPDATA%\Claude`), which the app creates on first **run**, while
+  the program installs at `%LOCALAPPDATA%\AnthropicClaude`. A missing settings folder means
+  "never opened", not "not installed". This one genuinely **blocked** — it returned False and
+  never wrote the connection. Now it looks for the program and, finding it, creates the folder
+  and writes the config, removing the round trip entirely.
+* **"The document library isn't on this machine"** — one message for three conditions, and wrong
+  for one of them: a machine syncing two SharePoint libraries *has* the library;
+  `_find_corpus_subfolder` refuses to guess, by design. Telling someone their files are missing
+  when they can see them is the same failure. Each cause now gets its own instruction.
+* **Shared-folder advice for a step deleted six weeks earlier** — "ask someone to share it, then
+  Add shortcut to My files" was true until `SHARED_DIR` moved *inside* `CORPUS_DIR` on
+  2026-08-03, specifically so that step would disappear. The function's own docstring still
+  asserted the old model, which is how it survived.
+* **Refusing to guess was itself a dead end** for a non-technical person who doesn't know the
+  folder name — the goal is just "connect to the firm's drive". Now the library is identified by
+  **content, not name**: ours is the one containing `SHARED_SUBFOLDER`. That works whatever it is
+  called on a given machine, needs nothing typed, and keeps the real name out of this public
+  repo. `VAULTER_CORPUS_HINT` (a distinctive word) is an opt-in last resort, deliberately blank
+  in the tracked `.env.template` — the word belongs in a machine's own gitignored `.env`.
+
+**The rule, which generalises well past install:** before shipping a message that tells someone
+*why* something failed, confirm the code actually tested that. When one condition can be false
+for several reasons, either distinguish them or describe only the symptom. **A confidently wrong
+cause is worse than "something isn't right here"** — it sends people to solve a problem they do
+not have. Same family as `_newer_readable_docs`' "couldn't check ≠ nothing new" and
+`geo_providers`' "unreachable ≠ nothing there".
+
+Worth keeping in proportion: the system itself was never broken. A full wipe-and-reinstall the
+same morning passed end to end. What was broken was its ability to explain itself.
+
 ### Auto-update (`system/scripts/release.py`, `system/scripts/apply_update.py`)
 
 **What the `system/` split means here (2026-08-03).** Both scripts resolve `PROJECT_ROOT` as
