@@ -202,10 +202,17 @@ def main() -> int:
     # reads as "which one do I click?" to someone non-technical. The .command
     # launcher stays in the repo -- add it back into a package deliberately
     # if a teammate ever needs it, rather than shipping it to everyone by
-    # default. No separate "Start Here" file either: the wizard's own printed
-    # output (see setup_wizard.py's numbered steps and final Summary) already
-    # carries that guidance step by step, so a second, easy-to-skip document
-    # saying the same thing isn't needed.
+    # default. This used to skip a "read me" file too, reasoning that the
+    # wizard's own printed output already walks through every step. That
+    # reasoning had a hole, found 2026-08-12 by watching a real first run:
+    # someone opened the zip WITHOUT extracting it, browsed into quick_start,
+    # and double-clicked Setup there. Windows can't run a program from inside
+    # a zip, so it interrupted with its own extract-first dialog -- and the
+    # wizard, whose output was supposed to be the guidance, had not run and
+    # could not run. Guidance that only exists once the program starts cannot
+    # help someone who is stuck before it starts. So READ ME FIRST.txt now
+    # ships beside the launcher, which is exactly where that person is
+    # standing when they get stuck.
     for launcher in sorted((REPO_ROOT / "quick_start").iterdir()):
         if launcher.is_file() and launcher.suffix != ".command":
             shutil.copy2(launcher, dest_quick / launcher.name)

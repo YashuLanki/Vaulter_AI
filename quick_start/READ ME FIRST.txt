@@ -1,0 +1,68 @@
+VAULTER AI - HOW TO INSTALL
+===========================
+
+STEP 1 - UNZIP IT FIRST.  This matters.
+
+  Do not open Setup from inside the zip file.  Windows can't run it
+  from in there, so it will interrupt you and ask to unpack it first.
+
+  Instead: find the "Vaulter AI" zip you downloaded, right-click it,
+  choose "Extract All...", and click Extract.
+
+  OPTIONAL, saves a scary message later: before extracting, right-click
+  the zip, choose "Properties", and if you see an "Unblock" tickbox at
+  the bottom, tick it and click OK.  Windows adds that to anything
+  downloaded from the internet.
+
+
+STEP 2 - RUN SETUP.
+
+  Open the folder that appears, go into the "quick_start" folder,
+  and double-click "Setup Vaulter AI".
+
+  You may see a folder inside a folder with the same name - for example
+  "Vaulter AI 2" containing "Vaulter AI".  That is just how Windows
+  unpacks it.  Keep going into the folders until you see "quick_start".
+
+  TWO MESSAGES THAT LOOK ALARMING AND ARE NOT:
+
+    "The publisher could not be verified... Unknown Publisher"
+      Expected.  Click Run.  Windows says this about every file of this
+      kind that came from the internet - it is about the file type, not
+      about anything being wrong.  (Ticking "Unblock" in Step 1 avoids
+      it.)
+
+    "Windows protected your PC"  (a blue window)
+      If you see this, click "More info" and then "Run anyway".
+
+
+STEP 3 - LEAVE IT ALONE WHILE IT WORKS.
+
+  A black window opens and shows what it's doing.  It may ask you
+  once to install Python - say yes; it downloads it from the official
+  site and doesn't need an administrator.
+
+  The last step reads through the firm's document library and takes
+  two or three minutes.  It only reads file NAMES - it never opens or
+  downloads any document, and it uses no disk space.
+
+
+STEP 4 - RESTART CLAUDE DESKTOP.
+
+  Fully quit Claude Desktop (close it completely, not just the
+  window) and open it again.  Then start a new conversation and ask
+  it something like "what do we know about <one of our properties>?"
+
+
+IF SOMETHING LOOKS WRONG
+------------------------
+
+  You can run Setup again as many times as you like - it never
+  overwrites anything already working.
+
+  If Setup tells you the folder is in a bad place (Downloads, a USB
+  stick, a cloud folder), it will move itself somewhere permanent and
+  carry on by itself.  Nothing for you to do.
+
+  If it says something you don't understand, send a photo of the
+  window to Yashu rather than guessing.

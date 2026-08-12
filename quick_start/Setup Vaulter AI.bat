@@ -55,6 +55,38 @@ if not exist "%VAULTER_ROOT%\system\scripts\setup_wizard.py" (
     )
 )
 
+REM Never copy one of the user's own major folders. If someone unpacked with
+REM "Extract Here" in another tool, or moved files by hand, quick_start can end
+REM up sitting directly in Downloads or Documents -- and then VAULTER_ROOT is
+REM that whole folder, so the copy below would drag every unrelated file the
+REM user owns into the install (measured: 3.4 GB and 62 items in one real
+REM Downloads folder). Checked BEFORE the "moving it" banner, so the window
+REM never announces a move it is not going to make.
+for %%K in ("%USERPROFILE%" "%USERPROFILE%\Downloads" "%USERPROFILE%\Documents" "%USERPROFILE%\Desktop") do (
+    if /I "%VAULTER_ROOT%"=="%%~fK" set "IS_USER_FOLDER=1"
+)
+if defined IS_USER_FOLDER (
+    echo.
+    echo ============================================================
+    echo   Please unzip into its own folder
+    echo ============================================================
+    echo.
+    echo   The Vaulter AI files look like they were unpacked loose into
+    echo     %VAULTER_ROOT%
+    echo   so they're mixed in with your other files there. Setup has
+    echo   stopped rather than risk moving them.
+    echo.
+    echo   To fix it:
+    echo     1. Close this window.
+    echo     2. Find the "Vaulter AI" zip you downloaded, right-click it and
+    echo        choose "Extract All...", then click Extract.
+    echo     3. Open the folder that appears, go into quick_start, and
+    echo        double-click "Setup Vaulter AI".
+    echo.
+    pause
+    exit /b 1
+)
+
 echo.
 echo ============================================================
 echo   Moving Vaulter AI to a permanent folder
