@@ -54,6 +54,24 @@ STEP 4 - RESTART CLAUDE DESKTOP.
   it something like "what do we know about <one of our properties>?"
 
 
+IF YOU MOVE OR RENAME THE FOLDER LATER
+--------------------------------------
+
+  Setup writes down where this folder is, so moving it, renaming it,
+  or renaming any folder above it will disconnect it from Claude
+  Desktop, and the nightly document refresh will stop.
+
+  Nothing is lost or damaged - all your settings and the document list
+  travel with the folder.
+
+  To fix it: go into "quick_start" in its NEW location and double-click
+  "Setup Vaulter AI" again.  It takes a couple of minutes and points
+  everything at the new location.  Then fully quit and reopen Claude
+  Desktop.
+
+  Simplest rule: pick a home for the folder and leave it there.
+
+
 IF SOMETHING LOOKS WRONG
 ------------------------
 

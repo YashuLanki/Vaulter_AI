@@ -944,12 +944,27 @@ no score -- it's a diary, not a dial.""".replace(
                     count, built = age
                     days = (_dt.datetime.now(_dt.timezone.utc) - built).days
                     lines.append(f"  Index: {count:,} files, built {days}d ago")
-                    if days > 30:
+                    # 10 days, not 30. The refresh runs DAILY, so anything past
+                    # a week means the scheduled task is not running at all --
+                    # and the most likely cause is someone moving or renaming
+                    # the Vaulter AI folder, which leaves the task pointing at
+                    # a path that no longer exists. That failure is completely
+                    # silent: nothing errors, the list just quietly stops
+                    # updating, and every "no newer documents" answer inherits
+                    # the staleness. 30 days was set when the refresh was
+                    # monthly and was never revisited. The slack over one day
+                    # absorbs a holiday -- the task is registered
+                    # StartWhenAvailable, so it catches up on the next boot.
+                    if days > 10:
                         issues.append(
-                            f"The document index is {days} days old, so anything filed since "
-                            "then won't turn up in search. Rebuild by double-clicking "
-                            "\"Setup Vaulter AI\" in the quick_start folder, or from a "
-                            "terminal: python system/main.py index-corpus"
+                            f"The document index is {days} days old, but it is meant to "
+                            f"refresh every night -- so the scheduled refresh has stopped "
+                            f"running. Anything filed since then won't turn up in search, "
+                            f"and 'nothing newer exists' answers can't be trusted. The "
+                            f"usual cause is the Vaulter AI folder being moved or renamed "
+                            f"after setup. Fix: double-click \"Setup Vaulter AI\" in the "
+                            f"quick_start folder -- it is safe to run again and repoints "
+                            f"everything at wherever the folder now lives."
                         )
             except Exception as e:
                 lines.append(f"  Index: could not check ({e})")
