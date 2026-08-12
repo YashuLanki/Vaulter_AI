@@ -1,104 +1,44 @@
 HOW TO START - VAULTER AI
 =========================
 
-THE WHOLE THING IN ONE LINE:
-  Unzip this folder somewhere first, then open "quick_start" and
-  double-click "Setup Vaulter AI".
+
+1.  UNZIP THIS FIRST.
+    Right-click the "Vaulter AI" zip, choose "Extract All...",
+    then click Extract.
 
 
-STEP 1 - MAKE SURE YOU HAVE UNZIPPED IT
----------------------------------------
-
-  If you are reading this from inside the zip file, stop here and
-  unzip it first.  Windows cannot run a program from inside a zip, so
-  if you try, it will interrupt you and make you unpack it anyway.
-
-  To unzip: find the "Vaulter AI" zip you downloaded, right-click it,
-  choose "Extract All...", then click Extract.
-
-  Not sure whether you have unzipped it?  Look at the top of this
-  window.  If the address contains ".zip", you have not.
-
-  OPTIONAL, and it saves a scary message later: before you extract,
-  right-click the zip, choose "Properties", and if there is an
-  "Unblock" tickbox near the bottom, tick it and click OK.  Windows
-  puts that on anything downloaded from the internet.
+2.  Open the "quick_start" folder and double-click
+    "Setup Vaulter AI".
 
 
-STEP 2 - RUN SETUP
-------------------
+3.  Wait.  A black window shows what it is doing.
+    Takes about 5 minutes.  Leave it open.
 
-  Open the "quick_start" folder and double-click "Setup Vaulter AI".
-
-  You may find a folder inside a folder with the same name - such as
-  "Vaulter AI 2" containing "Vaulter AI".  That is just how Windows
-  unpacks things.  Keep opening folders until you see "quick_start".
-
-  TWO MESSAGES THAT LOOK ALARMING AND ARE NOT:
-
-    "The publisher could not be verified... Unknown Publisher"
-      Expected.  Click Run.  Windows says this about every file of
-      this kind that came from the internet - it is about the type of
-      file, not about anything being wrong.  (The "Unblock" tickbox in
-      Step 1 prevents it.)
-
-    "Windows protected your PC"  (a blue window)
-      Click "More info", then "Run anyway".
+      - If it offers to install Python, say yes.
+      - If it then asks you to double-click Setup again, do that.
 
 
-STEP 3 - LEAVE IT ALONE WHILE IT WORKS
---------------------------------------
-
-  A black window opens and shows what it is doing.
-
-  It may move itself to a better folder and carry on - that is normal
-  and needs nothing from you.
-
-  It may ask once to install Python.  Say yes; it downloads from the
-  official site and does not need an administrator.  If it then asks
-  you to double-click Setup again, do that - it only needs to be told
-  twice in that one case.
-
-  The last step reads through the firm's document library and takes
-  two or three minutes.  It only reads file NAMES - it never opens or
-  downloads a document, and it uses no disk space.
+4.  Fully quit Claude Desktop, then open it again.
+    Done.  Try asking it:  "What do we know about <a property>?"
 
 
-STEP 4 - RESTART CLAUDE DESKTOP
--------------------------------
 
-  Fully quit Claude Desktop - close it completely, not just the
-  window - then open it again and start a new conversation.
+IF WINDOWS WARNS YOU
+--------------------
 
-  Try asking it something like:
-    "What do we know about <one of our properties>?"
+  "Unknown Publisher"           ->  click Run
+  "Windows protected your PC"   ->  click More info, then Run anyway
 
-
-IF YOU MOVE OR RENAME THE FOLDER LATER
---------------------------------------
-
-  Setup writes down where this folder is, so moving it, renaming it,
-  or renaming any folder above it will disconnect it from Claude
-  Desktop, and the nightly document refresh will stop.
-
-  Nothing is lost or damaged - your settings and the document list
-  travel with the folder.
-
-  To fix it: open "quick_start" in its NEW location and double-click
-  "Setup Vaulter AI" again, then restart Claude Desktop.
-
-  Simplest rule: pick a home for the folder and leave it there.
+  Both are normal for a downloaded file.
 
 
-IF SOMETHING LOOKS WRONG
-------------------------
+GOOD TO KNOW
+------------
 
-  You can run Setup as many times as you like - it never overwrites
-  anything that is already working.
+  Keep the folder where Setup puts it.  Moving or renaming it later
+  disconnects Vaulter AI - if that happens, run Setup again from the
+  new location.
 
-  If Setup says the folder is in a bad place (Downloads, a USB stick,
-  a cloud folder), it moves itself somewhere permanent and carries on.
-  Nothing for you to do.
+  Setup is safe to run as many times as you like.
 
-  If it says something you do not understand, send a photo of the
-  window to Yashu rather than guessing.
+  Stuck?  Send a photo of the window to Yashu.
