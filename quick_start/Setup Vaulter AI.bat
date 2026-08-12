@@ -205,19 +205,51 @@ if not %errorlevel%==0 (
 echo Installing Python for your account only -- a progress window will
 echo show briefly...
 "%PYINSTALLER%" /passive InstallAllUsers=0 PrependPath=1 Include_launcher=0 Include_test=0
+set "PYEXIT=%errorlevel%"
 del "%PYINSTALLER%" >nul 2>nul
 
-set PYCMD=%LOCALAPPDATA%\Programs\Python\Python312\python.exe
-if exist "%PYCMD%" (
+REM Look in several places, not one exact path. The old version checked only
+REM %LOCALAPPDATA%\Programs\Python\Python312 and, on anything else, told the
+REM user to double-click Setup again -- which is the confusing second click,
+REM and it never worked when the install had actually failed.
+set "PYCMD="
+for %%V in (Python313 Python312 Python311) do (
+    if not defined PYCMD if exist "%LOCALAPPDATA%\Programs\Python\%%V\python.exe" set "PYCMD=%LOCALAPPDATA%\Programs\Python\%%V\python.exe"
+)
+if not defined PYCMD for /f "delims=" %%P in ('dir /b /s "%LOCALAPPDATA%\Programs\Python\python.exe" 2^>nul') do (
+    if not defined PYCMD set "PYCMD=%%P"
+)
+if not defined PYCMD if exist "%LOCALAPPDATA%\Programs\Python\Launcher\py.exe" set "PYCMD=%LOCALAPPDATA%\Programs\Python\Launcher\py.exe"
+
+if defined PYCMD (
     echo.
     echo Python installed. Continuing with Vaulter AI setup...
     goto :run
 )
 
+REM Nothing found. Say so plainly and STOP. Measured 2026-08-12 on a real
+REM bare-machine run: the installer returned a failure code, installed
+REM nothing at all, and the old wording still said "Python installed" and
+REM sent the user round to double-click Setup again -- which fails the same
+REM way every time, with no way out and no clue why. Claiming success we did
+REM not verify is worse than admitting failure.
 echo.
-echo Python installed, but this window couldn't confirm it right away.
-echo Please close this window and double-click "Setup Vaulter AI" again --
-echo it should find Python this time.
+echo ============================================================
+echo   Python could not be installed automatically
+echo ============================================================
+echo.
+echo   The installer finished with code %PYEXIT% and Python is not on this
+echo   computer, so setup cannot continue. This is a Windows problem
+echo   rather than anything wrong with Vaulter AI, and it is usually
+echo   quicker to install Python yourself:
+echo.
+echo     1. Go to   https://www.python.org/downloads/
+echo     2. Download Python 3.12, run it, and TICK the box that says
+echo        "Add python.exe to PATH" on the first screen.
+echo     3. Come back here and double-click "Setup Vaulter AI" again.
+echo.
+echo   If that also fails, send this whole window to Yashu -- the code
+echo   above says why.
 echo.
 pause
 exit /b 1
