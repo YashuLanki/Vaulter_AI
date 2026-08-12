@@ -552,10 +552,39 @@ def setup_claude_desktop() -> bool:
         return False
 
     if not config_path.parent.exists():
-        print(f"  ⚠ Claude Desktop doesn't appear to be installed yet (expected its folder "
-              f"at {config_path.parent}). Install Claude Desktop first from "
-              f"https://claude.ai/download, open it once, then re-run this wizard.")
-        return False
+        # The folder being checked is Claude Desktop's SETTINGS folder, which it
+        # creates the first time it RUNS -- not when it is installed. The program
+        # itself lives somewhere else entirely. So "this folder is missing" means
+        # "never opened", and the old wording said "doesn't appear to be
+        # installed", which is both wrong and maddening for someone looking at
+        # the app on their own machine. Reported by a real teammate 2026-08-12.
+        installed_at = next(
+            (p for p in (
+                Path(os.environ.get("LOCALAPPDATA", "")) / "AnthropicClaude",
+                Path(os.environ.get("LOCALAPPDATA", "")) / "Programs" / "Claude",
+                Path(os.environ.get("PROGRAMFILES", "")) / "Claude",
+            ) if str(p) and p.exists()),
+            None,
+        )
+        if installed_at:
+            # It IS installed -- just never opened. Write the settings file
+            # anyway: Claude Desktop reads it at startup, so doing it now means
+            # one fewer round trip for someone who just wants this to work.
+            try:
+                config_path.parent.mkdir(parents=True, exist_ok=True)
+            except OSError as e:
+                print(f"  ⚠ Claude Desktop is installed, but its settings folder could not "
+                      f"be created ({e}). Open Claude Desktop once, then re-run this wizard.")
+                return False
+            print("  Claude Desktop is installed but hasn't been opened yet, so its")
+            print("  settings folder didn't exist. Created it and continuing.")
+        else:
+            print("  ⚠ Claude Desktop hasn't been opened on this computer yet, and this "
+                  "wizard couldn't find it installed either.")
+            print("     If you HAVE installed it: open Claude Desktop once (sign in), then")
+            print("     double-click \"Setup Vaulter AI\" again -- that is all it needs.")
+            print("     If you haven't: install it from https://claude.ai/download first.")
+            return False
 
     from core import safe_io
 
