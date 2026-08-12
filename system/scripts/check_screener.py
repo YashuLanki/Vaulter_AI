@@ -367,13 +367,30 @@ def main() -> int:
     print("\n6. Cost model is measured, and silence about a cost is stated")
     bd = base["dataframe"]
 
-    lo, hi = fs._entitlement_per_lot(48), fs._entitlement_per_lot(220)
-    mid = fs._entitlement_per_lot(116)
-    check("entitlement per lot falls as projects get bigger",
-          lo > mid > hi, f"48 lots ${lo:,.0f} > 116 ${mid:,.0f} > 220 ${hi:,.0f}")
-    check("entitlement per lot is flat outside the measured range, never extrapolated",
-          fs._entitlement_per_lot(5) == lo and fs._entitlement_per_lot(5000) == hi,
-          f"5 lots ${fs._entitlement_per_lot(5):,.0f}, 5000 lots ${fs._entitlement_per_lot(5000):,.0f}")
+    # The measured $/lot figures live in the gitignored cost_assumptions.json,
+    # which deliberately never ships -- so on every teammate's install there is
+    # no entitlement cost to assert about, and these checks are about the shape
+    # of a cost curve that isn't there. Skipped rather than failed: a fresh
+    # install reporting six FAILs reads as "this product is broken" when it is
+    # working exactly as designed. Found 2026-08-12 on a genuine fresh install,
+    # which is also the first time this suite had ever RUN in the configuration
+    # everyone other than the maintainer actually has.
+    HAS_COST = bool(fs.ASSUMPTIONS.get("entitlement_per_lot_anchors"))
+
+    if HAS_COST:
+        lo, hi = fs._entitlement_per_lot(48), fs._entitlement_per_lot(220)
+        mid = fs._entitlement_per_lot(116)
+        check("entitlement per lot falls as projects get bigger",
+              lo > mid > hi, f"48 lots ${lo:,.0f} > 116 ${mid:,.0f} > 220 ${hi:,.0f}")
+        check("entitlement per lot is flat outside the measured range, never extrapolated",
+              fs._entitlement_per_lot(5) == lo and fs._entitlement_per_lot(5000) == hi,
+              f"5 lots ${fs._entitlement_per_lot(5):,.0f}, "
+              f"5000 lots ${fs._entitlement_per_lot(5000):,.0f}")
+    else:
+        skip("entitlement per lot falls as projects get bigger",
+             "no local cost_assumptions.json -- expected on any install but the maintainer's")
+        skip("entitlement per lot is flat outside the measured range, never extrapolated",
+             "no local cost_assumptions.json")
 
     # Split with the SAME pattern the screener uses. Selecting on the literal
     # word "Residential" here put "Single Family Development" and "Apartment
@@ -390,7 +407,18 @@ def main() -> int:
     # "Land Area (AC)" from the output entirely, not just leave it all-NaN.
     resi_sized = (resi[resi["Land Area (AC)"].notna()]
                   if "Land Area (AC)" in resi.columns else resi.iloc[0:0])
-    if len(resi_sized):
+    if not HAS_COST:
+        skip("residential rows carry an entitlement cost",
+             "no local cost_assumptions.json -- nothing to price them from")
+        # The rule that still MUST hold without the cost file: every row says
+        # so. This is the honesty guarantee ("a cost with no record is declared,
+        # never estimated") and it is the one thing a teammate's screen depends
+        # on being right, so it is asserted here rather than skipped.
+        check("with no cost data, EVERY row declares the exit is understated",
+              bd["Cost_Basis"].astype(str).str.contains("understated").all(),
+              f"{bd['Cost_Basis'].astype(str).str.contains('understated').sum()} "
+              f"of {len(bd)} rows declared")
+    elif len(resi_sized):
         check("residential rows carry an entitlement cost",
               resi_sized["Entitlement_Per_Acre"].notna().all()
               and (resi_sized["Entitlement_Per_Acre"] > 0).all(),
@@ -407,11 +435,20 @@ def main() -> int:
           and (bd["Carry_Per_Acre"].dropna() > 0).all(),
           f"{fs.ASSUMPTIONS['carry_rate_annual']:.2%}/yr over "
           f"{fs.ASSUMPTIONS['hold_years_actual']}yr")
+    # The real $/acre figures live in the gitignored cost_assumptions.json and
+    # deliberately never ship, so on ANY teammate's install they are None. This
+    # assertion used to compare None > 0 and crash the whole suite there --
+    # meaning the checks had never once run in the configuration everyone else
+    # actually has. Found 2026-08-12 on a genuine fresh install. What matters is
+    # the same either way: horizontal cost must stay out of the arithmetic.
+    _h_lo = fs.ASSUMPTIONS.get("horizontal_per_acre_low")
+    _h_hi = fs.ASSUMPTIONS.get("horizontal_per_acre_high")
     check("horizontal cost stays OUT of the arithmetic (Pinal-only evidence)",
           "horizontal_cost_per_acre" not in fs.ASSUMPTIONS
-          and fs.ASSUMPTIONS["horizontal_per_acre_low"] > 0,
-          f"reported as ${fs.ASSUMPTIONS['horizontal_per_acre_low']:,}–"
-          f"${fs.ASSUMPTIONS['horizontal_per_acre_high']:,}/ac context only")
+          and (_h_lo is None or _h_lo > 0),
+          "context only; "
+          + (f"${_h_lo:,}–${_h_hi:,}/ac" if _h_lo is not None
+             else "no figures on this machine (private cost file absent, as expected)"))
     check("lot yield matches the measured range, not the old 8.0",
           (fs.ASSUMPTIONS["lots_per_acre_low"] <= fs.ASSUMPTIONS["lots_per_acre"]
            <= fs.ASSUMPTIONS["lots_per_acre_high"]),
@@ -566,13 +603,23 @@ def main() -> int:
     })
     rw = _run(pd.concat([resi_df, filler], ignore_index=True), full, tmp, "resiwords")["dataframe"]
     rw = rw[rw["Secondary Type"].isin(wordings)]
-    check("every CoStar wording of residential carries an entitlement cost",
-          rw["Entitlement_Per_Acre"].notna().all() and (rw["Entitlement_Per_Acre"] > 0).all(),
-          f"{len(rw)} wordings, all priced" if rw["Entitlement_Per_Acre"].notna().all()
-          else f"missing on {list(rw[rw['Entitlement_Per_Acre'].isna()]['Secondary Type'])}")
-    check("  ...and none of them is told there is no cost record for its type",
-          not rw["Cost_Basis"].str.contains("understated").any(),
-          f"{rw['Cost_Basis'].str.contains('understated').sum()} mislabelled")
+    if HAS_COST:
+        check("every CoStar wording of residential carries an entitlement cost",
+              rw["Entitlement_Per_Acre"].notna().all() and (rw["Entitlement_Per_Acre"] > 0).all(),
+              f"{len(rw)} wordings, all priced" if rw["Entitlement_Per_Acre"].notna().all()
+              else f"missing on {list(rw[rw['Entitlement_Per_Acre'].isna()]['Secondary Type'])}")
+        check("  ...and none of them is told there is no cost record for its type",
+              not rw["Cost_Basis"].str.contains("understated").any(),
+              f"{rw['Cost_Basis'].str.contains('understated').sum()} mislabelled")
+    else:
+        skip("every CoStar wording of residential carries an entitlement cost",
+             "no local cost_assumptions.json")
+        # What must still hold: each wording is RECOGNISED as residential, which
+        # is what routes it to a lot-based exit. That is independent of whether
+        # a cost figure exists, so it stays a real assertion.
+        check("every CoStar wording of residential is still recognised as residential",
+              rw["Vaulter_Read"].str.contains("exits as lots", case=False).all(),
+              f"{rw['Vaulter_Read'].str.contains('exits as lots', case=False).sum()} of {len(rw)}")
     check("  ...and the exit-path note says lots, not 'depends what it is entitled for'",
           rw["Vaulter_Read"].str.contains("exits as lots", case=False).all(),
           f"{rw['Vaulter_Read'].str.contains('exits as lots', case=False).sum()} of {len(rw)}")
@@ -595,10 +642,14 @@ def main() -> int:
                        ignore_index=True)
     sm = _run(sm_src, full, tmp, "smallparcels")["dataframe"]
     sm = sm[sm["Property Address"].str.startswith(("Tiny", "Small"))]
-    check("a sub-acre residential parcel with a price and a comp gets a headroom",
-          sm["Exit_Headroom"].notna().all(),
-          f"{sm['Exit_Headroom'].notna().sum()} of {len(sm)} priced — "
-          f"{list(sm['Exit_Headroom'])}")
+    if HAS_COST:
+        check("a sub-acre residential parcel with a price and a comp gets a headroom",
+              sm["Exit_Headroom"].notna().all(),
+              f"{sm['Exit_Headroom'].notna().sum()} of {len(sm)} priced — "
+              f"{list(sm['Exit_Headroom'])}")
+    else:
+        skip("a sub-acre residential parcel with a price and a comp gets a headroom",
+             "no local cost_assumptions.json -- headroom needs an entitlement cost")
     check("  ...and is credited with at least one lot, never zero",
           (sm["Indicative_Lots"] >= 1).all(),
           f"lots {list(sm['Indicative_Lots'])}")
