@@ -613,25 +613,26 @@ def build_corpus_index() -> bool:
         print("     'python system/main.py index-corpus' from this folder.")
         return False
 
-    _schedule_weekly_refresh()
+    _schedule_daily_refresh()
     return True
 
 
-def _schedule_weekly_refresh() -> None:
+def _schedule_daily_refresh() -> None:
     """
-    Register a weekly Windows task that rebuilds the file list.
+    Register a daily Windows task that rebuilds the file list.
 
     Why this has to exist: the "this summary may be out of date" warning
     compares a summary's own date against the file list. If the list is never
     rebuilt, it freezes at install day and the warning quietly stops warning --
     the failure mode is silence, not an error, which is the worst kind here.
 
-    Weekly (not monthly, as this originally shipped) so a newly-acquired
-    property shows up in the file list within days, not up to a month --
-    otherwise Claude has no way to recognize an acquisition the team just
-    made, since the list is the only thing that makes a property findable by
-    name at all. Costs nothing on disk either cadence: it reads names and
-    dates only, never opens a document.
+    Daily (was weekly, and monthly before that) because measurement beat the
+    guess: on one live deal in its inspection period, the list rebuilt one day
+    earlier already missed 24 documents, and a week's worth ran past a hundred.
+    Entitlement work moves in months and a weekly rhythm suited it fine, but a
+    deal under contract moves in hours -- a contract amendment landed and was
+    signed the same morning it was found. Costs nothing on disk at any cadence:
+    it reads names and dates only, never opens a document.
 
     A scheduled task rather than a thread or a subagent. mcp_server.py runs no
     background threads (see CLAUDE.md), and a subagent only exists inside a live
@@ -646,24 +647,27 @@ def _schedule_weekly_refresh() -> None:
         return
     import subprocess
 
-    old_task = "Vaulter AI - Monthly document list refresh"
-    task = "Vaulter AI - Weekly document list refresh"
+    old_tasks = ("Vaulter AI - Monthly document list refresh",
+                 "Vaulter AI - Weekly document list refresh")
+    task = "Vaulter AI - Daily document list refresh"
     target = PROJECT_ROOT / "main.py"
     if not target.exists():
         return
 
-    # Remove the old monthly-named task if a prior install of this same
-    # wizard left one -- otherwise the rename leaves two tasks registered
-    # side by side, one of them orphaned and silently doing nothing useful.
-    try:
-        subprocess.run(
-            ["powershell", "-NoProfile", "-NonInteractive", "-Command",
-             f'Unregister-ScheduledTask -TaskName "{old_task}" -Confirm:$false '
-             f'-ErrorAction SilentlyContinue'],
-            capture_output=True, text=True, timeout=30,
-        )
-    except (OSError, subprocess.SubprocessError):
-        pass  # best-effort cleanup; a stray old task isn't worth failing setup over
+    # Remove every earlier-named task a prior install of this wizard left
+    # behind -- otherwise each rename leaves another one registered alongside,
+    # orphaned and silently doing nothing useful. This has now been renamed
+    # twice (monthly -> weekly -> daily), so clean up both older names.
+    for old_task in old_tasks:
+        try:
+            subprocess.run(
+                ["powershell", "-NoProfile", "-NonInteractive", "-Command",
+                 f'Unregister-ScheduledTask -TaskName "{old_task}" -Confirm:$false '
+                 f'-ErrorAction SilentlyContinue'],
+                capture_output=True, text=True, timeout=30,
+            )
+        except (OSError, subprocess.SubprocessError):
+            pass  # best-effort cleanup; a stray old task isn't worth failing setup over
 
     # pythonw.exe, NOT python.exe. Measured 2026-08-04: with python.exe the
     # task registered fine, reported "Ready", then died on every run with
@@ -683,7 +687,7 @@ def _schedule_weekly_refresh() -> None:
     # silently failed to register while every other setup step succeeded.
     ps = (
         "$a = New-ScheduledTaskAction -Execute $env:VLT_RUNNER -Argument $env:VLT_ARG; "
-        "$t = New-ScheduledTaskTrigger -Weekly -WeeksInterval 1 -DaysOfWeek Sunday -At 7am; "
+        "$t = New-ScheduledTaskTrigger -Daily -DaysInterval 1 -At 7am; "
         "$s = New-ScheduledTaskSettingsSet -StartWhenAvailable "
         "-ExecutionTimeLimit (New-TimeSpan -Hours 2) -MultipleInstances IgnoreNew; "
         "Register-ScheduledTask -TaskName $env:VLT_TASK -Action $a -Trigger $t -Settings $s "
@@ -703,18 +707,18 @@ def _schedule_weekly_refresh() -> None:
         )
         if r.returncode == 0:
             print()
-            print("  ✓ Scheduled a weekly refresh of the document list (Sundays, 7am).")
+            print("  ✓ Scheduled a daily refresh of the document list (every day, 7am).")
             print("    It reads file names only and never opens a document, so it costs")
             print("    no disk space. This is what keeps the \"this summary may be out")
-            print("    of date\" warning honest, and lets a newly-acquired property show")
-            print("    up quickly instead of waiting up to a month.")
+            print("    of date\" warning honest, and lets a new document on a live deal")
+            print("    show up the next morning instead of days later.")
             print(f"    Remove it any time from Windows Task Scheduler: \"{task}\".")
         else:
-            print(f"\n  (Could not schedule the weekly refresh: "
+            print(f"\n  (Could not schedule the daily refresh: "
                   f"{(r.stderr or r.stdout).strip()[:120]})")
             print("   Not a problem today -- re-run this setup occasionally instead.")
     except (OSError, subprocess.SubprocessError) as e:
-        print(f"\n  (Could not schedule the weekly refresh: {e})")
+        print(f"\n  (Could not schedule the daily refresh: {e})")
         print("   Not a problem today -- re-run this setup occasionally instead.")
 
 

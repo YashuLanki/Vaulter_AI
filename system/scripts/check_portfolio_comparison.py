@@ -221,6 +221,50 @@ def main() -> int:
         check("a realistic AZ/Pinal query against the real index returns at least one match",
               len(r_real["matches"]) > 0, f"{len(r_real['matches'])} matches")
 
+    # ── 4. Summary currency checks ────────────────────────────────
+    # These guard the start-of-conversation warning that a property summary
+    # has fallen behind its documents. The failure that matters here is not a
+    # crash -- it is silence: a summary that IS behind reported as fine, or a
+    # check that could not run reported as "nothing new". Both produce a
+    # confident, well-cited, months-out-of-date answer, which is the worst
+    # shape a wrong answer can take. Added 2026-08-11 after exactly that
+    # happened on a live deal.
+    print("\n4. Summary currency checks")
+    try:
+        import datetime as _dt
+        sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+        import mcp_server as _m
+        import config as _c
+
+        check("a normal 'Source files as of' stamp parses",
+              _m._summary_stamp("**Source files as of:** 2026-08-03 (mtime of...)") is not None)
+        check("a summary with no stamp yields None, not a guessed date",
+              _m._summary_stamp("no stamp anywhere in this text") is None)
+        check("an impossible date (month 13) yields None, not a crash",
+              _m._summary_stamp("Source files as of: 2026-13-45") is None)
+
+        _st = _dt.datetime(2026, 1, 1, tzinfo=_dt.timezone.utc)
+        _nothing = _m._newer_readable_docs("Zzz No Such Property Zzz", _st)
+        check("a property with genuinely no newer documents reports 0, not None",
+              _nothing is not None and _nothing[0] == 0, f"got {_nothing!r}")
+
+        # THE one that matters most: with no index to read, the answer is
+        # "cannot tell" (None) and must never collapse into "nothing new" (0).
+        _real_idx = _c.CORPUS_INDEX_FILE
+        try:
+            _c.CORPUS_INDEX_FILE = Path(r"C:\nope\definitely_missing_index.db")
+            _cannot = _m._newer_readable_docs("Anything At All", _st)
+        finally:
+            _c.CORPUS_INDEX_FILE = _real_idx
+        check("with no document list, 'cannot check' stays None and never becomes 0",
+              _cannot is None, f"got {_cannot!r}")
+
+        check("the active-deal stage list is non-empty and holds real stage names",
+              bool(_m.ACTIVE_DEAL_STAGES) and "Acquisition" in _m.ACTIVE_DEAL_STAGES,
+              f"{_m.ACTIVE_DEAL_STAGES}")
+    except Exception as e:
+        check("summary currency checks ran", False, f"{type(e).__name__}: {e}")
+
     passed = sum(1 for _, ok, _ in RESULTS if ok)
     print(f"\n{passed}/{len(RESULTS)} checks passed")
     return 0 if passed == len(RESULTS) else 1

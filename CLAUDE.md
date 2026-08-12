@@ -283,6 +283,41 @@ summary — a false negative, not a false positive, and chosen on
 purpose: a wrong "you're missing this" claim damages trust in a tool built to stay silent unless
 something is actually wrong, more than an occasional missed detection in one narrow case costs.
 
+**It also flags summaries that have fallen *behind* their documents (added 2026-08-11)** — the
+opposite and more insidious case, since such a summary exists, reads as authoritative, and answers
+confidently while being months stale. Until now that was only ever noticed if someone happened to
+ask about that exact property. Three deliberate constraints, each measured rather than guessed:
+
+* **Active-stage properties only** (`ACTIVE_DEAL_STAGES` = Acquisition, Disposition). Those are
+  where money is in motion and dates are running; everything else (Rezone, Pre-Plat, Final
+  Engineering, Development, Site Maintenance) is real work on a multi-month clock where a summary
+  a few weeks behind rarely changes an answer. Widening it would name 39 of 49 properties every
+  conversation, and this check is trusted *because* it stays quiet. Non-active properties still
+  get the full on-demand warning whenever someone asks about them by name.
+* **It names the newest FILENAME, never a count.** A count cannot be trusted: OneDrive rewrites a
+  file's modified-date when it re-syncs, so on one real property **1,370 documents from 2024–2025
+  all looked like they arrived this year** (their own filenames carry the true dates, `250207`,
+  `241220`). A filename lets a reader tell a genuinely new contract from an old file that merely
+  got re-synced; a bare "1,211 new documents" is alarming and wrong. Same reasoning
+  `_summary_staleness` already gives for naming files instead of counting them.
+* **"Couldn't check" is never reported as "nothing new."** `_newer_readable_docs()` returns `None`
+  (cannot tell) distinctly from `0` (checked, genuinely nothing), and callers must not conflate
+  them — the same rule `geo_providers` follows for "provider unreachable" vs "provider says
+  nothing is there." `check_portfolio_comparison.py` §4 asserts this specific collapse can't
+  happen.
+
+It also reports, separately, active-stage summaries carrying **no `Source files as of:` stamp at
+all** (5 of 14 when built) — those can never be currency-checked, and saying so out loud beats
+skipping them silently, which downstream reads as "checked, fine."
+
+**The bug that prompted all of this is worth recording, because no feature would have caught it.**
+On 2026-08-11 a currency check was run against a *stale copy of the document list* and reported
+"no documents newer than 2026-08-03" as fact. There were 57. The document list itself was eight
+days old — the check was answering honestly about a list that was already wrong. The rule this
+yields: **never state "nothing new exists" without first confirming the list being read is
+current.** A freshness claim inherits the freshness of its source, and this system's own history
+says a confident empty answer is the most dangerous answer it can give.
+
 That covers whether the *data behind* a healthy connector is in good shape. Whether the
 *connector itself* is reachable and fast is a different failure mode (found 2026-07-30:
 `check_system_health` itself hung 60-240+s on a stuck git subprocess — see

@@ -408,39 +408,47 @@ def _acres_str(v) -> str:
 # Property summary staleness
 # ══════════════════════════════════════════════════════════════════
 
-def _summary_staleness(property_name: str, summary_text: str) -> str:
-    """
-    Compare a summary's own "Source files as of:" stamp against the corpus
-    index's mtimes, and say what has been filed since.
+# Stages where a summary being behind can change a decision this week --
+# money is in motion and dates are running. Everything else (Rezone,
+# Pre-Plat, Final Engineering, Development, Site Maintenance) is real work
+# on a multi-month clock, where a summary a few weeks behind rarely changes
+# an answer; those still get the full on-demand warning whenever someone
+# asks about that property by name. Deliberately narrow: check_system_health
+# is trusted BECAUSE it stays quiet, and naming 39 of 49 properties every
+# conversation is how a warning becomes wallpaper.
+ACTIVE_DEAL_STAGES = ("Acquisition", "Disposition")
 
-    The failure this exists to prevent is the worst shape a wrong answer can
-    take here: not "I don't know" but a confident, well-cited answer that is
-    simply months out of date. Every summary already records how current it
-    was; the index already knows every file's mtime. Nothing was comparing
-    them, so a summary could silently age forever.
 
-    Returns a line to prepend to the summary, or "" when it can't tell --
-    never a guess. Reports the newest filenames rather than only a count,
-    because "6 newer files" prompts a re-read of everything while
-    "Closing Memo.docx, Final ESA.pdf" tells the reader whether the change
-    even matters to the question they asked.
-    """
+def _summary_stamp(summary_text: str):
+    """The 'Source files as of:' date a summary stamps itself with, or None."""
     import re
-    import sqlite3
     import datetime as _dt
 
     m = re.search(r"Source files as of:\*{0,2}\s*(\d{4})-(\d{2})-(\d{2})", summary_text)
     if not m:
-        return ""
+        return None
     try:
-        stamped = _dt.datetime(int(m[1]), int(m[2]), int(m[3]), tzinfo=_dt.timezone.utc)
+        return _dt.datetime(int(m[1]), int(m[2]), int(m[3]), tzinfo=_dt.timezone.utc)
     except ValueError:
-        return ""
+        return None
+
+
+def _newer_readable_docs(property_name: str, stamped):
+    """
+    (count, [(name, mtime), ...]) of documents for this property filed since
+    `stamped`, or None when the question can't be answered (no index).
+
+    None and 0 are NOT the same and callers must not conflate them: 0 means
+    "checked, nothing new"; None means "couldn't check". Reporting None as
+    "nothing new" is exactly the false-reassurance failure this whole check
+    exists to prevent.
+    """
+    import sqlite3
 
     try:
         from config import CORPUS_INDEX_FILE
         if not Path(CORPUS_INDEX_FILE).exists():
-            return ""
+            return None
         con = sqlite3.connect(f"file:{CORPUS_INDEX_FILE}?mode=ro", uri=True)
         try:
             # LIKE, so escape its wildcards -- '_' matches any single
@@ -464,9 +472,38 @@ def _summary_staleness(property_name: str, summary_text: str) -> str:
             total = con.execute(f"SELECT COUNT(*) FROM files WHERE {where}", args).fetchone()[0]
         finally:
             con.close()
+        return total, rows
     except sqlite3.Error as e:
         log.warning(f"[MCP] Staleness check failed for {property_name}: {e}")
+        return None
+
+
+def _summary_staleness(property_name: str, summary_text: str) -> str:
+    """
+    Compare a summary's own "Source files as of:" stamp against the corpus
+    index's mtimes, and say what has been filed since.
+
+    The failure this exists to prevent is the worst shape a wrong answer can
+    take here: not "I don't know" but a confident, well-cited answer that is
+    simply months out of date. Every summary already records how current it
+    was; the index already knows every file's mtime. Nothing was comparing
+    them, so a summary could silently age forever.
+
+    Returns a line to prepend to the summary, or "" when it can't tell --
+    never a guess. Reports the newest filenames rather than only a count,
+    because "6 newer files" prompts a re-read of everything while
+    "Closing Memo.docx, Final ESA.pdf" tells the reader whether the change
+    even matters to the question they asked.
+    """
+    import datetime as _dt
+
+    stamped = _summary_stamp(summary_text)
+    if stamped is None:
         return ""
+    counted = _newer_readable_docs(property_name, stamped)
+    if counted is None:
+        return ""
+    total, rows = counted
 
     if not total:
         return ("\nCURRENCY: no readable documents newer than this summary's sources have "
@@ -586,6 +623,40 @@ def _resolve_costar_source(source_file: str, property_name: str = "", file_conte
 # MCP Tools
 # ══════════════════════════════════════════════════════════════════
 
+def _library_nicknames() -> str:
+    """
+    The names this firm's own people actually use for the document library,
+    built at runtime from the real folder name on this machine.
+
+    This exists so the real library name never appears in tracked code. It
+    used to be written straight into the server instructions -- and that is a
+    confidentiality leak, not a style issue: this repo is deliberately public,
+    and the library's display name identifies the firm's tenant. Found
+    2026-08-11 by the pre-commit leak hook, on a whole-file scan rather than a
+    diff scan; the string had been sitting on origin/main since well before,
+    invisible to every diff-based sweep. Same lesson the 2026-07-29 history
+    reset recorded: a diff-based check is not equivalent to a whole-tree one.
+
+    Degrades to a generic line if the library isn't reachable -- a teammate
+    whose OneDrive isn't synced still gets working instructions, just without
+    the nickname.
+    """
+    try:
+        from config import CORPUS_DIR
+        full = Path(CORPUS_DIR).name
+        if not full:
+            return "The library's own folder name is what people usually shorten."
+        # A library name like "<Firm> - <site>" gets shortened by the team to
+        # its last word in everyday speech ("the <site> drive").
+        short = full.replace("-", " ").split()[-1]
+        variants = [f'"{full}"', f'"{short}"', f'"the {short} drive"',
+                    f'"the {short} folder"']
+        return ("On this machine those names are: " + ", ".join(variants) +
+                ". Recognize any of them.")
+    except Exception:
+        return "The library's own folder name is what people usually shorten."
+
+
 def create_mcp_server():
     from mcp.server.fastmcp import FastMCP
 
@@ -617,13 +688,15 @@ subagent can fix), state that plainly in one or two sentences and continue with 
 the user actually asked.
 
 WHAT THE TEAM CALLS THIS. People refer to the document library by many names:
-"the shaw drive", "the shaw folder", "shaw", "the OneDrive", "the SharePoint",
-"the firm's files", "the drive", or just "our documents". These all mean the same
-thing — the library you already reach through search_documents, browse_documents
-and read_document. Treat any of them as referring to these tools.
+its own folder name and any short nickname drawn from it (named in the line below),
+plus "the OneDrive", "the SharePoint", "the firm's files", "the drive", or just
+"our documents". These all mean the same thing — the library you already reach
+through search_documents, browse_documents and read_document. Treat any of them as
+referring to these tools.
+NICKNAMES_FOR_THE_LIBRARY
 
-So if the user asks whether you are connected to the shaw drive (or any of those
-names), the answer is YES and you should say so directly. Do NOT search the
+So if the user asks whether you are connected to it by any of those names, the
+answer is YES and you should say so directly. Do NOT search the
 connector directory for it — this system is a local MCP server on the user's own
 computer, not an installable connector, so a connector search will always come back
 empty and reads as "not connected" when in fact it is working. Answer from the tools
@@ -739,7 +812,8 @@ offer to save it with record_screening_decision. Don't wait to be asked, and
 don't nag: offer once, save it if they say yes. This is the only record of
 whether the screener's ranking matches what the firm actually chooses, and a
 decision made in a meeting and never written down is simply lost. It changes
-no score -- it's a diary, not a dial."""
+no score -- it's a diary, not a dial.""".replace(
+            "NICKNAMES_FOR_THE_LIBRARY", _library_nicknames())
     )
 
     @mcp.tool()
@@ -959,6 +1033,91 @@ no score -- it's a diary, not a dial."""
                 )
         except Exception as e:
             lines.append(f"Property summaries: could not check ({e})")
+
+        # ── Summaries that have fallen behind their documents ────
+        # The missing-summary check above catches a property nobody has
+        # written up yet. This catches the opposite and more insidious case:
+        # a summary that EXISTS, reads as authoritative, and is months out of
+        # date. Until now that was only ever noticed if someone happened to
+        # ask about that exact property -- so a deal nobody asked about could
+        # drift indefinitely while still answering confidently.
+        #
+        # Active-stage properties only (see ACTIVE_DEAL_STAGES). Same
+        # detection-only rule as everything else here: it never rewrites a
+        # summary itself, it names the gap and lets a human decide.
+        try:
+            from portfolio import load_properties
+            from config import PROPERTY_SUMMARIES_DIR
+            import re as _re
+
+            def _norm(s):
+                return _re.sub(r"[^a-z0-9]", "", s.lower())
+
+            active, _src = load_properties()
+            summary_files = list(Path(PROPERTY_SUMMARIES_DIR).glob("*.md"))
+            behind, uncheckable = [], []
+            for prop in active:
+                if prop.get("category") not in ACTIVE_DEAL_STAGES:
+                    continue
+                pn = _norm(prop["name"])
+                match = next((f for f in summary_files
+                              if _norm(f.stem) in pn or pn in _norm(f.stem)), None)
+                if match is None:
+                    continue  # already reported by the missing-summary check
+                stamped = _summary_stamp(match.read_text(encoding="utf-8", errors="replace"))
+                if stamped is None:
+                    # No self-stamp means this one can never be currency-checked.
+                    # Say so rather than skipping quietly -- a silent skip reads
+                    # downstream as "checked, fine", which is the exact false
+                    # reassurance this whole check exists to prevent.
+                    uncheckable.append(prop["name"])
+                    continue
+                counted = _newer_readable_docs(prop["name"], stamped)
+                if counted is None:
+                    continue  # couldn't check != nothing new; stay silent
+                total, rows = counted
+                if total:
+                    behind.append((prop["name"], rows[0][0] if rows else ""))
+
+            if behind:
+                # Name the newest FILE, never a count. A count cannot be trusted
+                # here: OneDrive rewrites a file's modified-date when it re-syncs,
+                # so on one real property 1,370 documents from 2024-2025 all looked
+                # like they arrived this year. The filename is what lets a reader
+                # tell a genuinely new contract from an old file that merely got
+                # re-synced -- same reasoning _summary_staleness already gives for
+                # naming files instead of counting them.
+                named = "; ".join(f"{n} (newest: {f})" for n, f in behind[:3])
+                more = f"; +{len(behind) - 3} more" if len(behind) > 3 else ""
+                lines.append(f"Summaries behind: {len(behind)} active-stage "
+                             f"propert{'y' if len(behind) == 1 else 'ies'}")
+                issues.append(
+                    f"{len(behind)} propert"
+                    f"{'y' if len(behind) == 1 else 'ies'} being actively bought or sold "
+                    f"ha{'s' if len(behind) == 1 else 've'} documents filed since "
+                    f"{'its' if len(behind) == 1 else 'their'} shared summary was last "
+                    f"updated: {named}{more}. Judge from the filename, not the fact it "
+                    f"appeared -- OneDrive updates a file's date when it re-syncs, so an "
+                    f"old document can look new. Durable facts in those summaries are "
+                    f"still good; treat STATUS answers (has it closed, been extended, "
+                    f"been signed) as possibly out of date. Do not recite this list to "
+                    f"the user unprompted -- raise it only if they ask about one of these "
+                    f"properties, and then offer to read the new documents and bring the "
+                    f"summary up to date for the whole team."
+                )
+            if uncheckable:
+                lines.append(f"Summaries with no date stamp: {len(uncheckable)}")
+                issues.append(
+                    f"{len(uncheckable)} active-stage propert"
+                    f"{'y' if len(uncheckable) == 1 else 'ies'} cannot be currency-checked "
+                    f"at all, because {'its' if len(uncheckable) == 1 else 'their'} summary "
+                    f"carries no 'Source files as of:' date: {', '.join(uncheckable)}. "
+                    f"Nothing can tell whether {'it is' if len(uncheckable) == 1 else 'they are'} "
+                    f"out of date. If the user asks about one, say the summary's currency is "
+                    f"unknown, and offer to add the stamp when next updating it."
+                )
+        except Exception as e:
+            lines.append(f"Summary currency: could not check ({e})")
 
         # ── Version ──────────────────────────────────────────────
         _v = _get_code_version()
