@@ -156,7 +156,23 @@ def _copy_claude_tooling(package_root: Path) -> int:
             copied += 1
     guide = REPO_ROOT / "CLAUDE.md"
     if guide.exists():
-        shutil.copy2(guide, package_root / "CLAUDE.md")
+        # Inside system/, not at the top level. To the teammate this package
+        # is FOR, CLAUDE.md is a developer document sitting in their way at
+        # exactly the moment they are deciding what to click -- and the top
+        # level should hold one obvious instruction and nothing else.
+        #
+        # Marking it hidden instead was tried first and does NOT work: the zip
+        # format doesn't carry Windows file attributes, so it arrived hidden
+        # in the built folder and plainly visible again the moment anyone
+        # unzipped it. Verified by extracting the real zip and re-reading the
+        # attributes. Location survives; attributes do not.
+        #
+        # Cost: someone opening this package in Claude Code won't get CLAUDE.md
+        # loaded automatically from the root. Accepted -- that is the rare
+        # case this package explicitly does not optimise for, and the file is
+        # still right there in system/.
+        (package_root / "system").mkdir(parents=True, exist_ok=True)
+        shutil.copy2(guide, package_root / "system" / "CLAUDE.md")
         copied += 1
     return copied
 
@@ -202,26 +218,39 @@ def main() -> int:
     # reads as "which one do I click?" to someone non-technical. The .command
     # launcher stays in the repo -- add it back into a package deliberately
     # if a teammate ever needs it, rather than shipping it to everyone by
-    # default. This used to skip a "read me" file too, reasoning that the
-    # wizard's own printed output already walks through every step. That
+    # default. This used to skip a "how to start" file too, reasoning that
+    # the wizard's own printed output already walks through every step. That
     # reasoning had a hole, found 2026-08-12 by watching a real first run:
     # someone opened the zip WITHOUT extracting it, browsed into quick_start,
     # and double-clicked Setup there. Windows can't run a program from inside
     # a zip, so it interrupted with its own extract-first dialog -- and the
     # wizard, whose output was supposed to be the guidance, had not run and
     # could not run. Guidance that only exists once the program starts cannot
-    # help someone who is stuck before it starts. So READ ME FIRST.txt now
-    # ships beside the launcher, which is exactly where that person is
-    # standing when they get stuck.
+    # help someone who is stuck before it starts.
+    #
+    # It goes at the PACKAGE ROOT, not in quick_start beside the launcher --
+    # that was the first attempt and it was still one step too late. Opening
+    # the zip shows one folder; opening that folder had nothing to read at
+    # all; and the guidance only appeared in quick_start, arriving at the
+    # same moment as the Setup file itself. By then the tempting thing to
+    # click is already on screen. At the root it is read BEFORE there is
+    # anything to click wrongly -- and it is the only visible file there,
+    # since CLAUDE.md is hidden (see _copy_claude_tooling).
+    START_GUIDE = "How to start.txt"
     for launcher in sorted((REPO_ROOT / "quick_start").iterdir()):
-        if launcher.is_file() and launcher.suffix != ".command":
+        if not launcher.is_file() or launcher.suffix == ".command":
+            continue
+        if launcher.name == START_GUIDE:
+            shutil.copy2(launcher, package_root / START_GUIDE)
+            print(f"  {START_GUIDE}")
+        else:
             shutil.copy2(launcher, dest_quick / launcher.name)
             print(f"  quick_start/  {launcher.name}")
 
     # 3b. QA subagents, skills and the project guide -- see the docstring above
     #     for why this is partial and what it does NOT do for a Desktop user.
     n = _copy_claude_tooling(package_root)
-    print(f"  .claude/      {n} subagent/skill files + CLAUDE.md")
+    print(f"  .claude/      {n} subagent/skill files (CLAUDE.md tucked into system/)")
 
     # 3b. Stamp the version, exactly as release.py does for update packages.
     #
@@ -274,9 +303,10 @@ def main() -> int:
     size_mb = zip_path.stat().st_size / 1e6
     print(f"\nFolder: {package_root}")
     print(f"Zip:    {zip_path}  ({size_mb:.1f} MB)")
-    print("\nSend the .zip. Opening it shows quick_start (the only folder they need "
-          "to open) and system (the program), plus CLAUDE.md and a hidden .claude/ "
-          "that only matter if someone opens this in Claude Code.")
+    print("\nSend the .zip. Opening it shows one instruction file, \"How to start\", "
+          "plus quick_start (the only folder they open) and system (the program). "
+          "CLAUDE.md now sits inside system/, and .claude/ only matters if someone "
+          "opens this in Claude Code.")
     return 0
 
 
