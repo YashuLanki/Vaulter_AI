@@ -202,15 +202,38 @@ def _find_corpus_subfolder(onedrive_root: Path) -> Path | None:
 
     if len(candidates) == 1:
         return candidates[0]
+
     if len(candidates) > 1:
+        # More than one library synced. Rather than give up, identify ours by
+        # what is INSIDE it: the team's own shared folder lives in the firm's
+        # library and syncs with it, so the library containing SHARED_SUBFOLDER
+        # is the right one. Content, not name -- which means this keeps working
+        # whatever the library is called on a given machine, and still puts no
+        # real folder name in this (public) file.
+        with_shared = [d for d in candidates if (d / SHARED_SUBFOLDER).is_dir()]
+        if len(with_shared) == 1:
+            return with_shared[0]
+
+        # Last resort: a name fragment the firm can set once in
+        # confidentials/.env (gitignored), e.g. VAULTER_CORPUS_HINT=<site>.
+        # Kept out of the code and out of .env.template, both of which are
+        # public; a hint here is opt-in and never travels with the source.
+        hint = os.getenv("VAULTER_CORPUS_HINT", "").strip().lower()
+        if hint:
+            hinted = [d for d in candidates if hint in d.name.lower()]
+            if len(hinted) == 1:
+                return hinted[0]
+
         # Deliberately does NOT print the folder names: this message can reach
         # a log or a screen share, and the names are the tenant detail being
         # protected. The count is enough to tell the user to pick one.
         print(f"WARNING: found {len(candidates)} synced SharePoint libraries "
-              f"under {onedrive_root} -- can't tell which is the firm's "
-              f"document library. Set VAULTER_CORPUS_SUBFOLDER (the folder "
-              f"name) or VAULTER_CORPUS_DIR (the full path) in "
-              f"confidentials/.env to pick one.", file=sys.stderr)
+              f"under {onedrive_root}, and none of them contains a "
+              f"'{SHARED_SUBFOLDER}' folder, so this can't tell which is the "
+              f"firm's document library. Set VAULTER_CORPUS_SUBFOLDER (the "
+              f"folder name), VAULTER_CORPUS_DIR (the full path), or "
+              f"VAULTER_CORPUS_HINT (any distinctive word from the folder "
+              f"name) in confidentials/.env.", file=sys.stderr)
     return None
 
 
