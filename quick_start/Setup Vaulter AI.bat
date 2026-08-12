@@ -22,22 +22,7 @@ REM All three are fixed the same way: copy to a permanent local folder and
 REM carry on from there, rather than asking someone to fix a path by hand.
 for %%I in ("%~dp0..") do set "VAULTER_ROOT=%%~fI"
 
-REM NEVER end a findstr /C:"..." pattern with a backslash. Windows reads the
-REM closing \" as an escaped quote, the argument breaks, and the check silently
-REM never matches -- so the folder looks safe and setup carries on into a temp
-REM directory. Measured 2026-08-12: "\Downloads\" never matched while
-REM "\Downloads" matched correctly. Leading backslash only, always.
-set "MOVE_WHY="
-echo %VAULTER_ROOT%| findstr /I /L /C:"OneDrive" >nul
-if not errorlevel 1 set "MOVE_WHY=onedrive"
-echo %VAULTER_ROOT%| findstr /I /L /C:"\Downloads" >nul
-if not errorlevel 1 set "MOVE_WHY=downloads"
-echo %VAULTER_ROOT%| findstr /I /L /C:"\AppData\Local\Temp" >nul
-if not errorlevel 1 set "MOVE_WHY=zip"
-echo %VAULTER_ROOT%| findstr /I /L /C:"Temp1_" >nul
-if not errorlevel 1 set "MOVE_WHY=zip"
-echo %VAULTER_ROOT%| findstr /I /L /C:"\Temporary Internet Files" >nul
-if not errorlevel 1 set "MOVE_WHY=zip"
+call :check_location
 
 if defined MOVE_WHY goto :relocate
 goto :python_check
@@ -75,10 +60,29 @@ echo ============================================================
 echo   Moving Vaulter AI to a permanent folder
 echo ============================================================
 echo.
+if "%MOVE_WHY%"=="cloud" (
+    echo   This folder is inside a cloud-synced folder, which can lock or
+    echo   part-sync the files Vaulter AI writes to constantly -- its search
+    echo   index and screening results.
+)
 if "%MOVE_WHY%"=="onedrive" (
     echo   This folder is inside OneDrive, which can interfere with files
     echo   Vaulter AI writes to constantly -- its search index and
     echo   screening results.
+)
+if "%MOVE_WHY%"=="removable" (
+    echo   This folder is on a removable drive, such as a USB stick. Setup
+    echo   records this exact location, so Vaulter AI would stop working
+    echo   every time the drive isn't plugged in.
+)
+if "%MOVE_WHY%"=="network" (
+    echo   This folder is on a network drive. Setup records this exact
+    echo   location, so Vaulter AI would stop working whenever you're off
+    echo   the network, and it would be slow even when you're on it.
+)
+if "%MOVE_WHY%"=="readonly" (
+    echo   This folder can't be written to, so Vaulter AI has nowhere to
+    echo   keep its search index or your screening results.
 )
 if "%MOVE_WHY%"=="downloads" (
     echo   This folder is in your Downloads, which is the folder most
@@ -205,3 +209,78 @@ if not exist "%WIZARD%" (
 "%PYCMD%" "%WIZARD%"
 echo.
 pause
+exit /b 0
+
+
+REM ======================================================================
+REM  Is this folder a safe place to install into?
+REM ======================================================================
+REM Asks what the location IS, not what it is CALLED. An earlier version
+REM listed known-bad folder names, which can only ever cover the places
+REM someone thought of -- a redirected temp folder, a USB stick, a mapped
+REM network drive, a cloud folder with a custom name all slipped through.
+REM Every question below is answered from the machine at run time.
+REM
+REM Two traps, both measured 2026-08-12, both silent when got wrong:
+REM
+REM  1. A findstr /C:"..." pattern must NEVER end with a backslash: Windows
+REM     reads the closing \" as an escaped quote, the argument breaks, and
+REM     the test never matches. "\Downloads\" never fired; "\Downloads" did.
+REM  2. Windows hands out %TEMP% in short 8.3 form (C:\Users\ABCDEF~1\...)
+REM     while Explorer gives the long form, so comparing them directly MISSES.
+REM     Both sides are converted to short form (%%~sI) before comparing --
+REM     that direction always works, the reverse does not.
+REM ======================================================================
+:check_location
+set "MOVE_WHY="
+for %%I in ("%VAULTER_ROOT%") do set "VR_SHORT=%%~sI"
+for %%I in ("%VAULTER_ROOT%") do set "VR_DRIVE=%%~dI"
+
+REM -- Can we even write here? (read-only share, locked-down disc, CD) ----
+set "WRITE_PROBE=%VAULTER_ROOT%\vaulter_write_probe.tmp"
+break > "%WRITE_PROBE%" 2>nul
+if not exist "%WRITE_PROBE%" set "MOVE_WHY=readonly"
+del "%WRITE_PROBE%" >nul 2>nul
+
+REM -- What KIND of drive is this? Removable and network drives disappear -
+for /f "tokens=*" %%T in ('fsutil fsinfo drivetype %VR_DRIVE% 2^>nul') do set "DTYPE=%%T"
+echo %DTYPE%| findstr /I /L /C:"Removable" >nul
+if not errorlevel 1 set "MOVE_WHY=removable"
+echo %DTYPE%| findstr /I /L /C:"Network" >nul
+if not errorlevel 1 set "MOVE_WHY=network"
+echo %DTYPE%| findstr /I /L /C:"CD-ROM" >nul
+if not errorlevel 1 set "MOVE_WHY=readonly"
+
+REM -- Inside a temporary folder? Read the real ones, don't assume a name -
+call :is_inside "%TEMP%" zip
+call :is_inside "%TMP%" zip
+
+REM -- Inside Downloads? Ask Windows where that actually is; it can be
+REM    renamed, redirected to another drive, or localised.
+for /f "tokens=2,*" %%A in ('reg query "HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\Shell Folders" /v "{374DE290-123F-4565-9164-39C4925E467B}" 2^>nul') do call :is_inside "%%B" downloads
+if not defined MOVE_WHY call :is_inside "%USERPROFILE%\Downloads" downloads
+
+REM -- Inside any cloud-synced folder? OneDrive publishes its real roots as
+REM    environment variables whatever the tenant folder is named, so this
+REM    needs no company name and works on any machine.
+for /f "tokens=1,* delims==" %%A in ('set OneDrive 2^>nul') do call :is_inside "%%B" onedrive
+
+REM -- Other sync clients publish no such variable, so these stay by name.
+REM    A residual gap, and the reason the wizard ALSO warns about where it
+REM    is running from: this is one of two nets, not the only one.
+for %%C in (Dropbox "Google Drive" GoogleDrive Box iCloudDrive Nextcloud ownCloud pCloud MEGAsync Syncthing) do call :is_inside "%USERPROFILE%\%%~C" cloud
+goto :eof
+
+
+REM -- Is VAULTER_ROOT inside the folder named in %1? Sets MOVE_WHY=%2 ----
+REM    Skips an empty, missing, or bare-drive-root candidate: findstr with an
+REM    empty pattern errors, and "C:\" would match every path on the disk.
+:is_inside
+if "%~1"=="" goto :eof
+if not exist "%~1" goto :eof
+for %%I in ("%~1") do set "CAND=%%~sI"
+if "%CAND%"=="" goto :eof
+if "%CAND:~-2%"==":\" goto :eof
+echo %VR_SHORT%| findstr /I /L /C:"%CAND%" >nul
+if not errorlevel 1 set "MOVE_WHY=%~2"
+goto :eof
