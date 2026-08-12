@@ -4,10 +4,10 @@ HOW TO START - VAULTER AI
 
 1.  UNZIP THIS FIRST.
     Right-click the "Vaulter AI" zip, choose "Extract All...",
-    then click Extract.
+    Select the folder you prefer and then click Extract.
 
 
-2.  Open the "quick_start" folder and double-click
+2.  Open the "quick_start" folder again and double-click
     "Setup Vaulter AI".
 
 
