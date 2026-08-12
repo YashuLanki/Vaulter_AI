@@ -253,7 +253,7 @@ boundary is "is this your own computer, logged in as you." claude.ai (the web ap
 be used with this server: it runs in the cloud and can only reach a network address, never
 a process on someone's own machine. Claude Desktop or Claude Code are required.
 
-**28 tools.** Don't maintain this list by hand — it drifted to 19 entries with one duplicated
+**29 tools.** Don't maintain this list by hand — it drifted to 19 entries with one duplicated
 and two missing. Get the truth from the code:
 
 ```bash
@@ -266,7 +266,7 @@ Grouped by what they're for: **health & updates** — `check_system_health`,
 **Documents** — `search_documents`, `read_document`, `browse_documents`.
 **Team knowledge** (shared-folder files, deliberately outside the document index — each of
 these tools is the ONLY door to its record; see "Where answers live" in the server's own
-instructions) — `get_property_summary`, `update_property_summary`, `get_passed_on_deals`.
+instructions) — `get_property_summary`, `update_property_summary`, `get_passed_on_deals`, `get_sold_deals`.
 **Portfolio** — `get_property_info`, `get_portfolio_list`, `get_properties_by_stage`,
 `open_property_files`, `open_property_document`.
 **Screening** — `screen_listings`, `get_screening_rules`,
@@ -782,6 +782,32 @@ blind-verification markers (see above) so a reader can tell independently-confir
 a summary's own wording. Prices are stripped defensively with a regex guard before the string is
 built — one existing note mentions a sale figure, and `check_screener.py` asserts price never
 reaches this column, since the tool compares characteristics and history, never price.
+
+### Sold-deal precedent (`_sold-deals.md`, `get_sold_deals`) — 2026-08-12
+
+The mirror image of `_passed-on-deals.md`, and requested straight out of a team meeting: the
+firm's **completed round trips** are the only place the whole argument was tested end to end —
+entry basis, plan, execution and buyer. A still-held property tells you what was *intended*; a
+sold one tells you what actually cleared. Four deals as of this writing (two AZ, one CA, one TX),
+plus four more under contract to sell that will materially reshape it when they close.
+
+Hand-written from the four properties' own cited summaries, in the same spirit as
+`passed_on_patterns.py`'s `KNOWN_PATTERNS`: **never auto-derived**, and it feeds nothing. It is
+read in a conversation, exactly like `get_passed_on_deals`. The file's own opening rule is
+"precedent, never a formula" — the same discipline the passed-on record carries, in the opposite
+direction, and for the same measured reason (the hard-filter incident that discarded 60 of 69
+real listings).
+
+Three findings from it worth knowing, because they are the firm's own record rather than
+anyone's assumption: **every one of the four exited by selling the entitled position — none was
+built out**, confirming the stated model four times over; **three of four had a distressed or
+discounted basis** (an expired plat, a seller needing speed, a bank disposing of REO), so the
+edge was usually bought rather than created; and **holds ran long against plan** (3–4 years
+underwritten → ~10 actual on one; a ~5-year resale expectation → ~15 on another). The one deal
+that beat its schedule did so by abandoning the plan and selling early. The file states its own
+survivorship problem out loud: these are the deals that closed, while 21 properties bought
+2011–2015 are still held, so the completed set is the faster half of a slower portfolio by
+construction.
 
 ### Passed-on-deal patterns (`system/analysis/screening/passed_on_patterns.py`)
 

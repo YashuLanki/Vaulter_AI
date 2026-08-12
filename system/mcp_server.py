@@ -884,6 +884,12 @@ search about them proves nothing. Route by question:
 - A specific property ("what do we know about X?") -> get_property_summary
 - Deals the firm passed on, rejected, lost, or never closed ("which deals did
   we pass up on in Arizona?") -> get_passed_on_deals
+- Deals the firm bought and EXITED, and what transfers from them ("what have
+  we actually sold?", "how did we exit X?", "does our track record support
+  this listing?") -> get_sold_deals. Worth reading alongside a screening run:
+  a completed exit is the only case where basis, plan, execution and buyer
+  were all tested, so a listing resembling one is the strongest positive
+  precedent available. Precedent, never a score.
 - Why the team pursued or skipped something they screened ("why did we go
   after that one?") -> get_screening_decisions
 - "Have we done anything like this before?" -> compare_to_portfolio_history
@@ -1852,6 +1858,47 @@ no score -- it's a diary, not a dial.""".replace(
             return preamble + "\n\n" + "\n\n".join("## " + s for s in picked)
         except Exception as e:
             return f"Could not read the passed-on-deals record: {e}"
+
+    @mcp.tool()
+    def get_sold_deals() -> str:
+        """
+        Read the team's analysis of deals the firm BOUGHT AND EXITED -- what
+        made each buyable, how it was approached, how it actually exited, and
+        which of those signals transfer to a new listing.
+
+        USE THIS when the question is about the firm's completed round trips:
+        "which deals have we actually sold", "how did we exit X", "have we
+        made money on anything like this", "what does our track record say
+        about this listing". Also worth reading alongside a screening run --
+        a listing resembling a completed exit is the strongest positive
+        precedent available, because a sold deal is the only kind where the
+        whole argument was tested end to end: basis, plan, execution, buyer.
+
+        This record is NOT in search_documents (the shared folder is
+        deliberately excluded from the document index), so an empty document
+        search does NOT mean the firm has never sold anything -- this tool is
+        the only way to reach it.
+
+        The record's own first rule travels with it: this is PRECEDENT, never
+        a formula. Four completed exits is a small sample, each bought into a
+        different market. Never turn it into a score, an automatic "pursue",
+        or a rule -- the same discipline get_passed_on_deals carries, in the
+        opposite direction.
+        """
+        try:
+            from config import PROPERTY_SUMMARIES_DIR
+
+            record = Path(PROPERTY_SUMMARIES_DIR) / "_sold-deals.md"
+            if not record.is_file():
+                return ("The sold-deals analysis isn't on this machine yet. It lives in "
+                        "the team's shared folder -- check that OneDrive is syncing. If "
+                        "it is syncing and the file genuinely doesn't exist, the analysis "
+                        "hasn't been written yet; say so plainly rather than concluding "
+                        "the firm has never sold anything. The portfolio itself does "
+                        "record sold deals -- compare_to_portfolio_history still works.")
+            return record.read_text(encoding="utf-8", errors="replace")
+        except Exception as e:
+            return f"Could not read the sold-deals analysis: {e}"
 
     def _decisions_file(source_file: str) -> Path:
         """
