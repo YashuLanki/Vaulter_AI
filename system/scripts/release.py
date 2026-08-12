@@ -71,6 +71,29 @@ def _get_version() -> str:
     return result.stdout.strip()
 
 
+def _get_commit_time() -> str:
+    """
+    The committed date of HEAD, ISO 8601, or "" if it can't be read.
+
+    This is what lets an instance tell a NEWER release from a merely
+    different one. Short hashes have no order, so without it the update
+    check could only ask "is this the same version?" -- and would offer an
+    older release as though it were an upgrade (measured 2026-08-12 on a
+    real fresh install). The COMMIT date is used rather than the publish
+    time because it orders the code itself, so re-publishing an old commit
+    is correctly recognised as old.
+    """
+    result = subprocess.run(
+        ["git", "show", "-s", "--format=%cI", "HEAD"],
+        cwd=str(PROJECT_ROOT), capture_output=True, text=True, timeout=10,
+    )
+    if result.returncode != 0 or not result.stdout.strip():
+        print("  ⚠ could not read the commit date -- instances will not be able to tell "
+              "whether this release is newer than what they are running.", file=sys.stderr)
+        return ""
+    return result.stdout.strip()
+
+
 def _iter_package_files():
     for path in PROJECT_ROOT.rglob("*"):
         if not path.is_file():
@@ -83,7 +106,7 @@ def _iter_package_files():
         yield path, rel
 
 
-def _build_package(version: str) -> Path:
+def _build_package(version: str, commit_time: str = "") -> Path:
     from config import UPDATES_DIR
 
     zip_path = UPDATES_DIR / f"vaulter_ai_{version}.zip"
@@ -106,7 +129,13 @@ def _build_package(version: str) -> Path:
         # version as a plain file inside the package itself, instead of only
         # in the external marker JSON, means apply_update.py updates it
         # exactly like any other file -- no git operation needed.
-        zf.writestr("VERSION", version)
+        # Two lines: the hash, then the commit date. Readers take line 1
+        # for the version (see mcp_server._get_code_version) and line 2 to
+        # tell newer from older (_get_code_build_time). Old readers that
+        # take the whole file still match on a plain single-line VERSION,
+        # which is why the hash stays first.
+        zf.writestr("VERSION",
+                    (version + "\n" + commit_time + "\n") if commit_time else version)
     print(f"  Packaged {count} files into {zip_path.name}")
     return zip_path
 
@@ -126,7 +155,8 @@ def _sign_package(zip_path: Path) -> str:
     return base64.b64encode(signature).decode("ascii")
 
 
-def _write_marker(channel: str, version: str, zip_filename: str, notes: str, signature: str) -> None:
+def _write_marker(channel: str, version: str, zip_filename: str, notes: str,
+                  signature: str, commit_time: str = "", force: bool = False) -> None:
     from config import UPDATES_DIR
     from core import safe_io
 
@@ -135,6 +165,12 @@ def _write_marker(channel: str, version: str, zip_filename: str, notes: str, sig
         "version": version,
         "zip_filename": zip_filename,
         "published_at": datetime.now().isoformat(timespec="seconds"),
+        # The commit's own date, so an instance can tell whether this is
+        # genuinely NEWER than what it runs rather than merely different.
+        "commit_time": commit_time,
+        # Set only by --force: the deliberate escape hatch for rolling a
+        # bad release BACK, which by definition means publishing older code.
+        "force": force,
         "notes": notes,
         "signature": signature,
     })
@@ -186,14 +222,18 @@ def _prune_old_packages() -> None:
         print(f"  Cleaned up {removed} superseded package(s); kept {len(keep_names)}.")
 
 
-def publish(notes: str) -> None:
+def publish(notes: str, force: bool = False) -> None:
     print("Vaulter AI — publishing a new version to the CANARY channel")
     version = _get_version()
-    print(f"  Version: {version}")
+    commit_time = _get_commit_time()
+    print(f"  Version: {version}" + (f"  (committed {commit_time[:16]})" if commit_time else ""))
+    if force:
+        print("  --force: instances will accept this even if it is OLDER than what "
+              "they run. Use only to pull a bad release back.")
 
-    zip_path = _build_package(version)
+    zip_path = _build_package(version, commit_time)
     signature = _sign_package(zip_path)
-    _write_marker("canary", version, zip_path.name, notes, signature)
+    _write_marker("canary", version, zip_path.name, notes, signature, commit_time, force)
     _prune_old_packages()
 
     print()
@@ -223,6 +263,9 @@ def promote() -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--notes", default="", help="Short description of what changed")
+    parser.add_argument("--force", action="store_true",
+                        help="publish even though this code is OLDER than what instances "
+                             "run -- the deliberate way to roll a bad release back")
     parser.add_argument("--promote", action="store_true",
                          help="Promote the current canary release to the general channel")
     args = parser.parse_args()
@@ -230,7 +273,7 @@ def main() -> None:
     if args.promote:
         promote()
     else:
-        publish(args.notes)
+        publish(args.notes, force=args.force)
 
 
 if __name__ == "__main__":

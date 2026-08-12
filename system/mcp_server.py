@@ -158,9 +158,14 @@ def _get_code_version() -> str:
     """
     version_file = Path(__file__).parent / "VERSION"
     try:
+        # FIRST LINE ONLY. The file gained a second line (the commit's own
+        # date, used to tell newer from older -- see _get_code_build_time)
+        # and returning the whole thing would make every comparison against a
+        # published version fail, which is the endless re-staging loop this
+        # function's own history already records.
         content = version_file.read_text(encoding="utf-8").strip()
         if content:
-            return content
+            return content.splitlines()[0].strip()
     except OSError:
         pass
 
@@ -194,6 +199,82 @@ def _get_code_version() -> str:
         return "unknown"
 
 
+def _get_code_build_time():
+    """
+    When the running code was committed, from VERSION's second line, or None.
+
+    Exists so an update can be recognised as genuinely NEWER rather than
+    merely different. Git short hashes carry no order, so the old
+    `remote != current` test would happily offer an OLDER release: measured
+    2026-08-12 on a real fresh install, which came up on a build newer than
+    the channel and was immediately offered a downgrade -- which would have
+    silently removed the very fixes that install was sent to deliver.
+
+    None means "this install predates the dated VERSION format", which is
+    itself information: see _published_is_newer.
+    """
+    import datetime as _dt
+
+    version_file = Path(__file__).parent / "VERSION"
+    try:
+        lines = version_file.read_text(encoding="utf-8").strip().splitlines()
+    except OSError:
+        return None
+    if len(lines) < 2 or not lines[1].strip():
+        return None
+    try:
+        return _dt.datetime.fromisoformat(lines[1].strip())
+    except ValueError:
+        return None
+
+
+def _published_is_newer(remote: dict) -> bool:
+    """
+    Should this published release be offered to an instance running this code?
+
+    Deliberately conservative -- refusing a real update is recoverable (the
+    next release, or a fresh install, fixes it), while accepting an older one
+    silently removes working code from someone's machine.
+
+      * marker says force        -> yes. The explicit rollback escape hatch,
+                                    set by `release.py --force`, so a bad
+                                    release can still be pulled back
+                                    deliberately.
+      * we have no local date    -> yes. This install predates the dated
+                                    VERSION format, so anything published
+                                    since is newer by construction.
+      * marker has no date       -> no. The mirror image: our install is
+                                    dated (so built after this change) while
+                                    the marker is not (published before it),
+                                    which makes the marker the older of the
+                                    two.
+      * both dated               -> compare them.
+    """
+    import datetime as _dt
+
+    if remote.get("force"):
+        return True
+    local_time = _get_code_build_time()
+    if local_time is None:
+        return True
+    raw = remote.get("commit_time")
+    if not raw:
+        log.info("[UPDATE] Published release has no commit date and this install "
+                 "does, so it is older -- not offering it.")
+        return False
+    try:
+        remote_time = _dt.datetime.fromisoformat(str(raw))
+    except (TypeError, ValueError):
+        return False
+    if remote_time <= local_time:
+        log.info(f"[UPDATE] Published release is dated {remote_time:%Y-%m-%d %H:%M} and this "
+                 f"install {local_time:%Y-%m-%d %H:%M} -- not newer, so not offering it. "
+                 f"(Publish from the newest commit, or use release.py --force to roll back "
+                 f"on purpose.)")
+        return False
+    return True
+
+
 def _check_and_stage_update() -> None:
     """
     Priority 4 (docs/MULTI_USER_TRANSITION.md): checks this instance's
@@ -222,6 +303,8 @@ def _check_and_stage_update() -> None:
     current_version = _get_code_version()
     if not remote_version or remote_version == current_version:
         return  # already on the latest version for this channel
+    if not _published_is_newer(remote):
+        return  # different, but OLDER -- never offer a downgrade
 
     ready_path = PENDING_UPDATE_DIR / "ready.json"
     if ready_path.exists():

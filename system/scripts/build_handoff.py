@@ -276,7 +276,21 @@ def main() -> int:
         # and every package silently shipped VERSION="unknown" while looking
         # like it had worked.
         print(f"      (could not read the git version: {e})")
-    (dest_system / "VERSION").write_text(version, encoding="utf-8")
+    # Second line: the commit's own date. This is what lets a fresh install
+    # tell a genuinely NEWER published release from a merely different one --
+    # without it, a zip built after the last publish gets offered a DOWNGRADE
+    # the first time it checks (measured 2026-08-12 on a real fresh install).
+    commit_time = ""
+    try:
+        r = subprocess.run(["git", "show", "-s", "--format=%cI", "HEAD"],
+                           cwd=str(REPO_ROOT), capture_output=True, text=True,
+                           encoding="utf-8", errors="replace", timeout=10)
+        if r.returncode == 0:
+            commit_time = r.stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        pass
+    stamp = (version + "\n" + commit_time + "\n") if commit_time else version
+    (dest_system / "VERSION").write_text(stamp, encoding="utf-8")
     print(f"  system/VERSION  {version}")
     if version == "unknown":
         print("      ⚠ no version stamp — a fresh install will be prompted to "

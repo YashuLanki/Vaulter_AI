@@ -305,6 +305,60 @@ def main() -> int:
     except Exception as e:
         check("summary currency checks ran", False, f"{type(e).__name__}: {e}")
 
+    # ── 4b. Updates only ever go forwards ─────────────────────────
+    # Git short hashes carry no order, so the update check could only ask "is
+    # this different?" and would happily offer an OLDER release -- measured
+    # 2026-08-12 when a real fresh install came up newer than the channel and
+    # was offered a downgrade, which would have silently removed the fixes it
+    # had just been sent to deliver. Every branch is asserted here because the
+    # blast radius is every teammate's machine at once.
+    print("\n4b. Updates only ever go forwards")
+    try:
+        import datetime as _d2
+        _VF = Path(__file__).resolve().parent.parent / "VERSION"
+        _had = _VF.exists()
+        _backup = _VF.read_text(encoding="utf-8") if _had else None
+        NEW = "2026-08-12T10:00:00-07:00"
+        OLD = "2026-08-01T10:00:00-07:00"
+
+        def _with_version(text):
+            if text is None:
+                _VF.unlink(missing_ok=True)
+            else:
+                _VF.write_text(text, encoding="utf-8")
+
+        def _offer(local, marker):
+            _with_version(local)
+            return _m._published_is_newer(marker)
+
+        try:
+            check("an OLDER published release is never offered",
+                  _offer(f"aaa\n{NEW}\n", {"version": "old", "commit_time": OLD}) is False)
+            check("a NEWER published release is offered",
+                  _offer(f"aaa\n{OLD}\n", {"version": "new", "commit_time": NEW}) is True)
+            check("the same date is not treated as newer",
+                  _offer(f"aaa\n{NEW}\n", {"version": "other", "commit_time": NEW}) is False)
+            check("an install predating dated VERSION still gets updates",
+                  _offer("aaa", {"version": "new", "commit_time": NEW}) is True)
+            check("a marker predating dated VERSION is treated as older",
+                  _offer(f"aaa\n{NEW}\n", {"version": "old"}) is False)
+            check("--force still allows a deliberate rollback",
+                  _offer(f"aaa\n{NEW}\n",
+                         {"version": "old", "commit_time": OLD, "force": True}) is True)
+            check("an unreadable date refuses rather than crashing",
+                  _offer(f"aaa\n{NEW}\n",
+                         {"version": "x", "commit_time": "not-a-date"}) is False)
+            check("no VERSION file at all still gets updates",
+                  _offer(None, {"version": "x", "commit_time": NEW}) is True)
+            check("the version string itself ignores the date line",
+                  _offer(f"abc1234\n{NEW}\n", {"version": "x", "commit_time": NEW}) is not None
+                  and _m._get_code_version() == "abc1234",
+                  f"read {_m._get_code_version()!r}")
+        finally:
+            _with_version(_backup if _had else None)
+    except Exception as e:
+        check("update-direction checks ran", False, f"{type(e).__name__}: {e}")
+
     # ── 5. Document-library detection ─────────────────────────────
     # The library's folder name is deliberately NOT in the code (this repo is
     # public and the name identifies the firm's SharePoint site), so it is
