@@ -628,11 +628,28 @@ def check_shared_folder() -> bool:
         print("    library, and that library isn't syncing to this computer yet. Fix that")
         print("    first (step 7 below says how) and this usually fixes itself.")
     else:
-        print(f"    The document library IS syncing, but it has no 'Vaulter AI Shared'")
-        print(f"    folder in it yet:")
+        # Found on Ava's machine 2026-08-13. This used to say the shared folder
+        # had probably not been created yet and to ask Yashu to confirm it
+        # exists -- it does, and has for months. What had actually happened is
+        # that she was syncing a DIFFERENT SharePoint library (the site's
+        # default "Documents" one) and not the firm's document library at all,
+        # so the folder was never going to be there. Telling her nothing on her
+        # side was broken was the exact wrong steer: there was one thing to do,
+        # and it was on her side. Same failure as every other message in this
+        # family -- one symptom, several causes, and it picked the wrong one.
+        print(f"    A SharePoint library is syncing, but it has no 'Vaulter AI Shared'")
+        print(f"    folder inside it:")
         print(f"      {config.CORPUS_DIR}")
-        print("    That folder is created once, by whoever set Vaulter AI up for the team.")
-        print("    Ask Yashu to confirm it exists — nothing on your side is broken.")
+        print()
+        print("    Most likely this is a DIFFERENT library from the firm's document")
+        print("    library. An organisation usually has several, and Vaulter AI needs")
+        print("    the specific one the firm keeps its property documents in.")
+        print("    In OneDrive, check that the firm's document library is set to sync")
+        print("    on this computer (ask Yashu which one it is), let it finish, then")
+        print("    double-click \"Setup Vaulter AI\" again.")
+        print()
+        print("    Less likely: this IS the right library and it simply hasn't finished")
+        print("    syncing yet — in which case waiting and re-running setup is enough.")
     print()
     print("    Then double-click 'Setup Vaulter AI' again — it will find it")
     print("    automatically, wherever OneDrive puts it.")
