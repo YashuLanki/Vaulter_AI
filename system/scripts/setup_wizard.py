@@ -255,22 +255,49 @@ def _install_tesseract_windows() -> bool:
     installer_path = Path(os.environ.get("TEMP", ".")) / "vaulter_tesseract_installer.exe"
 
     print("  Downloading Tesseract OCR from the official tesseract-ocr GitHub releases...")
-    if not _download_with_progress(_TESSERACT_INSTALLER_URL, installer_path):
-        return False
+    if _download_with_progress(_TESSERACT_INSTALLER_URL, installer_path):
+        print("  Installing (per-user, no admin rights)...")
+        try:
+            # NSIS installer convention: /S = silent, /D=<dir> = install location.
+            # /D must be the last argument and unquoted -- adding quotes ourselves
+            # here would double-quote it once subprocess passes it through.
+            subprocess.run([str(installer_path), "/S", f"/D={install_dir}"], timeout=180)
+        except Exception as e:
+            print(f"      Installer didn't run cleanly: {e}")
+        finally:
+            installer_path.unlink(missing_ok=True)
+        if (install_dir / "tesseract.exe").exists():
+            return True
 
-    print("  Installing (per-user, no admin rights)...")
-    try:
-        # NSIS installer convention: /S = silent, /D=<dir> = install location.
-        # /D must be the last argument and unquoted -- adding quotes ourselves
-        # here would double-quote it once subprocess passes it through.
-        subprocess.run([str(installer_path), "/S", f"/D={install_dir}"], timeout=180)
-    except Exception as e:
-        print(f"      Installer didn't run cleanly: {e}")
-        return False
-    finally:
-        installer_path.unlink(missing_ok=True)
+    # Second attempt via winget, exactly as the launcher already does for
+    # Python. Not redundant: measured 2026-08-12, the direct python.org
+    # installer failed on a real machine while winget installed the same
+    # version successfully -- so a direct download failing says nothing about
+    # whether winget will. A corporate network, proxy or security product can
+    # block a raw GitHub download and a silently-run .exe while leaving the
+    # Microsoft-signed package path alone. winget ships with Windows 10/11; if
+    # it is missing this simply does nothing and we fall through to the manual
+    # instructions. Found needed 2026-08-13 when a teammate's Tesseract install
+    # failed here and there was no second route to try.
+    if shutil.which("winget"):
+        print("  Direct install didn't work. Trying again through Windows' own "
+              "app installer...")
+        try:
+            subprocess.run(["winget", "install", "--id", "UB-Mannheim.TesseractOCR",
+                            "--source", "winget", "--scope", "user", "--silent",
+                            "--accept-package-agreements", "--accept-source-agreements"],
+                           timeout=600)
+        except Exception as e:
+            print(f"      That didn't work either: {e}")
+        # winget chooses its own location, so ask config.py to look again
+        # rather than assuming the folder above.
+        import importlib
+        import config as _c
+        importlib.reload(_c)
+        if shutil.which("tesseract") or (_c.TESSERACT_PATH and _c.TESSERACT_PATH != "tesseract"):
+            return True
 
-    return (install_dir / "tesseract.exe").exists()
+    return False
 
 
 def _install_poppler_windows() -> bool:
@@ -322,9 +349,20 @@ def check_ocr_tools() -> bool:
             print(f"  ✓ Tesseract OCR installed: {config.TESSERACT_PATH}")
         else:
             ok = False
-            print("  ⚠ Couldn't install Tesseract automatically. You can install it yourself "
-                  "instead -- no admin rights needed:")
-            print("      https://github.com/UB-Mannheim/tesseract/wiki (per-user install option)")
+            # Say what is actually lost, not just that a step failed. Measured on
+            # a real teammate's machine 2026-08-13: this printed a bare failure
+            # plus a GitHub wiki link, which reads as "setup is broken" to a
+            # non-technical person. It is not -- everything else works, and this
+            # affects only scanned pages.
+            print("  ⚠ Tesseract couldn't be installed automatically, and that is OK to")
+            print("    leave for now -- nothing else is affected.")
+            print("    What it changes: pages that are PHOTOCOPIES or SCANS of paper")
+            print("    can't be read. Ordinary PDFs, Word, Excel and everything else are")
+            print("    completely unaffected, and the rest of setup carries on normally.")
+            print("    To add it later (no admin rights needed), either run this in a")
+            print("    Command Prompt:")
+            print("      winget install UB-Mannheim.TesseractOCR")
+            print("    or download it from https://github.com/UB-Mannheim/tesseract/wiki")
     else:
         ok = False
         print("  ⚠ Tesseract OCR was not found. Scanned/image-only PDF pages won't be "
@@ -868,7 +906,7 @@ def main() -> None:
         _print_summary(results)
         sys.exit(1)
 
-    results["OCR tools found"] = check_ocr_tools()
+    results["OCR tools (optional -- scanned pages only)"] = check_ocr_tools()
     results["Credentials ready"] = setup_env_file()
     results["Team shared folder"] = check_shared_folder()
     results["Claude Desktop connected"] = setup_claude_desktop()
@@ -882,6 +920,17 @@ def _print_summary(results: dict) -> None:
     _print_header("Summary")
     for step, ok in results.items():
         print(f"  {'✓' if ok else '⚠'} {step}")
+
+    # OCR is the one step whose failure blocks nothing. Lumping it in with the
+    # real problems made a teammate's setup read as more broken than it was.
+    blocking = {k: v for k, v in results.items() if not k.startswith("OCR tools")}
+
+    if all(blocking.values()) and not all(results.values()):
+        print()
+        print("The only thing not set up is OCR, which is optional -- it affects scanned")
+        print("or photocopied pages only. Everything else is ready. Fully quit and reopen")
+        print("Claude Desktop and start a new conversation.")
+        return
 
     if all(results.values()):
         print()
