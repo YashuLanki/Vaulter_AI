@@ -282,13 +282,25 @@ def _install_tesseract_windows() -> bool:
     if shutil.which("winget"):
         print("  Direct install didn't work. Trying again through Windows' own "
               "app installer...")
-        try:
-            subprocess.run(["winget", "install", "--id", "UB-Mannheim.TesseractOCR",
-                            "--source", "winget", "--scope", "user", "--silent",
-                            "--accept-package-agreements", "--accept-source-agreements"],
-                           timeout=600)
-        except Exception as e:
-            print(f"      That didn't work either: {e}")
+        # NOT --scope user here, unlike Python. Checked 2026-08-13: neither
+        # Tesseract package declares a per-user installer, and winget refuses
+        # outright ("no applicable installer") when asked for a scope a package
+        # doesn't offer -- so passing it guaranteed the fallback could never
+        # work. Let winget choose.
+        #
+        # Two package ids are tried because they are maintained separately and
+        # one may be reachable when the other is not.
+        for package in ("UB-Mannheim.TesseractOCR", "tesseract-ocr.tesseract"):
+            try:
+                subprocess.run(["winget", "install", "--id", package,
+                                "--source", "winget", "--silent",
+                                "--accept-package-agreements", "--accept-source-agreements"],
+                               timeout=600)
+            except Exception as e:
+                print(f"      {package} didn't work: {e}")
+                continue
+            if shutil.which("tesseract"):
+                return True
         # winget chooses its own location, so ask config.py to look again
         # rather than assuming the folder above.
         import importlib
