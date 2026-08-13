@@ -104,17 +104,38 @@ def check_install_location() -> bool:
     """
     _print_header("0. Where this folder lives")
     home = Path.home()
-    risky = {
-        "downloads": "your Downloads folder",
-        "temp": "a temporary folder",
-        "tmp": "a temporary folder",
-        "appdata/local/temp": "a temporary folder Windows may clear on its own",
-        "recycle": "the Recycle Bin",
-        "onedrive": "a OneDrive-synced folder (syncing can move or lock files mid-run)",
-    }
-    lowered = str(PROJECT_ROOT).replace("\\", "/").lower()
-    for needle, description in risky.items():
-        if needle in lowered:
+
+    # Ask whether this folder is really INSIDE a risky folder, rather than
+    # whether its path happens to contain a word. A substring match here told
+    # anyone whose Windows username contained "temp" (jtempleton, stemple) that
+    # they were running from a temporary folder, and anyone whose path contained
+    # "downloads" anywhere above them that they were in Downloads -- a confident
+    # cause the code never actually tested, the same class of bug the first real
+    # teammate install turned up four times in ten minutes. The .bat launcher
+    # already does this properly with its :is_inside helper; this is the same
+    # idea in Python.
+    def _inside(parent) -> bool:
+        if not parent:
+            return False
+        try:
+            PROJECT_ROOT.resolve().relative_to(Path(parent).resolve())
+            return True
+        except (ValueError, OSError):
+            return False
+
+    risky = [
+        (home / "Downloads", "your Downloads folder"),
+        (os.environ.get("TEMP"), "a temporary folder Windows may clear on its own"),
+        (os.environ.get("TMP"), "a temporary folder Windows may clear on its own"),
+        (home / "$Recycle.Bin", "the Recycle Bin"),
+        (os.environ.get("OneDriveCommercial"), "a OneDrive-synced folder "
+                                               "(syncing can move or lock files mid-run)"),
+        (os.environ.get("OneDrive"), "a OneDrive-synced folder "
+                                     "(syncing can move or lock files mid-run)"),
+    ]
+    for location, description in risky:
+        if _inside(location):
+            needle = "onedrive" if "OneDrive" in str(location) else ""
             print(f"  ⚠ This looks like it's running from {description}:")
             print(f"      {PROJECT_ROOT.parent}")
             print("    Setup records this exact location, so moving or deleting the folder")
@@ -134,9 +155,16 @@ def check_install_location() -> bool:
                 print(f"      {Path.home() / 'Vaulter AI'}")
                 print("    and run setup again from there.")
             else:
+                # Never suggest the folder we are already sitting in -- an
+                # earlier version printed "move it to X" where X was X.
+                suggestion = home / "Vaulter AI"
                 print("    Best to close this window, move the whole 'Vaulter AI' folder somewhere")
-                print(f"    permanent and local, such as {Path.home() / 'Vaulter AI'},")
-                print("    and run setup again from there.")
+                if suggestion.resolve() == PROJECT_ROOT.parent.resolve():
+                    print("    permanent and local, outside that folder, and run setup again")
+                    print("    from there.")
+                else:
+                    print(f"    permanent and local, such as {suggestion},")
+                    print("    and run setup again from there.")
             print("    Continuing is fine if you meant to keep it here.")
             return False
 
