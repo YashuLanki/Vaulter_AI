@@ -228,6 +228,32 @@ def _get_code_build_time():
         return None
 
 
+def _json_object(path) -> dict | None:
+    """
+    Read `path` as a JSON OBJECT, or None if it isn't one.
+
+    None covers all three ways this can fail -- unreadable, not valid JSON, or
+    valid JSON of the wrong shape (a list, a string, a number) -- because every
+    caller here treats them the same way: as "nothing to act on". The shape
+    check is the point. Every file read through this helper lives in the shared
+    OneDrive folder that all teammates can write to, so a truncated sync or a
+    hand-edit produces well-formed JSON that is not a dictionary; that used to
+    reach a `.get(...)` and raise. Nothing in an MCP tool may raise -- a crash
+    and a hang are indistinguishable to the user, who is told only that "the
+    server isn't responding".
+    """
+    import json
+    try:
+        loaded = json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if not isinstance(loaded, dict):
+        log.warning("Ignoring %s: expected a JSON object, got %s.",
+                    path, type(loaded).__name__)
+        return None
+    return loaded
+
+
 def _published_is_newer(remote: dict) -> bool:
     """
     Should this published release be offered to an instance running this code?
@@ -298,7 +324,18 @@ def _check_and_stage_update() -> None:
     if not marker_path.exists():
         return  # nothing published to this channel yet
 
-    remote = json.loads(marker_path.read_text())
+    # These two files must be JSON OBJECTS, and that is checked rather than
+    # trusted. The marker lives in the shared updates folder that every teammate
+    # can write to, and this function runs from check_system_health at the START
+    # OF EVERY CONVERSATION -- so valid JSON of the wrong shape (a truncated
+    # sync, a hand-edit) would raise on `.get(...)` and break the first tool call
+    # of every conversation, for everyone at once. Claude Desktop reports a crash
+    # and a hang identically as "the server isn't responding", so nobody would
+    # know why. Treat a wrong shape as "nothing published" -- the same
+    # fail-closed choice release signing already makes.
+    remote = _json_object(marker_path)
+    if remote is None:
+        return
     remote_version = remote.get("version")
     current_version = _get_code_version()
     if not remote_version or remote_version == current_version:
@@ -308,8 +345,8 @@ def _check_and_stage_update() -> None:
 
     ready_path = PENDING_UPDATE_DIR / "ready.json"
     if ready_path.exists():
-        already_staged = json.loads(ready_path.read_text()).get("version")
-        if already_staged == remote_version:
+        staged = _json_object(ready_path) or {}
+        if staged.get("version") == remote_version:
             return  # already downloaded, just waiting for a human to apply it
 
     zip_filename = remote.get("zip_filename")

@@ -121,9 +121,23 @@ def _load_cost_assumptions() -> dict:
         pass  # no config (bare clone) -- the local path alone is still valid
     for path in candidates:
         try:
-            return json.loads(path.read_text(encoding="utf-8"))
+            loaded = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, ValueError):
             continue
+        # It must be an OBJECT. Valid JSON that isn't -- a list, a bare string,
+        # a number -- used to be returned as-is and then blew up on the first
+        # `_COST.get(...)` at module import, taking the whole MCP server down
+        # before it could serve a single tool. That was survivable while this
+        # file was local (you break only your own machine); now that it is read
+        # from a folder every teammate can write to, one malformed file would
+        # kill every connector at once, and Claude Desktop reports a crash and
+        # a hang identically as "the server isn't responding". Skip it and carry
+        # on with no cost record, which every use site already handles.
+        if isinstance(loaded, dict):
+            return loaded
+        logging.warning("Ignoring %s: expected a JSON object, got %s. "
+                        "Screening will run without cost figures.",
+                        path, type(loaded).__name__)
     return {}
 
 

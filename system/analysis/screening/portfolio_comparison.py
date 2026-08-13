@@ -34,6 +34,7 @@ measured result. Change them in ASSUMPTIONS, not scattered through the code.
 """
 
 import json
+import logging
 import re
 from pathlib import Path
 
@@ -175,14 +176,40 @@ def load_index(path: Path = None) -> list[dict]:
     Resolves local-then-shared via index_path() unless a specific path is
     given (callers that pass INDEX_PATH explicitly, e.g. a rebuild script,
     still target the local file only).
+
+    It must come back as a LIST OF OBJECTS, and that is checked here rather
+    than trusted. This file is resolved local-then-shared, and the shared copy
+    sits in a folder every teammate can write to -- so a truncated sync, a
+    hand-edit, or a rebuild script writing the wrong thing produces valid JSON
+    of the wrong shape. That used to pass straight through and fail later on
+    somebody's `.get(...)`: measured 2026-08-13, an index that was an object
+    instead of a list crashed both `compare_to_portfolio_history` and every
+    `screen_listings` run, and since Claude Desktop reports a crash and a hang
+    identically as "the server isn't responding", nobody would have known why.
+    Wrong shape is therefore treated exactly like a missing file -- no
+    comparison data, said out loud in the log, never an exception.
     """
     p = path or index_path()
     if not p.exists():
         return []
     try:
-        return json.loads(p.read_text(encoding="utf-8"))
+        loaded = json.loads(p.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, OSError):
         return []
+    if not isinstance(loaded, list):
+        logging.warning("Ignoring %s: the comparison index must be a JSON list, "
+                        "got %s. Running without portfolio comparison.",
+                        p, type(loaded).__name__)
+        return []
+    # One bad record shouldn't discard the whole index -- keep the usable ones
+    # and say how many were dropped, the same way a screen reports what it
+    # could not read rather than going quiet.
+    records = [r for r in loaded if isinstance(r, dict)]
+    if len(records) != len(loaded):
+        logging.warning("Ignored %d entr%s in %s that were not objects.",
+                        len(loaded) - len(records),
+                        "y" if len(loaded) - len(records) == 1 else "ies", p)
+    return records
 
 
 def _score(facts: dict, record: dict) -> tuple[int, list[str]]:

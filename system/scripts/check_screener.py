@@ -1056,6 +1056,66 @@ def main() -> int:
               "data" in fs._load_cost_assumptions.__doc__ and
               "LOCAL FIRST" in fs._load_cost_assumptions.__doc__)
 
+    # ---- 22. A bad file in the TEAM folder must never take the system down ----
+    # Every file below is resolved local-then-shared, and the shared copy sits in
+    # a OneDrive folder every teammate can write to. A truncated sync or a
+    # hand-edit produces WELL-FORMED JSON OF THE WRONG SHAPE -- a third failure
+    # mode, distinct from "missing" and "corrupt", and the one that used to slip
+    # through to somebody's .get(). Measured 2026-08-13: a list in the cost file
+    # crashed fit_screen at import (so the whole MCP server died before serving a
+    # single tool), and a wrong-shaped comparison index broke both
+    # compare_to_portfolio_history and every screen. Claude Desktop reports a
+    # crash and a hang identically as "the server isn't responding".
+    print("\n22. A wrong-shaped file in the team folder degrades, never crashes")
+    import json as _js
+    import shutil as _sh
+    import analysis.screening.portfolio_comparison as _pc
+
+    BAD_SHAPES = [("a list", []), ("a string", "x"), ("a number", 42), ("null", None)]
+
+    def _survives(target, call):
+        """True if `call` survives every wrong shape written to `target`."""
+        if target is None:
+            return None
+        bak = target.with_suffix(target.suffix + ".checkbak") if target.exists() else None
+        if bak:
+            _sh.copy2(target, bak)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            for _, shape in BAD_SHAPES:
+                target.write_text(_js.dumps(shape), encoding="utf-8")
+                try:
+                    call()
+                except Exception:
+                    return False
+            return True
+        finally:
+            if bak:
+                _sh.move(str(bak), str(target))
+            else:
+                target.unlink(missing_ok=True)
+
+    facts = {"state": "AZ", "land_type": "residential", "acres": 100}
+    idx = _pc.index_path()
+    ok = _survives(idx, lambda: _pc.find_similar_deals(facts))
+    check("a wrong-shaped comparison index still lets a comparison run",
+          ok, "it used to raise AttributeError on .get()")
+    ok = _survives(idx, lambda: fs._purchase_reference("AZ"))
+    check("  ...and still lets the large-ask note render", ok)
+
+    try:
+        import config as _c
+        cost_target = Path(_c.ORG_SETTINGS_DIR) / "cost_assumptions.json"
+    except Exception:
+        cost_target = None
+    ok = _survives(cost_target, lambda: fs._load_cost_assumptions().get("x"))
+    if ok is None:
+        skip("a wrong-shaped cost file leaves a usable (empty) record",
+             "no shared folder on this machine")
+    else:
+        check("a wrong-shaped cost file leaves a usable (empty) record", ok,
+              "a list here used to kill the server at import")
+
     passed = sum(1 for _, ok, _ in RESULTS if ok)
     print(f"\n{passed}/{len(RESULTS)} checks passed")
     return 0 if passed == len(RESULTS) else 1

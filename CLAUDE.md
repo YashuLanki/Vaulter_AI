@@ -974,6 +974,20 @@ to save a decision when the user states one, once, without nagging.
   readers went; a blank `system/confidentials/.env` is a working setup. Adding a key back means
   adding a dependency on someone's billing, so look for the free equivalent first — every
   one of the removed keys had one.
+- **A shared file can be the wrong SHAPE, not just missing or corrupt (2026-08-13).** Every
+  local-then-shared JSON file resolves to a copy in a OneDrive folder **every teammate can
+  write to**, so a truncated sync or a hand-edit yields *well-formed JSON that is not the
+  expected type*. That is a third failure mode, distinct from "missing" and "unparseable", and
+  the one every reader here missed: `except (OSError, ValueError)` catches the first two and
+  lets the third through to somebody's `.get()`. Found by feeding each reader a list, a string,
+  a number and `null`. Real consequences measured: a list in `cost_assumptions.json` crashed
+  `fit_screen` **at import**, killing the whole MCP server before it served one tool; a
+  wrong-shaped `portfolio_comparison_index.json` broke `compare_to_portfolio_history` and every
+  screen; a wrong-shaped update marker broke `check_system_health`, which runs at the **start of
+  every conversation**. All now validate type and degrade to "no data", which every use site
+  already handles — `mcp_server._json_object()` is the shared helper. This is a direct
+  consequence of publishing to the shared folder: while a file was local, a bad one broke one
+  machine; now it would break everyone at once. `check_screener.py` §22 asserts it.
 - **A per-call provider failure is not the same as a finding.** `geo_providers` reports
   "provider unreachable" distinctly from "provider says there is nothing there," and the
   prompt formatter renders the difference. Conflating them once made an unconfigured API

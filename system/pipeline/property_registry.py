@@ -62,10 +62,20 @@ def load_registry(data_dir: Path) -> dict:
     if not path.exists():
         return {}
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
+        loaded = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError) as e:
         log.warning(f"[REGISTRY] Could not read {path}: {e}")
         return {}
+    # Valid JSON of the wrong shape is a third failure mode, distinct from
+    # unreadable and unparseable, and it used to slip through to a caller's
+    # `.items()`. This file resolves local-then-shared, so the copy in the
+    # team folder is writable by everyone; a truncated sync yields well-formed
+    # JSON that is not a dictionary. Same outcome as a missing file.
+    if not isinstance(loaded, dict):
+        log.warning(f"[REGISTRY] Ignoring {path}: expected a JSON object, "
+                    f"got {type(loaded).__name__}.")
+        return {}
+    return loaded
 
 
 def resolve(data_dir: Path, name: str, registry: dict | None = None) -> str | None:
