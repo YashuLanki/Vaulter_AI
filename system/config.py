@@ -156,6 +156,16 @@ def _dir_has_content(d: Path) -> bool:
         return False
 
 
+# WHY corpus detection failed, when it did -- "none_syncing" (no SharePoint
+# library on this machine at all), "ambiguous" (several, and nothing identified
+# ours), "unreadable", or "" when it succeeded. This exists because a single
+# "library not available" flag has several causes and every message that guessed
+# one got it wrong for somebody: telling a person their files aren't syncing when
+# they plainly are sends them to fix a problem they do not have. Same rule the
+# rest of this project follows -- describe the symptom, or distinguish the cause.
+CORPUS_UNRESOLVED_REASON = ""
+
+
 def _find_corpus_subfolder(onedrive_root: Path) -> Path | None:
     """
     The firm's synced SharePoint document library, found by shape not by name.
@@ -189,6 +199,7 @@ def _find_corpus_subfolder(onedrive_root: Path) -> Path | None:
               f"{onedrive_root}. Falling back to auto-detection.",
               file=sys.stderr)
 
+    global CORPUS_UNRESOLVED_REASON
     try:
         candidates = [
             d for d in onedrive_root.iterdir()
@@ -198,7 +209,11 @@ def _find_corpus_subfolder(onedrive_root: Path) -> Path | None:
             and not d.name.lower().startswith(_PERSONAL_ONEDRIVE_FOLDERS)
         ]
     except OSError:
+        CORPUS_UNRESOLVED_REASON = "unreadable"
         return None
+
+    if not candidates:
+        CORPUS_UNRESOLVED_REASON = "none_syncing"
 
     if len(candidates) == 1:
         return candidates[0]
@@ -234,6 +249,7 @@ def _find_corpus_subfolder(onedrive_root: Path) -> Path | None:
               f"folder name), VAULTER_CORPUS_DIR (the full path), or "
               f"VAULTER_CORPUS_HINT (any distinctive word from the folder "
               f"name) in confidentials/.env.", file=sys.stderr)
+        CORPUS_UNRESOLVED_REASON = "ambiguous"
     return None
 
 

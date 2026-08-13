@@ -562,7 +562,18 @@ def check_shared_folder() -> bool:
     print("    Everything else still works — but portfolio questions will come back")
     print("    empty, and you won't see the team's CoStar exports, until it's fixed.")
     print()
-    if not config.CORPUS_AVAILABLE:
+    if config.CORPUS_UNRESOLVED_REASON == "ambiguous":
+        # Found live on a real teammate's machine, 2026-08-13: this branch used to
+        # print "that library isn't syncing to this computer yet", which was FALSE
+        # for her -- two libraries were syncing perfectly well and setup simply
+        # refused to pick between them. She would have gone to OneDrive, seen
+        # everything syncing, and had nowhere to go. "Library not available" has
+        # several causes; say which one actually happened.
+        print("    The reason is NOT that your files are missing. This computer syncs")
+        print("    more than one SharePoint library, and Vaulter AI won't guess which")
+        print("    one is the firm's — so it hasn't looked inside any of them yet.")
+        print("    Step 7 below has the one-line fix; do that and this clears too.")
+    elif not config.CORPUS_AVAILABLE:
         print("    The likely reason: the team's folder lives INSIDE the firm's document")
         print("    library, and that library isn't syncing to this computer yet. Fix that")
         print("    first (step 7 below says how) and this usually fixes itself.")
@@ -690,8 +701,17 @@ def build_corpus_index() -> bool:
                 print(f"  ⚠ This computer is syncing {len(candidates)} SharePoint libraries, so "
                       f"setup can't tell which one holds the firm's documents.")
                 print("     Nothing is wrong with your files -- it just won't guess.")
-                print("     Ask Yashu which folder name to use; it goes in one line of")
-                print("     confidentials/.env and then setup will find it every time.")
+                print("     This is a one-line fix. Ask Yashu for the library's folder name,")
+                print("     then open this file in Notepad:")
+                print(f"       {PROJECT_ROOT / 'confidentials' / '.env'}")
+                print("     add this line at the bottom (replacing the part after the '='):")
+                print("       VAULTER_CORPUS_SUBFOLDER=the folder name Yashu gives you")
+                print("     save it, and double-click \"Setup Vaulter AI\" again.")
+                # Deliberately still does NOT print the candidate folder names.
+                # That looked like unhelpful caution until 2026-08-13, when a
+                # teammate photographed this exact screen and sent it on -- which
+                # is precisely the leak the omission prevents. The name reaches
+                # her privately instead.
             else:
                 print("  ⚠ The firm's document library isn't syncing to this computer yet.")
                 print("     In OneDrive, make sure the firm's document library is set to")
