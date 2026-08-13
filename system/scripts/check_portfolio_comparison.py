@@ -450,6 +450,32 @@ def main() -> int:
         finally:
             _shutil.rmtree(r, ignore_errors=True)
 
+        # OneDrive only names a library "<Org> - <Site>" when it is added with
+        # "Sync". "Add shortcut to My files" names the folder after the library
+        # itself -- no " - " anywhere. Until 2026-08-13 the content check ran
+        # only against names already matching the " - " shape, so a library
+        # added that way was invisible and the whole thing refused. Measured on
+        # a real teammate's machine. Content must beat name, and be tried first.
+        r = _fake_root("Desktop", "Documents", "projectfiles")
+        (Path(r) / "projectfiles" / _cf.SHARED_SUBFOLDER).mkdir(parents=True)
+        try:
+            got = _cf._find_corpus_subfolder(r)
+            check("a library whose name has no ' - ' is still found, by content",
+                  got is not None and got.name == "projectfiles",
+                  f"got {got.name if got else None}")
+        finally:
+            _shutil.rmtree(r, ignore_errors=True)
+
+        r = _fake_root("Desktop", "Other Org - Team", "Acme Co - beta", "sharepointdocs")
+        (Path(r) / "sharepointdocs" / _cf.SHARED_SUBFOLDER).mkdir(parents=True)
+        try:
+            got = _cf._find_corpus_subfolder(r)
+            check("  ...even alongside two normally-named libraries that are not ours",
+                  got is not None and got.name == "sharepointdocs",
+                  f"got {got.name if got else None}")
+        finally:
+            _shutil.rmtree(r, ignore_errors=True)
+
         r = _fake_root("Desktop", "Acme Co - alpha", _cf.SHARED_SUBFOLDER)
         try:
             got = _cf._find_corpus_subfolder(r)

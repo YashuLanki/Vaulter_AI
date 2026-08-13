@@ -201,16 +201,36 @@ def _find_corpus_subfolder(onedrive_root: Path) -> Path | None:
 
     global CORPUS_UNRESOLVED_REASON
     try:
-        candidates = [
+        # Everything OneDrive put at the account root that could plausibly be a
+        # library -- i.e. not this system's own shared folder, and not one of
+        # the personal folders OneDrive makes for the individual. NOTE this is
+        # deliberately NOT filtered by name shape yet; see below.
+        possible = [
             d for d in onedrive_root.iterdir()
             if d.is_dir()
-            and " - " in d.name
             and d.name != SHARED_SUBFOLDER
             and not d.name.lower().startswith(_PERSONAL_ONEDRIVE_FOLDERS)
         ]
     except OSError:
         CORPUS_UNRESOLVED_REASON = "unreadable"
         return None
+
+    # CONTENT BEATS NAME, and it is tried FIRST -- ours is the library that
+    # contains the team's shared folder, whatever it happens to be called.
+    #
+    # This used to run only as a tie-break among names already matching the
+    # "<Org> - <Site>" shape below, which made it useless in the case it was
+    # written for. OneDrive only uses that shape when a library is added with
+    # "Sync"; "Add shortcut to My files" names the folder after the library
+    # itself, with no " - " anywhere -- so the firm's own library was invisible
+    # to the shape filter and could never reach the content check. Found
+    # 2026-08-13 after a teammate whose machine reported two synced libraries,
+    # neither of which was ours.
+    with_shared = [d for d in possible if (d / SHARED_SUBFOLDER).is_dir()]
+    if len(with_shared) == 1:
+        return with_shared[0]
+
+    candidates = [d for d in possible if " - " in d.name]
 
     if not candidates:
         CORPUS_UNRESOLVED_REASON = "none_syncing"
@@ -219,17 +239,9 @@ def _find_corpus_subfolder(onedrive_root: Path) -> Path | None:
         return candidates[0]
 
     if len(candidates) > 1:
-        # More than one library synced. Rather than give up, identify ours by
-        # what is INSIDE it: the team's own shared folder lives in the firm's
-        # library and syncs with it, so the library containing SHARED_SUBFOLDER
-        # is the right one. Content, not name -- which means this keeps working
-        # whatever the library is called on a given machine, and still puts no
-        # real folder name in this (public) file.
-        with_shared = [d for d in candidates if (d / SHARED_SUBFOLDER).is_dir()]
-        if len(with_shared) == 1:
-            return with_shared[0]
-
-        # Last resort: a name fragment the firm can set once in
+        # More than one library synced and the content check above did not
+        # single one out (either none holds the shared folder, or oddly several
+        # do). Last resort: a name fragment the firm can set once in
         # confidentials/.env (gitignored), e.g. VAULTER_CORPUS_HINT=<site>.
         # Kept out of the code and out of .env.template, both of which are
         # public; a hint here is opt-in and never travels with the source.
