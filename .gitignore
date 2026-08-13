@@ -84,6 +84,10 @@ system/data/pending_settings/*
 # ── Portfolio comparison index (real deal names, prices, dates -- ──
 # rebuildable from the team's own property summaries, never checked in)
 system/data/portfolio_comparison_index.json
+# ...and any backup of it. A .bak sits beside the real index and is NOT
+# covered by the line above -- `git add -A` would have staged the whole
+# portfolio. Caught 2026-08-12 by checking what add would stage.
+system/data/*.bak
 
 # ── Real cost/pricing figures behind fit_screen.py's ASSUMPTIONS -- ──
 # the firm's real $/lot and $/acre figures; fit_screen.py loads this at

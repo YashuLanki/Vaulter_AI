@@ -305,6 +305,37 @@ def main() -> int:
     except Exception as e:
         check("summary currency checks ran", False, f"{type(e).__name__}: {e}")
 
+    # ── 4a. Exit figures are recorded honestly ────────────────────
+    # Added 2026-08-12. These make outcome QUALITY visible for the first time,
+    # and the danger is presenting a gross price comparison as though it were a
+    # return: Banning sold at 1.76x over ten years, which before entitlement
+    # spend, carry and taxes may well not be a profit at all. If these are ever
+    # to inform ranking, that distinction must survive.
+    print("\n4a. Exit figures are recorded honestly")
+    try:
+        _sold = [r for r in real_index if r.get("outcome_status") == "sold"]
+        check("every sold deal now carries an exit year and hold",
+              all(r.get("exit_year") and r.get("hold_years") for r in _sold),
+              f"{len(_sold)} sold records")
+        check("the multiple is named as a GROSS PRICE multiple, never a return",
+              all("gross_price_multiple" in r for r in _sold)
+              and not any("return" in k or "moic" in k.lower() for r in _sold for k in r),
+              "a gross price comparison is not a realised return")
+        # A deal whose entry basis is unknown must not get a fabricated multiple.
+        _no_entry = [r for r in _sold
+                     if not isinstance(r.get("entry_price_usd"), (int, float))]
+        check("a deal with no known entry basis gets NO multiple",
+              all(r.get("gross_price_multiple") is None for r in _no_entry),
+              f"{len(_no_entry)} record(s) with an unclear entry price")
+        # The finding that matters: selling is not the same as succeeding.
+        _mult = {r["property_name"]: r.get("gross_price_multiple") for r in _sold
+                 if r.get("gross_price_multiple")}
+        check("the record still shows a sold deal can be a weak outcome",
+              any(m < 2.0 for m in _mult.values()),
+              "at least one exit is under 2x gross -- 'sold' must never be read as 'good'")
+    except Exception as e:
+        check("exit-figure checks ran", False, f"{type(e).__name__}: {e}")
+
     # ── 4b. Updates only ever go forwards ─────────────────────────
     # Git short hashes carry no order, so the update check could only ask "is
     # this different?" and would happily offer an OLDER release -- measured

@@ -830,6 +830,29 @@ read in a conversation, exactly like `get_passed_on_deals`. The file's own openi
 direction, and for the same measured reason (the hard-filter incident that discarded 60 of 69
 real listings).
 
+**Exit figures were added to the comparison index 2026-08-12**, from each property's own
+settlement statements: `exit_price_usd`, `exit_year`, `hold_years`, `exit_form` and
+`gross_price_multiple`. The field is named **gross price multiple, never a return** —
+entitlement spend, carry and taxes are not deducted, and one property's own summary states that
+its actual re-entitlement costs across a 15-year hold were never established. A deal whose entry
+basis is genuinely unknown (one is a carve-out of a legacy position) gets **no** multiple rather
+than a fabricated one. `check_portfolio_comparison.py` §4a asserts all of that.
+
+**What the numbers show, and it is why they were worth extracting.** The three exits with a known
+basis came in at roughly **2.9x over 2 years**, **13x over 15 years**, and **1.76x over 10
+years**. That last is about **6% a year gross, before any cost is deducted at all** — after
+entitlement spend and carry it may not be a profit in real terms. **So a completed sale is
+evidence that an exit was achievable, not evidence that the deal worked.**
+
+That distinction is the answer to "should sold deals boost the ranking?" — asked directly
+2026-08-12. Boosting "resembles a sold deal" would promote listings that look like the *weakest*
+outcome in the record, because the record cannot currently tell a good exit from a bail-out. The
+best result here came from selling early and abandoning the original plan. Note also the sample
+asymmetry: **4 completed exits against 28 properties still held 10+ years**, five of them bought
+1999–2003. The better-evidenced signal is the inverse — a listing resembling something the firm
+has been stuck in — and that too belongs in `Cautions`, not the score. (Real names and figures:
+`docs/EVIDENCE_APPENDIX.md`, gitignored.)
+
 Three findings from it worth knowing, because they are the firm's own record rather than
 anyone's assumption: **every one of the four exited by selling the entitled position — none was
 built out**, confirming the stated model four times over; **three of four had a distressed or
