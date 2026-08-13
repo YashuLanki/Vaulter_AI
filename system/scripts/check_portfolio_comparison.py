@@ -154,11 +154,22 @@ def main() -> int:
                   {"property_name": "X", "plan_type": "subdivide",
                    "outcome_status": "still-held", "notes": "n",
                    "plan_type_source": "unrecorded"}))
-        check("a document-verified match is flagged as verified",
-              "[verified]" in pc.summarize_match(
+        # "[verified]" was removed 2026-08-12: after the provenance re-read it
+        # appeared on 216 of 216 rows of a real export, so it distinguished
+        # nothing and its explanatory note in the report read as confusing.
+        # Only the weak end is marked now.
+        _doc_line = pc.summarize_match(
+            {"property_name": "X", "plan_type": "subdivide",
+             "outcome_status": "still-held", "notes": "n",
+             "plan_type_source": "documents"})
+        check("a document-verified match carries NO tag at all",
+              "[verified]" not in _doc_line and "[unconfirmed]" not in _doc_line,
+              f"got: {_doc_line}")
+        check("no match of any provenance re-introduces a [verified] tag",
+              not any("[verified]" in pc.summarize_match(
                   {"property_name": "X", "plan_type": "subdivide",
                    "outcome_status": "still-held", "notes": "n",
-                   "plan_type_source": "documents"}))
+                   "plan_type_source": s}) for s in ("documents", "summary", "unrecorded", "")))
         check("a summary-derived match carries neither tag",
               not any(t in pc.summarize_match(
                   {"property_name": "X", "plan_type": "subdivide",

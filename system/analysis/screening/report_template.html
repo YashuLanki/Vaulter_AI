@@ -851,11 +851,7 @@ function detailHTML(x){
     ${x.distress && x.distress!=="none evident" ? `<h4 class="d-sub">Seller signals</h4><p class="d-p">${esc(x.distress)}</p>`:""}
     ${x.cautions ? `<h4 class="d-sub">Worth checking</h4><p class="d-p">${esc(x.cautions)}</p>`:""}
     ${x.history ? `<h4 class="d-sub">Similar to the firm's own history</h4>
-                    <p class="d-p">${esc(x.history)} — characteristics only, not a price comparison.${
-                      /\[verified\]/.test(x.history)
-                        ? ` <em>“[verified]” means that deal's approach was independently re-read from the original
-                            documents, rather than taken from its own written summary.</em>`
-                        : ""}</p>`:""}`;
+                    <p class="d-p">${esc(x.history)} — characteristics only, not a price comparison.</p>`:""}`;
 }
 function openDetail(rank, from){
   const x = L.find(v=>v.rank===rank); if(!x) return;

@@ -412,14 +412,20 @@ def summarize_match(m: dict, note_chars: int = 95) -> str:
     bits = [b for b in (plan, outcome) if b]
     head = f"{name} — {', '.join(bits)}" if bits else name
 
-    # Say how much to trust the approach, every time. "[verified]" and
-    # "[unconfirmed]" are the two ends worth flagging; a plain summary-derived
-    # classification is the unremarkable middle and gets no tag, so the marks
-    # stay meaningful instead of decorating every line.
+    # Flag ONLY the weak end. "[verified]" was dropped 2026-08-12 because it
+    # had stopped carrying information: after the full provenance re-read, 48
+    # of 49 classifications rest on documents, so the tag appeared on 216 of
+    # 216 rows of a real export. A mark that never varies distinguishes
+    # nothing, and its own explanatory note in the report was reported as
+    # confusing -- reasonably, since it was explaining a label that was always
+    # present. Same discipline as check_system_health: say something when
+    # something is wrong, and stay quiet when it is not.
+    #
+    # "[unconfirmed]" stays, and matters more now that it is the only mark:
+    # an unrecorded classification measured wrong 2 times in 3 against 1 in 8
+    # for cited ones, so it is a real warning rather than decoration.
     source = (m.get("plan_type_source") or "").strip().lower()
-    if verified or source == "documents":
-        head += " [verified]"
-    elif source == "unrecorded" and plan:
+    if not verified and source == "unrecorded" and plan:
         head += " [unconfirmed]"
     return f"{head}: {note}" if note else head
 
