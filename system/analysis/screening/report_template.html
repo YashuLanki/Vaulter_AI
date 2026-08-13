@@ -343,6 +343,11 @@ footer{margin-top:60px;padding-top:18px;border-top:1px solid var(--rule);
       <div class="fig"><div class="v" id="f-county"></div><div class="l" id="f-county-l"></div></div>
     </div>
 
+    <!-- Stated separately from the acquisition figure above, and deliberately
+         so: this is what a project costs BY EXIT, not at closing. Merged into
+         one comparison it flattered every shortlist. -->
+    <p id="f-cap-n" hidden style="font-size:13px;color:var(--ink-3);margin:-6px 0 18px;max-width:70ch"></p>
+
     <div id="top3"></div>
 
     <!-- The multiple on its own reads innocently. The firm's own published
@@ -697,20 +702,35 @@ const sized  = top3.filter(x=>x.acres!=null).length;
 
 document.getElementById("f-cap").textContent = priced
   ? "$" + (DATA.capitalTop3/1e6).toFixed(1) + "M" : "—";
-// A RANGE, not a point: two of the firm's own sources give different averages
-// and neither has been ratified, so the report shows the spread rather than
-// silently picking a side. Still null-safe -- a public clone with no local
-// cost data has neither figure and simply says less.
-const avgLo = DATA.assumptions.avg_asset_value_millions_low;
-const avgHi = DATA.assumptions.avg_asset_value_millions_high;
-const avgAsset = (avgLo!=null && avgHi!=null)
-  ? (avgLo === avgHi ? `$${avgLo}M` : `$${avgLo}–${avgHi}M`)
-  : null;
+// This figure is a total of ASKING PRICES, so the only honest thing to set it
+// against is what the firm pays AT CLOSING -- not what a project costs by the
+// time it exits. Until 2026-08-13 it was compared to average invested capital
+// (purchase plus years of entitlement and carry), which made every shortlist
+// read roughly four times cheaper against the firm than it really was, in the
+// most prominent number on the page. Same apples-to-oranges error the
+// large-ask caution carried, and fixed the same way.
+// Null-safe: a public clone or a teammate machine with no deal record has no
+// purchase figure and simply says less rather than guessing one.
+const buyAvg = DATA.assumptions.typical_purchase_millions;
+const buyN   = DATA.assumptions.typical_purchase_n;
 document.getElementById("f-cap-l").textContent =
-  priced>=3 ? (avgAsset!=null ? `to acquire all three, against a typical ${avgAsset} per asset`
-                               : "to acquire all three")
+  priced>=3 ? (buyAvg!=null
+                ? `to acquire all three, against a typical $${buyAvg}M the firm pays at purchase`
+                  + (buyN ? ` (${buyN} deals)` : "")
+                : "to acquire all three")
   : priced   ? `for the ${priced} of the top three that state an asking price`
              : "none of the top three states an asking price";
+
+// The by-exit figure, kept as its own sentence so it can never be mistaken for
+// a purchase price. An ask is not what a deal ends up costing.
+const invCap = DATA.assumptions.avg_invested_capital_millions;
+if (invCap != null) {
+  const n = document.getElementById("f-cap-n");
+  n.textContent = `An asking price is not the whole cost: the firm's own projects have `
+    + `run about $${invCap}M of invested capital each by the time they exit — purchase `
+    + `plus entitlement spend, carry and taxes across the hold.`;
+  n.hidden = false;
+}
 
 document.getElementById("f-acres").textContent =
   sized ? acres(top3.reduce((s,x)=>s+(x.acres||0),0)) : "—";

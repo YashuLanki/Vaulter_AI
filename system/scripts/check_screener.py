@@ -973,6 +973,49 @@ def main() -> int:
                   tx["Fit_Score"].equals(az["Fit_Score"]),
                   "the reference is context, never arithmetic")
 
+    # ---- 20. The headline card compares entry to entry, never entry to by-exit ----
+    # The report's biggest number is a total of ASKING PRICES. Setting it against
+    # average invested capital (purchase plus years of entitlement and carry) made
+    # every shortlist read several times cheaper against the firm than it was.
+    print("\n20. The report's headline figures compare like with like")
+    asm = base["assumptions"]
+    check("the withdrawn 'average asset value' range is gone from the report data",
+          not [k for k in asm if "avg_asset_value" in k],
+          "it was never a range -- the two figures measure different things")
+
+    buy = asm.get("typical_purchase_millions")
+    inv = asm.get("avg_invested_capital_millions")
+    if buy is None:
+        skip("the acquisition figure is set against a purchase price",
+             "no deal record on this machine to derive one from")
+    else:
+        check("the acquisition figure is set against a purchase price",
+              buy > 0 and asm.get("typical_purchase_n", 0) > 0,
+              f"derived from {asm.get('typical_purchase_n')} priced deals")
+        check("  ...and it is NOT the by-exit invested-capital figure",
+              inv is None or abs(buy - inv) > 1e-9,
+              "the exact confusion this section exists to prevent")
+        check("the purchase figure is derived, never stored in tracked code",
+              "typical_purchase_millions" not in
+              (PROJECT_ROOT / "analysis" / "screening" / "fit_screen.py").read_text(
+                  encoding="utf-8").split("def _purchase_assumptions")[0].split(
+                  '"typical_purchase_millions": None')[-1],
+              "a real figure in a public repo is a leak, not a default")
+
+    # A teammate machine has no cost file and no deal record, so BOTH figures
+    # arrive as null. The report must then simply say less -- never print a zero,
+    # which reads as a real measurement. Asserted against the template itself,
+    # because that is where the guard has to live.
+    tpl = (PROJECT_ROOT / "analysis" / "screening" / "report_template.html").read_text(
+        encoding="utf-8")
+    check("the report guards the purchase figure before printing it",
+          "buyAvg!=null" in tpl.replace(" ", ""))
+    check("the report guards the by-exit figure before printing it",
+          "invCap!=null" in tpl.replace(" ", ""))
+    check("the by-exit figure is its own sentence, not merged into the card label",
+          'id="f-cap-n"' in tpl and "invested capital" in tpl,
+          "merging them is what made every shortlist read cheap")
+
     passed = sum(1 for _, ok, _ in RESULTS if ok)
     print(f"\n{passed}/{len(RESULTS)} checks passed")
     return 0 if passed == len(RESULTS) else 1

@@ -140,17 +140,29 @@ ASSUMPTIONS = {
     "moic_target_low":  2.5,
     "moic_target_high": 3.0,
 
-    # The firm's own average asset value, used only as a reference point on an
-    # unusually large ask (see add_cautions) and in the report's headline
-    # figures. Real figure lives in the gitignored cost_assumptions.json.
-    # A RANGE, not a point, and deliberately so. Two of the firm's own sources
-    # disagree on the average capital per project and nobody has reconciled
-    # them (2026-08-11, pending a partner). Publishing one number would assert
-    # a reconciliation that has not happened -- the same reason the screener
-    # reports pricing confidence instead of a single confident figure.
-    "avg_asset_value_millions_low": _COST.get("avg_asset_value_millions_low"),
-    "avg_asset_value_millions_high": _COST.get("avg_asset_value_millions_high"),
-    "avg_asset_value_note": _COST.get("avg_asset_value_note"),
+    # What a project costs the firm BY THE TIME IT EXITS -- purchase plus
+    # entitlement spend, carry and taxes across the hold. From the firm's own
+    # corporate deck. Real figure lives in the gitignored cost_assumptions.json.
+    #
+    # This was published until 2026-08-13 as an "avg_asset_value" RANGE against
+    # a second, lower internal figure. That was wrong twice over. It was never a
+    # range -- the two numbers measure different things, and the lower one's
+    # measure was never established at all, so it is withdrawn pending a
+    # partner rather than shown with a dash between them. And the report's
+    # headline card compared a total of ASKING PRICES against it, which is
+    # entry against by-exit cost: the same apples-to-oranges error the
+    # large-ask caution had, in the most prominent number on the page. Compare
+    # an ask to `typical_purchase_millions` below; quote this one separately as
+    # what a deal ends up costing.
+    "avg_invested_capital_millions": _COST.get("avg_invested_capital_millions"),
+    "avg_invested_capital_note": _COST.get("avg_invested_capital_note"),
+
+    # What the firm actually pays AT CLOSING -- the like-for-like comparator for
+    # an asking price. Derived at run time from the deal record rather than
+    # stored, so it never goes stale and never needs a real figure in a tracked
+    # file. Filled in by screen(); None on a machine with no comparison index.
+    "typical_purchase_millions": None,
+    "typical_purchase_n": None,
 
     # Residential lot yield, lots per acre. MEASURED across five deals, and the
     # single largest correction in this file: the previous value of 8.0 was
@@ -1256,6 +1268,37 @@ def add_cautions(df: pd.DataFrame) -> pd.DataFrame:
 _MIN_STATE_SAMPLE = 5
 
 
+def _firm_purchase_stats() -> dict | None:
+    """
+    Median / count / largest of what the firm has actually paid at closing.
+
+    Read from the gitignored comparison index at run time, so no real figure
+    is ever stored in tracked code. Returns None when the index is missing --
+    a public clone or a teammate machine simply says less, never guesses.
+    """
+    import statistics
+    try:
+        from analysis.screening.portfolio_comparison import load_index
+        idx = load_index()
+    except Exception:
+        return None
+    priced = sorted(r["entry_price_usd"] for r in (idx or [])
+                    if isinstance(r.get("entry_price_usd"), (int, float))
+                    and r["entry_price_usd"] > 0)
+    if not priced:
+        return None
+    return {"median": statistics.median(priced), "n": len(priced), "max": max(priced)}
+
+
+def _purchase_assumptions() -> dict:
+    """The two derived purchase figures the report's headline card needs."""
+    s = _firm_purchase_stats()
+    if not s:
+        return {}
+    return {"typical_purchase_millions": round(s["median"] / 1e6, 2),
+            "typical_purchase_n": s["n"]}
+
+
 def _purchase_reference(state: str) -> str:
     """
     One sentence on what the firm has actually paid in THIS state, or an
@@ -1765,7 +1808,7 @@ def screen(source_path: Path, moic: float = None, write_workbook: bool = True) -
         "evidence_coverage": _coverage(df, holdings),
         "column_sources": column_sources,
         "weights_used": weights,
-        "assumptions": dict(ASSUMPTIONS),
+        "assumptions": {**ASSUMPTIONS, **_purchase_assumptions()},
         "exit_lot_comps": list(EXIT_LOT_COMPS),
         "dataframe": view,
     }
