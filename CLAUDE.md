@@ -568,6 +568,22 @@ Four rules that must survive any edit:
   came from, and that two different markets never receive the same sentence. The static
   `large_ask_reference_text` in `cost_assumptions.json` survives purely as the fallback for a
   machine with no comparison index.
+- **Never set an asking price against a by-exit cost (2026-08-13).** The report's headline card
+  shows what the top three listings would cost to buy, and set it against "a typical $3.5–5M per
+  asset". That was two separate errors in the page's most prominent number. It was **never a
+  range** — the two figures measure different things: the corporate deck's *average invested
+  capital per project* (purchase **plus** entitlement spend, carry and taxes across the hold) and
+  a second internal figure whose measure was never established. Printing them with a dash between
+  implied a careful estimate where there was an open question. And an acquisition total is an
+  **entry** figure, so comparing it to a **by-exit** figure made every shortlist read roughly four
+  times cheaper against the firm than it was. `typical_purchase_millions` /
+  `typical_purchase_n` are now **derived at run time** from the comparison index (so nothing real
+  is stored in tracked code and the figure can't go stale), `avg_invested_capital_millions` is
+  quoted as its own separate sentence, and the unexplained lower figure is withdrawn into
+  `cost_assumptions.json` under `withdrawn_avg_asset_value_*` so the question survives for a
+  partner. `check_screener.py` §20 asserts the two kinds of figure stay apart and that a machine
+  with no deal record says less rather than printing a zero. Same family as the market-aware
+  caution above: **before comparing two numbers, confirm they measure the same thing.**
 - **Say what the portfolio can't tell you.** Every run returns `evidence_coverage` per state.
   Arizona is fully evidenced; California partial; everywhere else has none. An unevidenced
   market still ranks normally and says so — marking it down would rank the firm's own data
