@@ -103,6 +103,25 @@ def _should_skip(path: Path, rel: Path) -> bool:
     return False
 
 
+def _detected_library_name() -> str | None:
+    """
+    The folder name of the firm's document library, as seen on THIS machine.
+
+    Read at build time rather than stored anywhere: the name is real tenant
+    detail and this repo is public, so it must never appear in tracked source.
+    Returns None if this machine cannot resolve it either, in which case the
+    package simply does not name one and the recipient falls back to detection.
+    """
+    try:
+        sys.path.insert(0, str(PROJECT_ROOT))
+        import config
+        if config.CORPUS_DIR is None:
+            return None
+        return Path(config.CORPUS_DIR).name
+    except Exception:
+        return None
+
+
 def _copy_system_files(dest_system: Path) -> int:
     """Everything the program runs on, minus the exclusions. Returns file count."""
     copied = 0
@@ -177,18 +196,59 @@ def _copy_claude_tooling(package_root: Path) -> int:
     return copied
 
 
+# The only settings a packaged .env may contain. Anything else means a real
+# .env has been picked up by mistake, and the package must be refused.
+_PACKAGEABLE_ENV_KEYS = {"VAULTER_CORPUS_SUBFOLDER", "VAULTER_CORPUS_HINT"}
+
+
+def _env_is_packageable(path: Path) -> bool:
+    """
+    True only for the tiny .env this script writes itself.
+
+    A .env normally must never travel -- that is why the name is on the
+    forbidden list. Since 2026-08-13 the package deliberately carries one, so
+    the recipient does not have to be told which SharePoint library to use.
+    That exception is checked by CONTENT, not by trusting that we wrote it:
+    every setting must be one of a short allowlist, so a real .env that got
+    copied in by accident still fails the check and stops the build. Fails
+    closed -- an unreadable file is refused, never waved through.
+    """
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return False
+    for line in lines:
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        key = line.split("=", 1)[0].strip()
+        if key not in _PACKAGEABLE_ENV_KEYS:
+            return False
+    return True
+
+
 def _verify_no_secrets(package_root: Path) -> list:
     """Walk the real built output and report anything that must not ship."""
     offenders = []
     for path in package_root.rglob("*"):
-        if path.is_file() and path.name in FORBIDDEN_IN_PACKAGE:
-            offenders.append(str(path.relative_to(package_root)))
+        if not path.is_file() or path.name not in FORBIDDEN_IN_PACKAGE:
+            continue
+        if path.name == ".env" and _env_is_packageable(path):
+            continue  # the library-name file this script writes; contents checked
+        offenders.append(str(path.relative_to(package_root)))
     return offenders
 
 
 def main() -> int:
     print("Vaulter AI -- building the handoff folder")
     print(f"Source: {PROJECT_ROOT}\n")
+
+    # Default ON, because the whole point of the package is that the recipient
+    # does nothing. Pass --no-library to build one that names no library --
+    # appropriate if the zip is going somewhere the firm's folder name should
+    # not travel. This is deliberately loud in the output either way, so it is
+    # never a silent property of the package.
+    include_library = "--no-library" not in sys.argv
 
     package_root = OUTPUT_ROOT / PACKAGE_NAME
     if package_root.exists():
@@ -212,6 +272,42 @@ def main() -> int:
     (dest_system / "confidentials").mkdir(parents=True, exist_ok=True)
     shutil.copy2(template, dest_system / "confidentials" / ".env.template")
     print("  system/confidentials/.env.template")
+
+    # 2b. Tell the package which document library to use, so the recipient never
+    #     has to work it out. Read from THIS machine at build time -- never
+    #     hardcoded, so the name stays out of this public repo, and never
+    #     committed, since data/ is excluded from git.
+    #
+    #     Why this is worth doing: detection is good but not omniscient. An
+    #     organisation has several SharePoint libraries, and a teammate syncing
+    #     the site's default "Documents" one but not the firm's document library
+    #     leaves nothing to detect -- measured on two real machines, 2026-08-13.
+    #     Naming it outright removes the guesswork and the round trip.
+    #
+    #     Setup only creates .env when it is absent, so this survives install.
+    #     Both settings are written: the exact folder name wins outright, and
+    #     the distinctive word is a fallback in case a colleague's copy is named
+    #     slightly differently (confirmed 2026-07-29 that capitalisation varies).
+    if include_library:
+        library = _detected_library_name()
+        if library:
+            hint = library.split(" - ")[-1].strip() or library
+            (dest_system / "confidentials" / ".env").write_text(
+                "# Written by build_handoff.py from the machine that built this\n"
+                "# package, so setup does not have to guess which SharePoint\n"
+                "# library holds the firm's documents.\n"
+                f"VAULTER_CORPUS_SUBFOLDER={library}\n"
+                f"VAULTER_CORPUS_HINT={hint}\n",
+                encoding="utf-8",
+            )
+            print("  system/confidentials/.env  (document library pre-set for the recipient)")
+        else:
+            print("  ! Could not read this machine's document library, so the package "
+                  "does not name one.")
+            print("    The recipient's setup will fall back to detecting it.")
+    else:
+        print("  system/confidentials/.env  SKIPPED (--no-library) -- the recipient's "
+              "setup will detect the library itself.")
 
     # 3. The only folder the recipient ever opens. Windows-only for now: the
     # team is on Windows, and a second file (the Mac .command launcher) just
