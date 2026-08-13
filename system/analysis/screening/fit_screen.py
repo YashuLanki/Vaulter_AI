@@ -1230,14 +1230,73 @@ def add_cautions(df: pd.DataFrame) -> pd.DataFrame:
         if pd.notna(st) and st > 0:
             c.append(f"{int(st)} structure(s) on site — verify if income or demo cost")
         large_ask_threshold = _COST.get("large_ask_threshold")
-        large_ask_text = _COST.get("large_ask_reference_text")
-        if large_ask_threshold and large_ask_text and pd.notna(pr) and pr > large_ask_threshold:
-            c.append(f"${pr/1e6:.0f}M ask — {large_ask_text}")
+        if large_ask_threshold and pd.notna(pr) and pr > large_ask_threshold:
+            # Reference the market the listing is actually IN, not a portfolio
+            # average dominated by the states the firm happens to own most in.
+            ref = _purchase_reference(sta) or _COST.get("large_ask_reference_text", "")
+            c.append(f"${pr/1e6:.0f}M ask — well above {ref}" if ref
+                     else f"${pr/1e6:.0f}M ask — well above the firm's typical deal size")
         past = passed_on_caution(sta, co)
         if past:
             c.append(past)
         out.append("; ".join(c) if c else "")
     return _attach(df, {"Cautions": out})
+
+
+# The firm's own purchase history, per market, for the large-ask caution.
+# A single global figure is wrong for the same reason a single global price
+# threshold is wrong (see normalise_columns' own note): the portfolio is
+# concentrated in two states, so comparing a listing in a third against it
+# measures where the firm has operated, not what the listing is worth. Measured
+# 2026-08-12: two states carry enough priced deals to quote a median, three
+# carry three or fewer, and two of those have exactly ONE -- a "median" drawn
+# from a single purchase is nonsense dressed as evidence. Real per-state figures
+# live in docs/EVIDENCE_APPENDIX.md; the numbers themselves are read at runtime
+# from the gitignored comparison index and never appear in this file.
+_MIN_STATE_SAMPLE = 5
+
+
+def _purchase_reference(state: str) -> str:
+    """
+    One sentence on what the firm has actually paid in THIS state, or an
+    honest statement that it has no meaningful history there.
+
+    Never invents a market figure. Below _MIN_STATE_SAMPLE the state's own
+    number is not quoted at all -- the firm-wide figure is given instead, and
+    labelled as such, so a reader is never handed an n=1 "typical".
+    """
+    import statistics
+    try:
+        from analysis.screening.portfolio_comparison import load_index
+        idx = load_index()
+    except Exception:
+        return ""
+    if not idx:
+        return ""
+
+    def priced(rows):
+        return sorted(r["entry_price_usd"] for r in rows
+                      if isinstance(r.get("entry_price_usd"), (int, float))
+                      and r["entry_price_usd"] > 0)
+
+    st = (state or "").strip().upper()
+    here = priced([r for r in idx if (r.get("state") or "").upper() == st]) if st else []
+    everywhere = priced(idx)
+    if not everywhere:
+        return ""
+
+    if len(here) >= _MIN_STATE_SAMPLE:
+        return (f"anything the firm has bought in {st}, where its median purchase is "
+                f"${statistics.median(here)/1e6:.1f}M across {len(here)} deals "
+                f"(largest ${max(here)/1e6:.1f}M)")
+    firm = (f"anything the firm has bought anywhere — median ${statistics.median(everywhere)/1e6:.1f}M "
+            f"across {len(everywhere)} deals, largest ${max(everywhere)/1e6:.1f}M")
+    if st and here:
+        return (f"{firm}. Only {len(here)} of those {'is' if len(here) == 1 else 'are'} "
+                f"in {st}, too few to quote a {st} figure of its own")
+    if st:
+        return f"{firm}. The firm has no recorded purchase history in {st} at all"
+    return firm
 
 
 def add_portfolio_comparison(df: pd.DataFrame) -> pd.DataFrame:

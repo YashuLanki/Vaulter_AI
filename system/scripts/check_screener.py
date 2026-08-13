@@ -909,6 +909,70 @@ def main() -> int:
     else:
         skip("dossiers never move the score", "no dossiers on this machine to test with")
 
+    # ---- 19. The large-ask reference is measured against the listing's own market ----
+    print("\n19. A big ask is measured against the market it is in")
+    try:
+        from analysis.screening.portfolio_comparison import load_index as _li
+        _idx = _li()
+    except Exception:
+        _idx = None
+    if not _idx:
+        skip("the large-ask caution names the listing's own state",
+             "no portfolio comparison index on this machine")
+    else:
+        import statistics as _st
+
+        def _priced(st_code):
+            return [r["entry_price_usd"] for r in _idx
+                    if isinstance(r.get("entry_price_usd"), (int, float))
+                    and r["entry_price_usd"] > 0
+                    and (not st_code or (r.get("state") or "").upper() == st_code)]
+
+        well_evidenced = [s for s in {(r.get("state") or "").upper() for r in _idx}
+                          if s and len(_priced(s)) >= fs._MIN_STATE_SAMPLE]
+        thin = [s for s in {(r.get("state") or "").upper() for r in _idx}
+                if s and 0 < len(_priced(s)) < fs._MIN_STATE_SAMPLE]
+
+        check("a state the firm has real history in is named by name",
+              all(s in fs._purchase_reference(s) for s in well_evidenced),
+              f"states with enough deals to quote: {sorted(well_evidenced) or 'none'}")
+
+        # The trap this exists for: CO and NM have exactly ONE priced deal each.
+        # A "median" from one purchase is a number pretending to be evidence.
+        check("a state with too few deals is never given its own median",
+              all("too few" in fs._purchase_reference(s) for s in thin),
+              f"thin states: {sorted(thin) or 'none'}")
+        check("  ...and says so out loud rather than staying silent",
+              all(fs._purchase_reference(s).strip() for s in thin))
+        check("a state the firm has never bought in says exactly that",
+              "no recorded purchase history in ZZ" in fs._purchase_reference("ZZ"))
+
+        firm_med = _st.median(_priced(None))
+        check("the fallback quotes the whole-portfolio figure, not a state one",
+              f"${firm_med/1e6:.1f}M" in fs._purchase_reference("ZZ"))
+
+        # Two different markets must not receive the same sentence.
+        if len(well_evidenced) >= 2:
+            a, b = sorted(well_evidenced)[:2]
+            check("two different markets get two different references",
+                  fs._purchase_reference(a) != fs._purchase_reference(b),
+                  f"{a} vs {b} -- a global figure would make these identical")
+
+        # Same rule as every other caution: informational, never a score input.
+        big = src.copy()
+        pcol = next((c for c in ("For Sale Price", "Sale Price", "Price") if c in big.columns), None)
+        if pcol:
+            big[pcol] = 99_000_000
+            az = _run(big, full, tmp, "bigask_az")["dataframe"]
+            other = big.copy()
+            for sc in ("State", "State Name"):
+                if sc in other.columns:
+                    other[sc] = "TX"
+            tx = _run(other, full, tmp, "bigask_tx")["dataframe"]
+            check("Fit_Score is identical whichever market the reference came from",
+                  tx["Fit_Score"].equals(az["Fit_Score"]),
+                  "the reference is context, never arithmetic")
+
     passed = sum(1 for _, ok, _ in RESULTS if ok)
     print(f"\n{passed}/{len(RESULTS)} checks passed")
     return 0 if passed == len(RESULTS) else 1

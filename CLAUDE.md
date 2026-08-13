@@ -553,6 +553,21 @@ Four rules that must survive any edit:
   per-acre basis but **only in Pinal County**, and the firm sells entitled rather than improved
   land, so it applies only where the exit comp is improved. Quoted as context on wide-headroom
   rows. Applying a Pinal figure to a Texas listing would be inventing again.
+- **The "this ask is huge" caution is measured against the listing's own market
+  (`_purchase_reference`, 2026-08-13).** It used to quote one whole-portfolio figure at every
+  listing, which is the same mistake `normalise_columns` and the peer-group logic already avoid:
+  the portfolio is AZ/CA-heavy, so a global median tells a Texas listing where the firm has
+  *operated*, not what a big ask means there. It now quotes the firm's own median purchase **in
+  that state** — and only where there are at least `_MIN_STATE_SAMPLE` (5) priced deals to build
+  it from. Below that it quotes the firm-wide figure, labels it as firm-wide, and says outright
+  how thin the local record is. This threshold is not decoration: as of this writing Colorado and
+  New Mexico have **exactly one** priced deal each, and a "median" drawn from a single purchase
+  is a number pretending to be evidence — the same failure `_newer_readable_docs` avoids by
+  separating "couldn't check" from "nothing there". Informational only, like every other caution:
+  `check_screener.py` §19 asserts `Fit_Score` is byte-identical whichever market the reference
+  came from, and that two different markets never receive the same sentence. The static
+  `large_ask_reference_text` in `cost_assumptions.json` survives purely as the fallback for a
+  machine with no comparison index.
 - **Say what the portfolio can't tell you.** Every run returns `evidence_coverage` per state.
   Arizona is fully evidenced; California partial; everywhere else has none. An unevidenced
   market still ranks normally and says so — marking it down would rank the firm's own data
