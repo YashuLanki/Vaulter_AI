@@ -666,6 +666,86 @@ def _claude_desktop_config_path() -> Path | None:
         return Path.home() / "Library" / "Application Support" / "Claude" / "claude_desktop_config.json"
 
 
+def _find_claude_desktop() -> Path | None:
+    """
+    Where Claude Desktop is installed, or None if it genuinely is not.
+
+    THREE independent ways, because one is not enough. Checking a list of known
+    install folders is the obvious approach and the one that failed on a real
+    teammate's machine 2026-08-13: she had Claude Desktop installed, and setup
+    still told her it had never been opened, because it was not in any folder
+    on the list. A path list can only recognise the installs someone already
+    thought of.
+
+    So: the known folders first (fastest), then the Windows uninstall registry,
+    which records wherever an installer actually put it, then a Start Menu
+    shortcut, which exists no matter where the program lives. Any one of them
+    is proof enough, and the caller only needs a truthy answer.
+
+    Never raises. An unreadable registry or missing Start Menu just falls
+    through to the next check, and finding nothing is a normal answer.
+    """
+    for candidate in (
+        Path(os.environ.get("LOCALAPPDATA", "")) / "AnthropicClaude",
+        Path(os.environ.get("LOCALAPPDATA", "")) / "Programs" / "Claude",
+        Path(os.environ.get("PROGRAMFILES", "")) / "Claude",
+        Path(os.environ.get("PROGRAMFILES(X86)", "")) / "Claude",
+    ):
+        try:
+            if candidate.exists():
+                return candidate
+        except OSError:
+            pass
+
+    if sys.platform != "win32":
+        return None
+
+    try:
+        import winreg
+        hives = (
+            (winreg.HKEY_CURRENT_USER,
+             r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall"),
+            (winreg.HKEY_LOCAL_MACHINE,
+             r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall"),
+            (winreg.HKEY_LOCAL_MACHINE,
+             r"SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall"),
+        )
+        for hive, path in hives:
+            try:
+                with winreg.OpenKey(hive, path) as root:
+                    for i in range(winreg.QueryInfoKey(root)[0]):
+                        try:
+                            with winreg.OpenKey(root, winreg.EnumKey(root, i)) as sub:
+                                name = str(winreg.QueryValueEx(sub, "DisplayName")[0])
+                                if "claude" not in name.lower():
+                                    continue
+                                try:
+                                    loc = str(winreg.QueryValueEx(sub, "InstallLocation")[0])
+                                except OSError:
+                                    loc = ""
+                                # An entry with no recorded location still proves
+                                # it is installed.
+                                return Path(loc) if loc else Path(name)
+                        except OSError:
+                            continue
+            except OSError:
+                continue
+    except Exception:
+        pass
+
+    for menu in (os.environ.get("APPDATA", ""), os.environ.get("PROGRAMDATA", "")):
+        if not menu:
+            continue
+        try:
+            programs = Path(menu) / "Microsoft" / "Windows" / "Start Menu" / "Programs"
+            if programs.is_dir() and any(programs.rglob("*Claude*.lnk")):
+                return programs
+        except OSError:
+            pass
+
+    return None
+
+
 def setup_claude_desktop() -> bool:
     _print_header("6. Claude Desktop connection")
     config_path = _claude_desktop_config_path()
@@ -680,14 +760,7 @@ def setup_claude_desktop() -> bool:
         # "never opened", and the old wording said "doesn't appear to be
         # installed", which is both wrong and maddening for someone looking at
         # the app on their own machine. Reported by a real teammate 2026-08-12.
-        installed_at = next(
-            (p for p in (
-                Path(os.environ.get("LOCALAPPDATA", "")) / "AnthropicClaude",
-                Path(os.environ.get("LOCALAPPDATA", "")) / "Programs" / "Claude",
-                Path(os.environ.get("PROGRAMFILES", "")) / "Claude",
-            ) if str(p) and p.exists()),
-            None,
-        )
+        installed_at = _find_claude_desktop()
         if installed_at:
             # It IS installed -- just never opened. Write the settings file
             # anyway: Claude Desktop reads it at startup, so doing it now means
