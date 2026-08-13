@@ -596,6 +596,18 @@ Four rules that must survive any edit:
   date unmoved). The screen prints implied IRR at both horizons so a 3x pro forma can't be
   read innocently.
 
+**`cost_assumptions.json` is read local-then-shared (2026-08-13)** — this machine's
+`system/data/`, then `config.ORG_SETTINGS_DIR` in the team folder — the same two-location pattern
+`portfolio.py::_portfolio_dirs()` uses, and for a measured reason. A fresh-install test found that
+a teammate with no cost record **scored 170 of 216 rows differently and shared only 3 of the top
+10** with the maintainer's machine: without measured entitlement costs the screen cannot work out
+what a deal must sell for, so it ranks on less information. Both runs were honest — every affected
+row says `entitlement cost not included — no record for this type` — but nobody comparing two
+shortlists would have guessed that was the reason they disagreed. Publishing the file once makes
+every instance agree (verified: 0 of 216 rows differ). Local still wins, so a deliberately-placed
+local file beats the team copy. `check_screener.py` §21 asserts the published copy exists and
+matches. The file itself stays gitignored — it is published to OneDrive, never to this public repo.
+
 Every tunable lives in `ASSUMPTIONS` at the top of the module, deliberately in one place so a
 partner can argue with it. Each now carries its source. **The four `WEIGHTS` are the only
 numbers left with no evidence at all** — two document searches found nothing in the corpus that

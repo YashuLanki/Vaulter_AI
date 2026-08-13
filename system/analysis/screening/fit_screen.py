@@ -91,21 +91,40 @@ log = logging.getLogger("vaulter.fit_screen")
 
 def _load_cost_assumptions() -> dict:
     """
-    Real $/lot and $/acre figures live in system/data/cost_assumptions.json,
-    gitignored -- this repo is public, and those are the firm's real numbers.
-    Never raises: a missing file is a normal, expected state (a fresh clone of
-    the public repo with no local firm data), not an error. Every ASSUMPTIONS
-    key sourced from here degrades to None when the file is absent, and every
-    use site below treats a None the same as "no record" -- declared, never
-    invented. See docs/PORTFOLIO_STANDARD.md (also gitignored) for how each
-    real figure was measured.
+    Real $/lot and $/acre figures live in cost_assumptions.json, gitignored --
+    this repo is public, and those are the firm's real numbers.
+
+    TWO LOCATIONS, LOCAL FIRST, exactly like portfolio.py's `_portfolio_dirs()`:
+    this machine's own system/data/, then the team's shared folder
+    (config.ORG_SETTINGS_DIR). The shared copy exists because without it a
+    teammate's screen and this machine's screen DISAGREE -- measured 2026-08-13
+    on the real 216-row export, 170 rows scored differently and only 3 of the
+    top 10 matched, because a machine with no cost record cannot work out what
+    a deal must sell for and ranks on less information. It said so honestly on
+    every row, but nobody comparing two shortlists would have guessed that was
+    why. Local wins so a deliberately-placed local file always beats the team
+    copy and an existing machine's behaviour is unchanged.
+
+    Never raises: a missing file in BOTH places is still a normal, expected
+    state (a fresh clone of the public repo with no firm data), not an error.
+    Every ASSUMPTIONS key sourced from here degrades to None when the file is
+    absent, and every use site below treats a None the same as "no record" --
+    declared, never invented. See docs/PORTFOLIO_STANDARD.md (also gitignored)
+    for how each real figure was measured.
     """
     import json
-    path = Path(__file__).resolve().parents[2] / "data" / "cost_assumptions.json"
+    candidates = [Path(__file__).resolve().parents[2] / "data" / "cost_assumptions.json"]
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return {}
+        import config
+        candidates.append(Path(config.ORG_SETTINGS_DIR) / "cost_assumptions.json")
+    except Exception:
+        pass  # no config (bare clone) -- the local path alone is still valid
+    for path in candidates:
+        try:
+            return json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+    return {}
 
 
 _COST = _load_cost_assumptions()

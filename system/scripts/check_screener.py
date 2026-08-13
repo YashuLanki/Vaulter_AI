@@ -1016,6 +1016,46 @@ def main() -> int:
           'id="f-cap-n"' in tpl and "invested capital" in tpl,
           "merging them is what made every shortlist read cheap")
 
+    # ---- 21. Cost figures reach the whole team, not just the maintainer ----
+    # Measured 2026-08-13 before this was wired: a teammate with no cost record
+    # scored 170 of 216 rows differently and shared only 3 of the top 10 with
+    # this machine. Both runs were honest; nobody comparing two shortlists would
+    # have guessed why they disagreed.
+    print("\n21. Every machine screens from the same cost record")
+    try:
+        import config as _cfg
+        shared_cost = Path(_cfg.ORG_SETTINGS_DIR) / "cost_assumptions.json"
+    except Exception:
+        shared_cost = None
+    local_cost = PROJECT_ROOT / "data" / "cost_assumptions.json"
+
+    if shared_cost is None:
+        skip("the cost record is published where the team can read it",
+             "no shared folder configured on this machine")
+    else:
+        check("the cost record is published where the team can read it",
+              shared_cost.is_file(),
+              f"{'found' if shared_cost.is_file() else 'MISSING'} in the team's settings folder")
+
+    if not local_cost.is_file():
+        # This IS the teammate case -- if it loaded, it came from the shared copy.
+        check("a machine with no local copy still gets the cost record",
+              bool(fs._COST),
+              "read from the team's shared folder")
+    elif shared_cost is not None and shared_cost.is_file():
+        import json as _json
+        try:
+            same = _json.loads(local_cost.read_text(encoding="utf-8")) == \
+                   _json.loads(shared_cost.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            same = False
+        check("the published copy matches this machine's own",
+              same,
+              "a stale published copy makes the team disagree without saying so")
+        check("local is preferred, so a deliberate local file still wins",
+              "data" in fs._load_cost_assumptions.__doc__ and
+              "LOCAL FIRST" in fs._load_cost_assumptions.__doc__)
+
     passed = sum(1 for _, ok, _ in RESULTS if ok)
     print(f"\n{passed}/{len(RESULTS)} checks passed")
     return 0 if passed == len(RESULTS) else 1
