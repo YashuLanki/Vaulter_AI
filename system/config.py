@@ -166,6 +166,63 @@ def _dir_has_content(d: Path) -> bool:
 CORPUS_UNRESOLVED_REASON = ""
 
 
+# The SharePoint address of the firm's document library, when the package that
+# built this install knew it. Written into confidentials/.env by
+# build_handoff.py; absent on a public clone, which is why nothing here
+# hardcodes it. It is the ONLY identifier of the library that is the same on
+# everybody's machine -- folder names vary, this does not.
+LIBRARY_URL = os.getenv("VAULTER_LIBRARY_URL", "").strip()
+
+
+def _library_from_onedrive_records() -> Path | None:
+    """
+    Ask OneDrive itself where it put the firm's document library.
+
+    Windows keeps a map of every synced library -- local folder to SharePoint
+    address -- under HKCU\Software\SyncEngines\Providers\OneDrive. Reading it
+    beats looking around the OneDrive folder for three reasons:
+
+      * it identifies the library by its SHAREPOINT ADDRESS, which is identical
+        on every machine in the firm, rather than by a local folder name, which
+        is not. Confirmed 2026-07-29 that colleagues see different spellings;
+        confirmed 2026-08-13 that "Add shortcut to My files" produces a name of
+        an entirely different shape;
+      * it finds a library mounted OUTSIDE the OneDrive account folder, which
+        nothing that walks that folder can ever do;
+      * it is OneDrive's own answer rather than an inference from what is
+        lying on disk.
+
+    Returns None if the address is unknown, the records are unreadable, or the
+    library simply is not synced here -- all normal, all handled by the
+    detection that follows. Never raises: this runs at import time.
+    """
+    if not LIBRARY_URL or sys.platform != "win32":
+        return None
+
+    def _norm(u: str) -> str:
+        return u.strip().rstrip("/").lower()
+
+    want = _norm(LIBRARY_URL)
+    try:
+        import winreg
+        key = r"Software\SyncEngines\Providers\OneDrive"
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, key) as root:
+            for i in range(winreg.QueryInfoKey(root)[0]):
+                try:
+                    with winreg.OpenKey(root, winreg.EnumKey(root, i)) as sub:
+                        url = _norm(str(winreg.QueryValueEx(sub, "UrlNamespace")[0]))
+                        if url != want:
+                            continue
+                        mount = Path(str(winreg.QueryValueEx(sub, "MountPoint")[0]))
+                        if mount.is_dir():
+                            return mount
+                except OSError:
+                    continue
+    except Exception:
+        pass
+    return None
+
+
 def _find_corpus_subfolder(onedrive_root: Path) -> Path | None:
     """
     The firm's synced SharePoint document library, found by shape not by name.
@@ -207,6 +264,14 @@ def _find_corpus_subfolder(onedrive_root: Path) -> Path | None:
         globals()["CORPUS_UNRESOLVED_REASON"] = "configured_missing"
 
     global CORPUS_UNRESOLVED_REASON
+
+    # Ask OneDrive first. This is the only check that identifies the library by
+    # something every machine in the firm agrees on, so it beats anything based
+    # on where a folder sits or what it is called.
+    from_records = _library_from_onedrive_records()
+    if from_records is not None:
+        return from_records
+
     try:
         # Everything OneDrive put at the account root that could plausibly be a
         # library -- i.e. not this system's own shared folder, and not one of
