@@ -264,32 +264,84 @@ echo     %TARGET%
 
 echo.
 
+REM ---------------------------------------------------------------------
+REM An older copy already installed is the single most common thing that
+REM stops someone getting a fix. Until 2026-08-13 setup REFUSED here and told
+REM them to delete the folder themselves -- which reads as "it's broken", and
+REM two teammates in a row ended up running an old version without knowing.
+REM
+REM So: upgrade in place instead of refusing. What is NEVER touched:
+REM   data\           their document list, logs, and anything they dropped in
+REM   .env            their own settings
+REM Both are things only that machine has, and both would be real loss.
+REM Everything else (the program itself) is replaced by this newer copy.
+REM
+REM Nothing is deleted at any point -- files are overwritten by newer ones,
+REM which is what robocopy does by default. There is no rmdir here on purpose.
+REM ---------------------------------------------------------------------
 if exist "%TARGET%" (
 
-    echo   Vaulter AI is already installed there.
+    REM `set /p VAR=<file` reads the FIRST line only, which is what VERSION's
+    REM first line is (the second is the build date). Simpler and far less
+    REM fragile than a for/f loop with a first-iteration guard.
+    set "OLDVER=unknown"
+    set "NEWVER=unknown"
+    if exist "%TARGET%\system\VERSION" set /p OLDVER=<"%TARGET%\system\VERSION"
+    if exist "%VAULTER_ROOT%\system\VERSION" set /p NEWVER=<"%VAULTER_ROOT%\system\VERSION"
 
+    setlocal enabledelayedexpansion
+    echo   An earlier copy of Vaulter AI is already installed there.
+    echo     installed now:  !OLDVER!
+    echo     this copy:      !NEWVER!
+    echo.
+    if "!OLDVER!"=="!NEWVER!" (
+        echo   They are the same version, so nothing needs replacing.
+        echo   Continuing with setup from the installed copy.
+    ) else (
+        echo   Replacing the program files with this newer copy.
+        echo   Your own settings and your document list are kept as they are.
+    )
+    endlocal
     echo.
 
-    echo   Nothing has been changed. To finish setting that copy up, open:
+    REM /XD data  -- never touch the document list, logs, or dropped files.
+    REM /XF .env   -- never overwrite their settings. Without this, robocopy
+    REM              replaced the whole file and a real setting written for
+    REM              that machine (which shared folder to use) was silently
+    REM              lost. Caught by testing the upgrade against a fake old
+    REM              install with settings in it, 2026-08-13 -- the comment
+    REM              above this block claimed .env was safe while it was not.
+    robocopy "%VAULTER_ROOT%" "%TARGET%" /E /XD "data" /XF ".env" /NFL /NDL /NJH /NJS /NP >nul
+    if errorlevel 8 (
+        echo   Could not replace the installed files. Close any open Vaulter AI
+        echo   windows and try again.
+        echo.
+        pause
+        exit /b 1
+    )
 
-    echo     %TARGET%\quick_start
+    REM Their .env wins -- it may name the document library or the shared
+    REM folder for this specific machine. But if this package knows the
+    REM library and their file does not, add that one line rather than
+    REM leaving them to be told it over Teams a third time.
+    if exist "%VAULTER_ROOT%\system\confidentials\.env" (
+        findstr /b /c:"VAULTER_CORPUS_SUBFOLDER" "%TARGET%\system\confidentials\.env" >nul 2>nul
+        if errorlevel 1 (
+            type "%VAULTER_ROOT%\system\confidentials\.env" >> "%TARGET%\system\confidentials\.env"
+            echo   Added this package's document-library setting to your settings file.
+        )
+    )
 
-    echo   and double-click "Setup Vaulter AI" there. It is safe to run more
-
-    echo   than once.
-
+    echo   Done. Continuing setup from:
+    echo     %TARGET%
     echo.
+    cd /d "%TARGET%\quick_start"
 
-    echo   If you meant to replace it with this newer copy, rename or delete
+set "VAULTER_ROOT=%TARGET%"
 
-    echo   the folder above first, then double-click Setup here again.
-
-    echo.
-
-    pause
-
-    exit /b 1
-
+:after_move
+    set "VAULTER_ROOT=%TARGET%"
+    goto :after_move
 )
 
 echo   This takes a few seconds. Please wait...
@@ -494,11 +546,11 @@ if defined PYCMD (
 
     echo.
 
-    REM "found", not "installed": this is reached both when an install worked
-    REM AND when both installers failed but a usable Python turned up anyway
-    REM (measured 2026-08-12 -- both failed, the py launcher was found, and
-    REM setup completed all eight steps). Saying "installed" there would be
-    REM the same unverified claim this whole block exists to stop making.
+    REM "found", not "installed": this is reached both when an install worked
+    REM AND when both installers failed but a usable Python turned up anyway
+    REM (measured 2026-08-12 -- both failed, the py launcher was found, and
+    REM setup completed all eight steps). Saying "installed" there would be
+    REM the same unverified claim this whole block exists to stop making.
     echo Python found. Continuing with Vaulter AI setup...
 
     goto :run
