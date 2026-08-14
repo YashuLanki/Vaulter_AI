@@ -103,6 +103,43 @@ def _should_skip(path: Path, rel: Path) -> bool:
     return False
 
 
+def _detected_library_url() -> str | None:
+    """
+    The SharePoint web address of the firm's document library, as recorded by
+    OneDrive on THIS machine.
+
+    Windows keeps a map of every synced library -- local folder to web address
+    -- under HKCU\Software\SyncEngines\Providers\OneDrive. Reading it means
+    the package can carry the one link that lets a teammate sync the library
+    themselves, instead of being talked through finding it.
+
+    Read at build time and never stored in this repo: the address contains the
+    firm's SharePoint tenant, which is real account detail and this repo is
+    public. Returns None on anything unexpected -- the package then simply
+    carries no link and setup explains in words instead.
+    """
+    try:
+        import winreg
+        corpus = _detected_library_name()
+        if not corpus:
+            return None
+        key = r"Software\SyncEngines\Providers\OneDrive"
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, key) as root:
+            for i in range(winreg.QueryInfoKey(root)[0]):
+                try:
+                    with winreg.OpenKey(root, winreg.EnumKey(root, i)) as sub:
+                        mount = str(winreg.QueryValueEx(sub, "MountPoint")[0])
+                        if Path(mount).name != corpus:
+                            continue
+                        url = str(winreg.QueryValueEx(sub, "UrlNamespace")[0]).strip()
+                        return url or None
+                except OSError:
+                    continue
+    except Exception:
+        pass
+    return None
+
+
 def _detected_library_name() -> str | None:
     """
     The folder name of the firm's document library, as seen on THIS machine.
@@ -198,7 +235,8 @@ def _copy_claude_tooling(package_root: Path) -> int:
 
 # The only settings a packaged .env may contain. Anything else means a real
 # .env has been picked up by mistake, and the package must be refused.
-_PACKAGEABLE_ENV_KEYS = {"VAULTER_CORPUS_SUBFOLDER", "VAULTER_CORPUS_HINT"}
+_PACKAGEABLE_ENV_KEYS = {"VAULTER_CORPUS_SUBFOLDER", "VAULTER_CORPUS_HINT",
+                          "VAULTER_LIBRARY_URL"}
 
 
 def _env_is_packageable(path: Path) -> bool:
@@ -292,15 +330,24 @@ def main() -> int:
         library = _detected_library_name()
         if library:
             hint = library.split(" - ")[-1].strip() or library
+            lines = [
+                "# Written by build_handoff.py from the machine that built this",
+                "# package, so setup does not have to guess which SharePoint",
+                "# library holds the firm's documents.",
+                f"VAULTER_CORPUS_SUBFOLDER={library}",
+                f"VAULTER_CORPUS_HINT={hint}",
+            ]
+            url = _detected_library_url()
+            if url:
+                lines += [
+                    "# Where that library lives on SharePoint, so setup can open it",
+                    "# for someone who has not synced it to their computer yet.",
+                    f"VAULTER_LIBRARY_URL={url}",
+                ]
             (dest_system / "confidentials" / ".env").write_text(
-                "# Written by build_handoff.py from the machine that built this\n"
-                "# package, so setup does not have to guess which SharePoint\n"
-                "# library holds the firm's documents.\n"
-                f"VAULTER_CORPUS_SUBFOLDER={library}\n"
-                f"VAULTER_CORPUS_HINT={hint}\n",
-                encoding="utf-8",
-            )
-            print("  system/confidentials/.env  (document library pre-set for the recipient)")
+                "\n".join(lines) + "\n", encoding="utf-8")
+            print("  system/confidentials/.env  (document library pre-set for the recipient"
+                  + (", with its SharePoint link" if url else "") + ")")
         else:
             print("  ! Could not read this machine's document library, so the package "
                   "does not name one.")

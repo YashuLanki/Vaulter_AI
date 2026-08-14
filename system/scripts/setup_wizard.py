@@ -554,6 +554,35 @@ def _hunt_for_shared_folder(onedrive_root: Path, corpus_dir) -> Path | None:
     return hits[0] if len(hits) == 1 else None
 
 
+def _offer_library_link() -> None:
+    """
+    Open the firm's document library in the browser so they can click Sync.
+
+    The package carries this address (see build_handoff.py) precisely so a
+    teammate is not talked through finding a SharePoint library over Teams --
+    which is where both real installs stalled. Prints the address as well as
+    opening it, because a browser that opens behind the setup window is easy
+    to miss, and because a printed link can be clicked later.
+
+    Silent and harmless if the package carries no address.
+    """
+    url = os.getenv("VAULTER_LIBRARY_URL", "").strip()
+    if not url:
+        return
+    print()
+    print("    The firm's document library is here:")
+    print(f"      {url}")
+    print("    Opening it in your browser now. On that page, click \"Sync\" in the")
+    print("    toolbar along the top and say yes to OneDrive. Let it finish, then")
+    print("    double-click \"Setup Vaulter AI\" again.")
+    try:
+        import webbrowser
+        webbrowser.open(url)
+    except Exception:
+        print("    (Couldn't open it automatically -- copy the address above into "
+              "your browser.)")
+
+
 def check_shared_folder() -> bool:
     """
     Make sure this machine can see the TEAM's shared folder, not a private
@@ -624,6 +653,7 @@ def check_shared_folder() -> bool:
         print("    double-click \"Setup Vaulter AI\" again.")
         print("    If you cannot see that library at all, you may not have been given")
         print("    access to it yet -- ask Yashu.")
+        _offer_library_link()
     elif config.CORPUS_UNRESOLVED_REASON == "ambiguous":
         # Found live on a real teammate's machine, 2026-08-13: this branch used to
         # print "that library isn't syncing to this computer yet", which was FALSE
@@ -635,6 +665,7 @@ def check_shared_folder() -> bool:
         print("    more than one SharePoint library, and Vaulter AI won't guess which")
         print("    one is the firm's — so it hasn't looked inside any of them yet.")
         print("    Step 7 below has the one-line fix; do that and this clears too.")
+        _offer_library_link()
     elif not config.CORPUS_AVAILABLE:
         print("    The likely reason: the team's folder lives INSIDE the firm's document")
         print("    library, and that library isn't syncing to this computer yet. Fix that")
@@ -662,6 +693,7 @@ def check_shared_folder() -> bool:
         print()
         print("    Less likely: this IS the right library and it simply hasn't finished")
         print("    syncing yet — in which case waiting and re-running setup is enough.")
+        _offer_library_link()
     print()
     print("    Then double-click 'Setup Vaulter AI' again — it will find it")
     print("    automatically, wherever OneDrive puts it.")
