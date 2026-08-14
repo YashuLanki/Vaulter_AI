@@ -612,7 +612,19 @@ def check_shared_folder() -> bool:
     print("    Everything else still works — but portfolio questions will come back")
     print("    empty, and you won't see the team's CoStar exports, until it's fixed.")
     print()
-    if config.CORPUS_UNRESOLVED_REASON == "ambiguous":
+    if config.CORPUS_UNRESOLVED_REASON == "configured_missing":
+        print("    This copy of Vaulter AI was told which document library to use, and")
+        print("    that library is NOT on this computer. It fell back to another one:")
+        print(f"      {config.CORPUS_DIR}")
+        print()
+        print("    Nothing here is broken and nothing needs reinstalling. The firm's")
+        print("    document library simply is not syncing to this computer yet.")
+        print("    In OneDrive (or on the SharePoint site in your browser), add the")
+        print("    firm's document library so it syncs here, let it finish, then")
+        print("    double-click \"Setup Vaulter AI\" again.")
+        print("    If you cannot see that library at all, you may not have been given")
+        print("    access to it yet -- ask Yashu.")
+    elif config.CORPUS_UNRESOLVED_REASON == "ambiguous":
         # Found live on a real teammate's machine, 2026-08-13: this branch used to
         # print "that library isn't syncing to this computer yet", which was FALSE
         # for her -- two libraries were syncing perfectly well and setup simply

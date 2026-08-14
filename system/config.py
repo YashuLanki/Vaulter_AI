@@ -198,6 +198,13 @@ def _find_corpus_subfolder(onedrive_root: Path) -> Path | None:
               f"'{CORPUS_SUBFOLDER}' but no such folder exists under "
               f"{onedrive_root}. Falling back to auto-detection.",
               file=sys.stderr)
+        # Recorded so the setup wizard can SAY this, rather than reporting on
+        # whatever library it fell back to as though that were the intended
+        # one. This warning goes to stderr and scrolls past; the person then
+        # sees a later step confidently describing the wrong library. Found
+        # 2026-08-14 -- the package now names the library, so "the named one
+        # is not on this machine" became a distinct and likely state.
+        globals()["CORPUS_UNRESOLVED_REASON"] = "configured_missing"
 
     global CORPUS_UNRESOLVED_REASON
     try:
