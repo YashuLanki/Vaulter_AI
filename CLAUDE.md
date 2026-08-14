@@ -959,6 +959,39 @@ threw out 60 of 69 real listings). If a pattern eventually emerges in these note
 decides whether the screener should change. The server's own instructions tell Claude to offer
 to save a decision when the user states one, once, without nagging.
 
+## There is a live user (2026-08-13)
+
+**A teammate other than the maintainer is connected to `vaulter_ai` on her own Claude Desktop and
+using it.** This is a standing constraint on every change, not a status note: a mistake used to
+cost a rebuild on one machine, and now it reaches someone else's working install.
+
+**Three ways a change reaches her with no action from her:**
+
+* **Anything under `system/`** — published to the update channel, offered inside her own
+  conversation, applied on a "yes". Every commit touching the program is a change to her computer.
+* **Anything published to the shared OneDrive folder** — `cost_assumptions.json`,
+  `portfolio_comparison_index.json`, property summaries, jurisdiction dossiers. No update needed;
+  OneDrive syncs it. This is why a wrong-*shaped* file there is a whole-team outage rather than one
+  person's problem (see the shape-validation convention below).
+* **`check_system_health` runs at the START of her every conversation.** Anything slow, noisy or
+  crashy there is the first thing she experiences, every single time.
+
+`quick_start/` and `.claude/` do **not** reach her — fresh zip only. Known asymmetry, see the
+auto-update section.
+
+**The practice this requires: for anything touching library/shared-folder detection, a
+shared-folder reader, or the launcher's install path, simulate the ALREADY-WORKING layouts and
+assert the answer is unchanged** — don't only test that the new case now works. That is what caught
+both real regressions the week this was written: the library-detection rewrite (checked against
+three working layouts, all had to give the same answer as before) and the in-place upgrade, whose
+first attempt **silently destroyed a machine's own `.env`** because robocopy replaced the whole file
+while the comment above it claimed that could not happen. Only a test with a fake old install
+carrying real settings found it.
+
+And never assume this machine is representative — it has the cost file locally, the library under
+one particular name, OCR installed and Python already working. Every teammate bug found in
+2026-08 lived in a state this machine has never been in.
+
 ## Conventions to preserve
 
 - **Secrets never touch `system/config.py` or git.** All credentials go through
