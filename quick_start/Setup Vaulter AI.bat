@@ -320,15 +320,23 @@ if exist "%TARGET%" (
         exit /b 1
     )
 
-    REM Their .env wins -- it may name the document library or the shared
-    REM folder for this specific machine. But if this package knows the
-    REM library and their file does not, add that one line rather than
-    REM leaving them to be told it over Teams a third time.
+    REM Their .env wins -- it may name the shared folder or the library for
+    REM this specific machine. But any setting THIS package knows and their
+    REM file does not is added, rather than leaving them to be told it over
+    REM Teams a third time.
+    REM
+    REM Checked setting by setting, not all-or-nothing. It used to skip the
+    REM whole merge if the library name was already present -- so anyone who
+    REM installed after the name started shipping would never have received
+    REM the SharePoint link that came later, which is the setting that lets
+    REM setup open the library page for them. Found 2026-08-14 while checking
+    REM what an upgrade actually carries across.
     if exist "%VAULTER_ROOT%\system\confidentials\.env" (
-        findstr /b /c:"VAULTER_CORPUS_SUBFOLDER" "%TARGET%\system\confidentials\.env" >nul 2>nul
-        if errorlevel 1 (
-            type "%VAULTER_ROOT%\system\confidentials\.env" >> "%TARGET%\system\confidentials\.env"
-            echo   Added this package's document-library setting to your settings file.
+        for /f "usebackq eol=# tokens=1* delims==" %%A in ("%VAULTER_ROOT%\system\confidentials\.env") do (
+            findstr /b /c:"%%A=" "%TARGET%\system\confidentials\.env" >nul 2>nul || (
+                echo %%A=%%B>>"%TARGET%\system\confidentials\.env"
+                echo   Added setting %%A to your settings file.
+            )
         )
     )
 
