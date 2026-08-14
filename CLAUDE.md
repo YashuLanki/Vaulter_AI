@@ -34,11 +34,17 @@ python system/main.py screen CostarExport.xlsx  # rank a CoStar export by portfo
 python system/main.py screen export.xlsx 2.5    # ...at a 2.5x MOIC target instead of the 3x default
 python system/main.py properties                # list the portfolio from the Project Master
 python system/main.py stats                     # what this instance has available
+
+# Checks -- run the one that matches what you touched (see "Three regression suites" below)
+python system/scripts/check_screener.py             # 106 checks on the screener's arithmetic
+python system/scripts/check_portfolio_comparison.py # 58 checks on the comparison index
+python system/scripts/check_answers.py              # 7 checks on the knowledge answers come from
 ```
 
-There is no lint/test framework configured (no pytest, no linter config).
-`.claude/hooks/check_python_syntax.py` runs `py_compile` on every `.py` Claude edits —
-that hook is the only automated safety net in the repo.
+There is no lint/test framework configured (no pytest, no linter config) — the three
+`check_*.py` suites above are hand-rolled scripts that print PASS/FAIL, and between them they
+are the whole regression net. `.claude/hooks/check_python_syntax.py` runs `py_compile` on every
+`.py` Claude edits — that hook is the only layer that runs unasked.
 
 ## Repository layout
 
@@ -615,10 +621,12 @@ ranks or weights selection factors. They need a senior partner's judgment, not a
 (Real names and figures behind every genericized citation in this file live in
 `docs/EVIDENCE_APPENDIX.md`, local-only — this repo is deliberately public.)
 
-`system/scripts/check_screener.py` runs **75 assertions** across deformed market shapes. Run it after
+`system/scripts/check_screener.py` runs **106 checks** across deformed market shapes. Run it after
 any change to `fit_screen.py`. Note it covers the screener only — **`geo_providers.py` has no
 automated coverage at all**, and that is where the worst measured bug of 2026-07-29 lived (see
-the proximity note below).
+the proximity note below). It is one of three suites: `check_portfolio_comparison.py` (58 checks)
+covers the comparison index, and `check_answers.py` (7) covers the shared knowledge answers are
+built from — see "Three regression suites" below for what each one can and cannot catch.
 
 #### What was removed with it
 `pipeline.py`, `phase1_rules.py`, `phase2_ranking.py`, `phase3_deep_analysis.py`,
@@ -992,6 +1000,67 @@ And never assume this machine is representative — it has the cost file locally
 one particular name, OCR installed and Python already working. Every teammate bug found in
 2026-08 lived in a state this machine has never been in.
 
+## Three regression suites, and the third one checks answers (2026-08-14)
+
+`check_screener.py` (**106 checks**) and `check_portfolio_comparison.py` (**58**) both test
+deterministic Python, and both pass while the answer a person actually receives is still wrong —
+because the wrongness lives in the knowledge the answer was built from, not in the arithmetic.
+`system/scripts/check_answers.py` (**7 checks**) is the third suite, and that knowledge is what it
+tests.
+
+**Why it exists.** On 2026-08-11 Claude stated as fact that no documents newer than 2026-08-03
+existed for a property. There were 57. Every test passed, the code was flawless, and the answer
+was false. Nothing in this repo could catch a wrong **answer** as opposed to broken code, and that
+was the entire gap.
+
+`python system/scripts/check_answers.py` reads file **names** only, out of the local index — it
+opens no documents, downloads nothing, and makes no network or model calls, so it is free and safe
+to run as often as you like. Measured against the 49 property summaries and an index of several
+hundred thousand files:
+
+* **Cited documents are real files** — 681 of 706 exact citations resolve; **25 do not**. Confirmed
+  genuine rather than an index gap: the index holds paths up to 312 characters, so nothing was
+  truncated; some cited names have no near match at all, and others differ from the real filename
+  by enough that a reader could not find the file. A further 35 citations are deliberately
+  abbreviated (a wildcard or an ellipsis) and are **excluded**, not counted as failures.
+* **Every summary can be currency-checked** — all 49 carry a `Source files as of` line, but only
+  **39 in machine-readable `YYYY-MM-DD`**; the other 10 are prose no code can read, which is the
+  same "cannot be checked" state `check_system_health` already reports out loud rather than skips.
+* **Every summary declares what it did NOT read** — all 49 have a Gaps section.
+* **Citation coverage** — 985 of 1,881 substantive bullets carry a source (**52%**). Reported as a
+  proportion, never pass/fail: prose legitimately contains connective sentences.
+
+It then **generates the question set at run time** from the summaries — 261 answerable questions
+and **61 that must be REFUSED**, the latter taken from Gaps entries saying something was not
+established. It writes to `system/data/eval/question_set.json`, which is **gitignored**
+(`system/data/eval/*`): every entry is a real firm fact and this repo is public. Deriving it each
+run also means it can never go stale against the summaries it came from.
+
+`.claude/skills/answer-eval/SKILL.md` drives the half no script can do alone: run that question set
+through the real MCP tools and score each answer on **fact, source and honesty**. Whether the 61
+refusals are actually refused is the part that matters most — this system's own history says a
+confident empty answer is the most dangerous answer it can give.
+
+**All three thresholds are measured, not chosen.** 25 unresolvable citations, 10 prose stamps, 52%
+coverage: each is simply the value observed the day the check was written. They are **regression
+detectors** — "has this got worse?" — and explicitly **not standards anyone ratified**. The first
+draft asserted a 60% coverage threshold with nothing behind it; that was removed, because inventing
+a number is the exact habit this project removes everywhere else (the four `WEIGHTS` still sit
+unset rather than guessed; `cost_load = 0.35` was deleted for being the wrong *shape*, not merely
+the wrong value). The rule: **lower a baseline as things get fixed, never raise one to make a run
+go green.**
+
+**Baseline rather than zero, deliberately.** A permanently-red suite gets ignored, and this
+project's checks are trusted precisely because they stay quiet unless something is actually wrong —
+the same reasoning already recorded for restricting the health check's staleness warning to
+active-stage properties. Any **new** failure still fails immediately, which is the whole point.
+
+**And verify the checker before believing the finding.** Its own first run reported two failures
+that were the checker being wrong about the thing it was checking: it demanded an exact `## Gaps`
+heading when real ones vary (`## Gaps / caveats`, `### Gaps (this verification pass)`), and it
+counted deliberately-abbreviated citations as fabricated. Both fixed. A new check has no track
+record, so its first failures are evidence about the check at least as much as about the data.
+
 ## Conventions to preserve
 
 - **Secrets never touch `system/config.py` or git.** All credentials go through
@@ -1057,8 +1126,8 @@ pattern without a name for it at the time. Generic version of this framework cal
 **Layer 1 — Skills (the instructions).** Markdown playbooks in `.claude/skills/*/SKILL.md`. Each
 one defines the objective, which tools or subagents to use, the expected output, and how to
 handle edge cases, in plain language — the same way you'd brief a colleague. `screening-run`,
-`vaulter-screening-pipeline`, `proximity-mapping`, `document-research`, `commit_git`, `cleanup`,
-`recap`, `vaulter-rebuild`, `mcp-health-check`, and `full-sweep` are all Layer 1. This is this project's
+`vaulter-screening-pipeline`, `proximity-mapping`, `document-research`, `answer-eval`, `commit_git`,
+`cleanup`, `recap`, `vaulter-rebuild`, `mcp-health-check`, and `full-sweep` are all Layer 1. This is this project's
 "workflows/" — there is no separate directory by that name, and one should not be created; the
 skill *is* the workflow doc.
 
@@ -1090,12 +1159,18 @@ asking.
 | Proximity mapping | `proximity-mapping` | onedrive-auditor (output hygiene), fact-checker (memo-bound claims) | `proximity_tool.py`, `geo_providers.py`, `geo_federal.py` |
 | Connector health | `mcp-health-check` (+ auto-dispatch from the server's own MCP instructions) | connection-doctor | `check_mcp_health.py` |
 | Install & onboarding | agent-led | setup-tester | `setup_wizard.py`, `release.py`/`apply_update.py` |
-| Documents & research | `document-research` | document-reader, city-researcher, fact-checker | `system/corpus/` |
+| Documents & research | `document-research`, `answer-eval` | document-reader, city-researcher, fact-checker | `system/corpus/`, `check_answers.py` |
 | OneDrive shared folder | agent-led | onedrive-auditor | `system/config.py` path layer |
 | Security | agent-led + hook | leak-guard | `.claude/hooks/check_no_leaks.py` (the hook is the only layer that can actually *block*) |
 
 `vaulter-fact-checker` deliberately serves three desks — it's a shared verification worker, one
 agent per claim, not a desk of its own.
+
+`answer-eval` (2026-08-14) is the documents desk's **second lead**, not a desk of its own: what it
+scores is the property summaries that desk writes. It is the one place the two halves are visible
+side by side — `check_answers.py` is the deterministic half (do the citations point at real files,
+can every summary be dated), the skill is the model-in-the-loop half (are the answers themselves
+right, sourced and honest). Nothing else in the repo tests the second thing.
 
 **Why this matters:** when a single agent pass tries to handle every step of reasoning directly,
 accuracy compounds downward — five steps at 90% each chains down to 59%. Offloading execution to
@@ -1108,8 +1183,11 @@ did before it existed.
    `.claude/agents/`, and `system/analysis/`/`system/pipeline/`/`system/scripts/` before writing new logic. The QA
    subagents exist because nothing did this checking before; don't rebuild what's already there.
 2. **When something fails, fix the tool, verify, then record what was learned.** This project's
-   regression net for the screener is `system/scripts/check_screener.py` — run it after any
-   `fit_screen.py` change, real file or synthetic. What was learned goes in the `context.md` /
+   regression net is three suites under `system/scripts/`, and which you run depends on what you
+   touched: `check_screener.py` after any `fit_screen.py` change (real file or synthetic),
+   `check_portfolio_comparison.py` after any change to the comparison index or its scoring, and
+   `check_answers.py` after anything that changes the property summaries or how answers are built
+   from them. What was learned goes in the `context.md` /
    `memory.md` pair each QA subagent keeps under `docs/agents/<name>/` — that is this project's
    "update the workflow" step, scoped per-agent rather than one shared log.
 3. **Keep skills current; don't create or overwrite one without asking**, unless told to

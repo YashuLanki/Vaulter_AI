@@ -102,6 +102,12 @@ system/data/cost_assumptions.json
 # time; never checked in.
 system/data/property_ids.json
 
+# The answer-eval question set (scripts/check_answers.py builds it). Every
+# entry is a real firm fact quoted out of a property summary, plus the document
+# it came from -- exactly the content this public repo exists to keep out. It is
+# derived at run time rather than stored, so nothing is lost by ignoring it.
+system/data/eval/*
+
 # ── Local backups of real-data files ──────────────────────────────
 # system/data/backups/ holds point-in-time copies of the coordinates table,
 # comparison index and ID registry -- all real firm data, same rule as the

@@ -62,6 +62,11 @@ steps (five steps at 90% each chains down to 59%), so anything that can be
 deterministic *should* be, and the agent layer stays focused on orchestration
 — sequencing, judgment calls, and knowing when to stop and ask.
 
+Those two layers need different kinds of checking, and both now have it: the
+deterministic layer has regression suites, and the agent layer has an
+evaluation of whether the answers themselves are right. See
+[Checking the work](#checking-the-work).
+
 ### The desks
 
 Skills and subagents are organized into seven domains ("desks"), each with one
@@ -96,9 +101,9 @@ workers) — except the desks small enough that the worker *is* the whole desk.
 ### Skills used
 
 `screening-run`, `vaulter-screening-pipeline`, `proximity-mapping`,
-`document-research`, `mcp-health-check`, `vaulter-rebuild`, `commit_git`,
-`cleanup`, and `recap` — each a playbook under `.claude/skills/*/SKILL.md`
-that a session runs directly or fans out from.
+`document-research`, `mcp-health-check`, `answer-eval`, `vaulter-rebuild`,
+`commit_git`, `cleanup`, and `recap` — each a playbook under
+`.claude/skills/*/SKILL.md` that a session runs directly or fans out from.
 
 ## Design principles
 
@@ -115,6 +120,57 @@ that a session runs directly or fans out from.
 - **Say what the data can't tell you.** Every screening run reports its own
   evidence coverage per state, and every comparison names its own confidence,
   rather than staying silent about a thin sample.
+
+## Checking the work
+
+Three regression suites, checking three different kinds of thing:
+
+```bash
+python system/scripts/check_screener.py              # 106 checks -- the screener's arithmetic
+python system/scripts/check_portfolio_comparison.py  #  58 checks -- deal matching and its index
+python system/scripts/check_answers.py               #   7 checks -- the knowledge answers are built from
+```
+
+The first two test deterministic Python — same input, same output, every time.
+The third exists because both of them can pass while the answer a person
+receives is still wrong. Measured 2026-08-11: this system stated as fact that
+no documents newer than a given date existed for one property. There were 57.
+Every test passed, the code was flawless, and the answer was false. Nothing in
+this repo could have caught it, because the wrongness lived in the knowledge
+the answer was built from rather than in any calculation.
+
+So `check_answers.py` checks that shared knowledge instead of the code. It
+reads filenames out of the local index only — it opens no documents, downloads
+nothing, and makes no network or model calls. Today's run, against 49
+per-property summaries and an index of several hundred thousand files:
+
+- **Every cited document is a real file.** 681 of 706 exact citations resolve;
+  the 25 that don't were confirmed to be genuine misses rather than an
+  indexing gap, and recorded as a baseline so the number can only improve. A
+  further 35 citations are deliberately abbreviated and excluded.
+- **Every summary can be told whether it's out of date.** All 49 carry a
+  "source files as of" line — 39 as a machine-readable date, 10 written as
+  prose (baselined).
+- **Every summary declares what it did *not* read.** All 49 pass. A summary
+  with no gaps section reads as exhaustive whether or not it is.
+- **Citation coverage** — 985 of 1,881 substantive bullets, 52%. Recorded as a
+  regression baseline, explicitly **not** a ratified standard.
+
+All three baselines are measured, not chosen. The first draft of this file
+asserted a 60% coverage threshold with nothing behind it, and that was removed:
+inventing a number is the exact habit this project spends most of its effort
+removing everywhere else.
+
+The suite then generates the question set for the half no script can do alone
+— 261 questions with a known answer, and 61 that must be **refused**, drawn
+from the summaries' own gaps sections where they say something isn't
+established. A confident answer to one of those is a failure however plausible
+it sounds. Scoring them means asking them through the real MCP tools the way a
+teammate would, so it's a job for the agent layer rather than a script:
+`.claude/skills/answer-eval/SKILL.md` is that playbook, marking each answer on
+fact, source, and honesty. The questions themselves are derived from the
+summaries at run time and written to a gitignored file, because every one of
+them is a real firm fact.
 
 ## Setup
 
