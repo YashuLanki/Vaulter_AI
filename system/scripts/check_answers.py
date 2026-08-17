@@ -89,7 +89,7 @@ _CITED_PAGE = re.compile(
 _STAMP = re.compile(r"Source files as of:?\*{0,2}\s*(\d{4}-\d{2}-\d{2})")
 
 # What proportion of substantive bullets carried a source when this check was
-# first run (2026-08-14, 49 summaries, 1,881 bullets). MEASURED, not chosen --
+# first run (2026-08-14). MEASURED, not chosen --
 # the first version of this file asserted 60% with nothing behind it, which is
 # the exact habit this project removes everywhere else. It exists to catch the
 # number FALLING, not to claim it is where it should be. Raise it only after a

@@ -141,20 +141,24 @@ the answer was built from rather than in any calculation.
 
 So `check_answers.py` checks that shared knowledge instead of the code. It
 reads filenames out of the local index only — it opens no documents, downloads
-nothing, and makes no network or model calls. Today's run, against 49
-per-property summaries and an index of several hundred thousand files:
+nothing, and makes no network or model calls. It runs against every
+per-property summary and the local file index, and checks four things:
 
-- **Every cited document is a real file.** 681 of 706 exact citations resolve;
-  the 25 that don't were confirmed to be genuine misses rather than an
-  indexing gap, and recorded as a baseline so the number can only improve. A
-  further 35 citations are deliberately abbreviated and excluded.
-- **Every summary can be told whether it's out of date.** All 49 carry a
-  "source files as of" line — 39 as a machine-readable date, 10 written as
-  prose (baselined).
-- **Every summary declares what it did *not* read.** All 49 pass. A summary
+- **Every cited document is a real file.** Most exact citations resolve; the
+  few that don't were confirmed to be genuine misses rather than an
+  indexing gap, and recorded as a baseline so the number can only improve.
+  Deliberately abbreviated citations are excluded.
+- **Every summary can be told whether it's out of date.** All carry a
+  "source files as of" line, though a handful state it as prose rather than a
+  machine-readable date (baselined).
+- **Every summary declares what it did *not* read.** All pass. A summary
   with no gaps section reads as exhaustive whether or not it is.
-- **Citation coverage** — 985 of 1,881 substantive bullets, 52%. Recorded as a
-  regression baseline, explicitly **not** a ratified standard.
+- **Citation coverage** — the share of substantive bullets carrying a source.
+  Recorded as a regression baseline, explicitly **not** a ratified standard.
+
+The measured values live in the script's own baseline constants and its console
+output rather than in this file: they count the firm's real documents and
+citations, and this repository is public.
 
 All three baselines are measured, not chosen. The first draft of this file
 asserted a 60% coverage threshold with nothing behind it, and that was removed:
@@ -162,7 +166,7 @@ inventing a number is the exact habit this project spends most of its effort
 removing everywhere else.
 
 The suite then generates the question set for the half no script can do alone
-— 261 questions with a known answer, and 61 that must be **refused**, drawn
+— questions with a known answer, and a set that must be **refused**, drawn
 from the summaries' own gaps sections where they say something isn't
 established. A confident answer to one of those is a failure however plausible
 it sounds. Scoring them means asking them through the real MCP tools the way a

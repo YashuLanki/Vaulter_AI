@@ -315,10 +315,10 @@ ask about that exact property. Three deliberate constraints, each measured rathe
   conversation, and this check is trusted *because* it stays quiet. Non-active properties still
   get the full on-demand warning whenever someone asks about them by name.
 * **It names the newest FILENAME, never a count.** A count cannot be trusted: OneDrive rewrites a
-  file's modified-date when it re-syncs, so on one real property **1,370 documents from 2024–2025
-  all looked like they arrived this year** (their own filenames carry the true dates, `250207`,
-  `241220`). A filename lets a reader tell a genuinely new contract from an old file that merely
-  got re-synced; a bare "1,211 new documents" is alarming and wrong. Same reasoning
+  file's modified-date when it re-syncs, so on one real property **years' worth of older documents
+  all looked like they arrived this year** (their own filenames carry the true dates, in a
+  `YYMMDD` prefix). A filename lets a reader tell a genuinely new contract from an old file that
+  merely got re-synced; a bare "N new documents" is alarming and wrong. Same reasoning
   `_summary_staleness` already gives for naming files instead of counting them.
 * **"Couldn't check" is never reported as "nothing new."** `_newer_readable_docs()` returns `None`
   (cannot tell) distinctly from `0` (checked, genuinely nothing), and callers must not conflate
@@ -575,14 +575,14 @@ Four rules that must survive any edit:
   `large_ask_reference_text` in `cost_assumptions.json` survives purely as the fallback for a
   machine with no comparison index.
 - **Never set an asking price against a by-exit cost (2026-08-13).** The report's headline card
-  shows what the top three listings would cost to buy, and set it against "a typical $3.5–5M per
-  asset". That was two separate errors in the page's most prominent number. It was **never a
-  range** — the two figures measure different things: the corporate deck's *average invested
-  capital per project* (purchase **plus** entitlement spend, carry and taxes across the hold) and
-  a second internal figure whose measure was never established. Printing them with a dash between
-  implied a careful estimate where there was an open question. And an acquisition total is an
-  **entry** figure, so comparing it to a **by-exit** figure made every shortlist read roughly four
-  times cheaper against the firm than it was. `typical_purchase_millions` /
+  shows what the top three listings would cost to buy, and set it against a static "typical cost
+  per asset" range. That was two separate errors in the page's most prominent number. It was
+  **never a range** — the two figures measure different things: the corporate deck's *average
+  invested capital per project* (purchase **plus** entitlement spend, carry and taxes across the
+  hold) and a second internal figure whose measure was never established. Printing them with a
+  dash between implied a careful estimate where there was an open question. And an acquisition
+  total is an **entry** figure, so comparing it to a **by-exit** figure made every shortlist read
+  roughly four times cheaper against the firm than it was. `typical_purchase_millions` /
   `typical_purchase_n` are now **derived at run time** from the comparison index (so nothing real
   is stored in tracked code and the figure can't go stale), `avg_invested_capital_millions` is
   quoted as its own separate sentence, and the unexplained lower figure is withdrawn into
@@ -1033,40 +1033,42 @@ was the entire gap.
 
 `python system/scripts/check_answers.py` reads file **names** only, out of the local index — it
 opens no documents, downloads nothing, and makes no network or model calls, so it is free and safe
-to run as often as you like. Measured against the 49 property summaries and an index of several
-hundred thousand files:
+to run as often as you like. It measures four things against every property summary and the local
+file index. **The observed values are not repeated here** — they live in `check_answers.py`'s own
+baseline constants and in its console output, because a count of the firm's own citations and
+documents is real corpus detail and this repo is public:
 
-* **Cited documents are real files** — 681 of 706 exact citations resolve; **25 do not**. Confirmed
-  genuine rather than an index gap: the index holds paths up to 312 characters, so nothing was
-  truncated; some cited names have no near match at all, and others differ from the real filename
-  by enough that a reader could not find the file. A further 35 citations are deliberately
-  abbreviated (a wildcard or an ellipsis) and are **excluded**, not counted as failures.
-* **Every summary can be currency-checked** — all 49 carry a `Source files as of` line, but only
-  **39 in machine-readable `YYYY-MM-DD`**; the other 10 are prose no code can read, which is the
-  same "cannot be checked" state `check_system_health` already reports out loud rather than skips.
-* **Every summary declares what it did NOT read** — all 49 have a Gaps section.
-* **Citation coverage** — 985 of 1,881 substantive bullets carry a source (**52%**). Reported as a
+* **Cited documents are real files** — most exact citations resolve; a minority do not, and that
+  minority was confirmed genuine rather than an index gap: the index holds paths far longer than
+  any cited name, so nothing was truncated; some cited names have no near match at all, and others
+  differ from the real filename by enough that a reader could not find the file. Deliberately
+  abbreviated citations (a wildcard or an ellipsis) are **excluded**, not counted as failures.
+* **Every summary can be currency-checked** — all carry a `Source files as of` line, but a
+  handful state it as prose no code can read, which is the same "cannot be checked" state
+  `check_system_health` already reports out loud rather than skips.
+* **Every summary declares what it did NOT read** — all have a Gaps section.
+* **Citation coverage** — the share of substantive bullets carrying a source. Reported as a
   proportion, never pass/fail: prose legitimately contains connective sentences.
 
-It then **generates the question set at run time** from the summaries — 261 answerable questions
-and **61 that must be REFUSED**, the latter taken from Gaps entries saying something was not
-established. It writes to `system/data/eval/question_set.json`, which is **gitignored**
+It then **generates the question set at run time** from the summaries — questions with a known
+answer, plus a set **that must be REFUSED**, the latter taken from Gaps entries saying something
+was not established. It writes to `system/data/eval/question_set.json`, which is **gitignored**
 (`system/data/eval/*`): every entry is a real firm fact and this repo is public. Deriving it each
 run also means it can never go stale against the summaries it came from.
 
 `.claude/skills/answer-eval/SKILL.md` drives the half no script can do alone: run that question set
-through the real MCP tools and score each answer on **fact, source and honesty**. Whether the 61
-refusals are actually refused is the part that matters most — this system's own history says a
-confident empty answer is the most dangerous answer it can give.
+through the real MCP tools and score each answer on **fact, source and honesty**. Whether the
+must-refuse questions are actually refused is the part that matters most — this system's own
+history says a confident empty answer is the most dangerous answer it can give.
 
-**All three thresholds are measured, not chosen.** 25 unresolvable citations, 10 prose stamps, 52%
-coverage: each is simply the value observed the day the check was written. They are **regression
-detectors** — "has this got worse?" — and explicitly **not standards anyone ratified**. The first
-draft asserted a 60% coverage threshold with nothing behind it; that was removed, because inventing
-a number is the exact habit this project removes everywhere else (the four `WEIGHTS` still sit
-unset rather than guessed; `cost_load = 0.35` was deleted for being the wrong *shape*, not merely
-the wrong value). The rule: **lower a baseline as things get fixed, never raise one to make a run
-go green.**
+**All three thresholds are measured, not chosen.** Unresolvable citations, prose date stamps and
+coverage: each baseline is simply the value observed the day the check was written. They are
+**regression detectors** — "has this got worse?" — and explicitly **not standards anyone
+ratified**. The first draft asserted a 60% coverage threshold with nothing behind it; that was
+removed, because inventing a number is the exact habit this project removes everywhere else
+(the four `WEIGHTS` still sit unset rather than guessed; `cost_load = 0.35` was deleted for being
+the wrong *shape*, not merely the wrong value). The rule: **lower a baseline as things get fixed,
+never raise one to make a run go green.**
 
 **Baseline rather than zero, deliberately.** A permanently-red suite gets ignored, and this
 project's checks are trusted precisely because they stay quiet unless something is actually wrong —

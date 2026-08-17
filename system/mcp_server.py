@@ -1284,9 +1284,9 @@ no score -- it's a diary, not a dial.""".replace(
             if behind:
                 # Name the newest FILE, never a count. A count cannot be trusted
                 # here: OneDrive rewrites a file's modified-date when it re-syncs,
-                # so on one real property 1,370 documents from 2024-2025 all looked
-                # like they arrived this year. The filename is what lets a reader
-                # tell a genuinely new contract from an old file that merely got
+                # so on one real property years' worth of older documents all
+                # looked like they arrived this year. The filename is what lets
+                # a reader tell a genuinely new contract from an old file that merely got
                 # re-synced -- same reasoning _summary_staleness already gives for
                 # naming files instead of counting them.
                 named = "; ".join(f"{n} (newest: {f})" for n, f in behind[:3])
