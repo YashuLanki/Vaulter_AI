@@ -1116,6 +1116,46 @@ def main() -> int:
         check("a wrong-shaped cost file leaves a usable (empty) record", ok,
               "a list here used to kill the server at import")
 
+    # ---- 23. The stuck-deal caution informs, never ranks ----
+    # Asked for on 2026-08-14 as a SCORING factor and built as a caution
+    # instead: only 6 of 49 properties are evidenced as marketed-and-unsold,
+    # which is thinner than the 4 completed exits this project already refused
+    # to score on. Same rule as every other caution.
+    print("\n23. The stuck-deal caution informs, never ranks")
+    import analysis.screening.portfolio_comparison as _pc
+
+    if not _pc.load_index():
+        skip("the stuck-deal caution never moves the score", "no deal record on this machine")
+    else:
+        with_c = base["dataframe"]
+        real_fn = _pc.stuck_deal_caution
+        _pc.stuck_deal_caution = lambda *a, **k: None
+        try:
+            without = _run(src, full, tmp, "nostuck")["dataframe"]
+        finally:
+            _pc.stuck_deal_caution = real_fn
+        check("Fit_Score is identical with and without the stuck-deal caution",
+              with_c["Fit_Score"].equals(without["Fit_Score"]),
+              "it is context, never arithmetic")
+        check("Fit_Tier is identical with and without it",
+              with_c["Fit_Tier"].equals(without["Fit_Tier"]))
+
+        # Firing everywhere is the same as not firing at all. Matching on state
+        # and land type alone hit 71 of 216 rows before county was required.
+        hit = with_c["Cautions"].astype(str).str.contains("marketed and could not sell")
+        share = hit.mean()
+        check("it stays rare enough to mean something",
+              share <= 0.25,
+              f"fires on {int(hit.sum())} of {len(with_c)} rows ({share:.0%})")
+
+        # It must never fire without evidence behind it.
+        check("it never fires on a county the firm has no stuck position in",
+              _pc.stuck_deal_caution({"state": "ZZ", "county": "nowhere",
+                                      "land_type": "residential"}) is None)
+        check("  ...nor when the land type is unknown",
+              _pc.stuck_deal_caution({"state": "AZ", "county": "pinal",
+                                      "land_type": ""}) is None)
+
     passed = sum(1 for _, ok, _ in RESULTS if ok)
     print(f"\n{passed}/{len(RESULTS)} checks passed")
     return 0 if passed == len(RESULTS) else 1

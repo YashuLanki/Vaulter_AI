@@ -457,6 +457,73 @@ def summarize_match(m: dict, note_chars: int = 95) -> str:
     return f"{head}: {note}" if note else head
 
 
+def stuck_deal_caution(facts: dict, index: list[dict] = None) -> str | None:
+    """
+    A caution when a listing resembles land the firm MARKETED AND COULD NOT SELL.
+
+    Asked for on 2026-08-14 as a scoring factor, and deliberately built as a
+    caution instead, because the evidence will not carry a score. The reasoning
+    is worth keeping, since the same request will come back:
+
+    38 of 49 properties are still held and 28 of those were bought in 2016 or
+    earlier -- which looks like a large, damning sample until you ask why each
+    one is still held. Only 9 of the 28 record a reason at all. Of the 10
+    properties in the whole index carrying `disposition_detail`, six are
+    `marketed-unsold`, two were `never-marketed` (a deliberate hold, not a
+    failure) and two have already `capital-returned` (not a failure in any
+    sense). So "still held for a long time" is NOT evidence of a bad deal; it
+    is mostly evidence that nobody wrote down what happened.
+
+    That leaves six evidenced cases. Six is thinner than the four completed
+    exits this project already refused to score on (see CLAUDE.md's sold-deal
+    note) -- and applying a looser standard to an idea because it is a new one
+    would be exactly the bias this codebase keeps removing. Hence a caution:
+    the same non-eliminating mechanism flood risk, an oversized ask and the
+    passed-on-deal patterns already use.
+
+    Returns None on anything unmatched, unknown, or unevidenced. Never raises.
+    """
+    records = index if index is not None else load_index()
+    if not records:
+        return None
+
+    stuck = [r for r in records
+             if (r.get("disposition_detail") or "").strip().lower() == "marketed-unsold"]
+    if not stuck:
+        return None
+
+    state = (facts.get("state") or "").strip().upper()
+    county = (facts.get("county") or "").strip().lower()
+    land = (facts.get("land_type") or "").strip().lower()
+    if not state or not county or not land:
+        return None
+
+    # STATE, COUNTY and land type must all match. County is not optional, and
+    # that was measured rather than assumed: matching on state and land type
+    # alone fired on 71 of 216 rows -- a third of the file -- because four of
+    # the six evidenced properties are Arizona residential, so every Arizona
+    # residential listing got the same sentence. A caution that common stops
+    # being read, which is the failure mode the jurisdiction dossiers were
+    # deliberately scoped against too (one dossier, 11 of 216 rows, silence
+    # everywhere else). All six sit in just two counties, so requiring county
+    # makes this fire where the firm genuinely has a stuck position and nowhere
+    # else.
+    hits = [r for r in stuck
+            if (r.get("state") or "").strip().upper() == state
+            and county in (r.get("county") or "").strip().lower()
+            and (r.get("land_type") or "").strip().lower() == land]
+    if not hits:
+        return None
+
+    years = sorted(r["entry_year"] for r in hits if isinstance(r.get("entry_year"), int))
+    held = ""
+    if years:
+        held = f", bought {years[0]}" if len(years) == 1 else f", bought {years[0]}-{years[-1]}"
+    return (f"resembles {len(hits)} propert{'y' if len(hits) == 1 else 'ies'} the firm "
+            f"marketed and could not sell{held} — worth asking what would make this one "
+            f"different")
+
+
 def find_similar_deals(facts: dict, top_n: int = 5, index: list[dict] = None) -> dict:
     """
     Compares `facts` (a listing or off-market property's characteristics)

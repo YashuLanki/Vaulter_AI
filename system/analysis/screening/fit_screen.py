@@ -304,13 +304,32 @@ EXIT_LOT_COMPS = tuple(
 # "the strongest revealed preference, and mechanically checkable" -- ~34 of 57
 # holdings sit in one of 15 clusters.
 #
-# THESE ARE THE ONLY NUMBERS IN THIS FILE WITH NO EVIDENCE BEHIND THEM. Two
-# independent document searches (2026-07-28) found nothing in the corpus that
-# ranks or weights selection factors. The closest artifact is a senior
-# partner's unordered list on the firm's largest recent acquisition --
-# distressed basis, vested entitlements, low off-site cost, prepaid utility
-# credits. No document contradicts these weights either. They need a human
-# decision; see PORTFOLIO_STANDARD.md §9.
+# REVIEWED AND KEPT, 2026-08-14. These were the only numbers in this file with
+# no evidence behind them -- two independent document searches (2026-07-28)
+# found nothing in the corpus that ranks or weights selection factors, and they
+# ran unratified for six weeks.
+#
+# They were then put to a person, as four concrete either/or choices between
+# real listings out of a live 216-row export rather than as abstract
+# percentages, and three of the four came back confirming what was already
+# here:
+#
+#   * proximity vs pricing -- "about the same", so the near-tie stays;
+#   * a long time on market as a motivated-seller signal -- "about right" at a
+#     fifth of the decision, consistent with three of the firm's four completed
+#     sales having come from a distressed or discounted basis;
+#   * parcel size -- a matter of degree rather than pass/fail, so it stays a
+#     scoring factor rather than becoming a filter.
+#
+# Answered on the firm's behalf by the project owner rather than by the senior
+# partner directly, which is worth knowing: it is a considered answer from
+# someone close to the deals, not a signed-off underwriting policy. That is
+# still a large step up from four numbers nobody had ever looked at, and the
+# distinction is recorded here rather than quietly rounded up.
+#
+# The fourth question -- whether resembling a past deal should move the score --
+# is NOT reflected below; see add_portfolio_comparison and the sold-deal note in
+# CLAUDE.md for why that one is harder than it looks.
 WEIGHTS = {
     "proximity": 35,
     "pricing":   30,
@@ -1238,6 +1257,8 @@ def add_cautions(df: pd.DataFrame) -> pd.DataFrame:
     mined from the full passed-on-deals file.
     """
     from analysis.screening.passed_on_patterns import passed_on_caution
+    from analysis.screening.portfolio_comparison import (
+        classify_land_type, stuck_deal_caution)
 
     acres = _num(_col(df, "Land Area (AC)"))
     # NOTE: on both real exports `Floodplain Area` holds a LABEL, not a number
@@ -1258,10 +1279,14 @@ def add_cautions(df: pd.DataFrame) -> pd.DataFrame:
     ask = _num(_col(df, "For Sale Price"))
     state = _text(_col(df, "State", default=""))
     county = _text(_col(df, "County Name", default=""))
+    # Same column preference the comparison wiring already uses: on a land
+    # export "Property Type" is the constant "Land" and says nothing, so the
+    # proposed-use column is read first.
+    use_text = _text(_col(df, "Proposed Land Use", "Secondary Type", default=""))
 
     out = []
-    for ac, fa, fr, sf, st, pr, sta, co in zip(acres, flood_area, flood_risk, in_sfha,
-                                                 stories, ask, state, county):
+    for ac, fa, fr, sf, st, pr, sta, co, use in zip(acres, flood_area, flood_risk, in_sfha,
+                                                     stories, ask, state, county, use_text):
         c = []
         if pd.notna(fa) and pd.notna(ac) and ac > 0:
             share = fa / ac
@@ -1284,6 +1309,14 @@ def add_cautions(df: pd.DataFrame) -> pd.DataFrame:
         past = passed_on_caution(sta, co)
         if past:
             c.append(past)
+        # Answers the one question the four scoring factors cannot: does this
+        # look like something the firm would still be holding in ten years?
+        # Informational, like every other entry here -- see stuck_deal_caution
+        # for why the evidence supports a caution and not a score.
+        stuck = stuck_deal_caution({"state": sta, "county": co,
+                                    "land_type": classify_land_type(use)})
+        if stuck:
+            c.append(stuck)
         out.append("; ".join(c) if c else "")
     return _attach(df, {"Cautions": out})
 
