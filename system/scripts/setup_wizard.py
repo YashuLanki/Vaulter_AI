@@ -641,7 +641,16 @@ def check_shared_folder() -> bool:
     print("    Everything else still works — but portfolio questions will come back")
     print("    empty, and you won't see the team's CoStar exports, until it's fixed.")
     print()
-    if config.CORPUS_UNRESOLVED_REASON == "configured_missing":
+    if not config.ONEDRIVE_ROOT:
+        # No OneDrive at all is a different situation from a library that isn't
+        # syncing, and it has a different fix. Without this branch the message
+        # below told someone with no OneDrive to go check their library sync --
+        # advice for a thing that cannot exist yet. Step 7 has always said this
+        # correctly; step 5 did not. Sixth instance of the same shape.
+        print("    OneDrive isn't set up on this computer yet, so nothing can sync to it.")
+        print("    Open OneDrive, sign in with your work account, and let it finish its")
+        print("    first sync. Then double-click \"Setup Vaulter AI\" again.")
+    elif config.CORPUS_UNRESOLVED_REASON == "configured_missing":
         print("    This copy of Vaulter AI was told which document library to use, and")
         print("    that library is NOT on this computer. It fell back to another one:")
         print(f"      {config.CORPUS_DIR}")
