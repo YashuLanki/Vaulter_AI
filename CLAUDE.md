@@ -803,7 +803,25 @@ wrong **2 times in 3**, against 1 in 8 for cited ones, so an unrecorded one now 
 relying on it. `disposition_detail` splits `still-held` — which covered "never marketed",
 "marketed for years, no buyer", and "capital already returned" under one label — but **only where
 the property's own note evidences which**; 10 of 38 as of this writing, and the other 28 stay
-plain rather than being assigned a story. And `pipeline/property_registry.py` gives every property
+plain rather than being assigned a story.
+
+**A deliberate backfill attempt on 2026-08-14 recovered 3 of 19, and the low yield is the finding.**
+Every still-held property bought 2016 or earlier without a recorded reason had its summary re-read
+for evidence of *why* it is still held. Three were plain enough to record: one whose summary states
+outright that it was "listed for sale as raw/partially-entitled land multiple times without a
+completed transaction"; one whose Disposition/Offers, /Marketing and /CTC folders were verified
+empty by folder listing on two separate dates; and one with a named broker's active listing and a
+stated asking price. **Sixteen stayed unrecorded**, because their summaries simply do not say —
+the question was never asked when they were written, so the documents behind them were read for
+what the deal *was*, not for what happened to it since. Two candidates were deliberately rejected
+rather than stretched: one with an executed 2026 LOI on a parcel (marketed and selling, not
+marketed and stuck), and several whose only evidence was a folder name nobody had opened. New
+entries carry `disposition_source` and a `disposition_source_note`; the original 10 predate those
+fields. **Do not re-run this against the summaries expecting a better result — the ceiling is what
+the summaries record. Raising it means re-reading source documents with this specific question in
+hand, which is a documents-desk pass, not a re-parse.**
+
+And `pipeline/property_registry.py` gives every property
 a durable internal ID (never shown to a user) with every observed spelling recorded as an alias,
 because the same property is named four different ways across the four files describing it —
 harmless only while nothing joins them by name. Its first build merged a project with its
