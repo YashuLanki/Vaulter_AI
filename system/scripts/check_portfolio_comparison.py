@@ -466,6 +466,23 @@ def main() -> int:
         finally:
             _shutil.rmtree(r, ignore_errors=True)
 
+        # The library is not always at the account root. Sync the parent site's
+        # default "Documents" library instead of the firm's own, and the firm's
+        # library arrives as a folder INSIDE it -- same documents, one level
+        # down. Measured on a real teammate's machine 2026-08-18; detection
+        # only ever looked at the top level, so it matched the parent by name
+        # shape and indexed that, finding her property documents but never the
+        # team folder below them.
+        r = _fake_root("Desktop", "Documents", "Acme Co - Documents")
+        (Path(r) / "Acme Co - Documents" / "alpha" / _cf.SHARED_SUBFOLDER).mkdir(parents=True)
+        try:
+            got = _cf._find_corpus_subfolder(r)
+            check("a library nested one level down is still found",
+                  got is not None and got.name == "alpha",
+                  f"got {got.name if got else None}")
+        finally:
+            _shutil.rmtree(r, ignore_errors=True)
+
         r = _fake_root("Desktop", "Other Org - Team", "Acme Co - beta", "sharepointdocs")
         (Path(r) / "sharepointdocs" / _cf.SHARED_SUBFOLDER).mkdir(parents=True)
         try:

@@ -298,9 +298,52 @@ def _find_corpus_subfolder(onedrive_root: Path) -> Path | None:
     # to the shape filter and could never reach the content check. Found
     # 2026-08-13 after a teammate whose machine reported two synced libraries,
     # neither of which was ours.
+    def _found(d):
+        # Clear any earlier failure. A route succeeding AFTER an earlier one
+        # failed means the earlier failure is no longer the story -- and
+        # leaving it set made setup report a problem it had just solved:
+        # a machine carrying a pre-set library name that does not match, but
+        # whose library detection then finds it anyway, was still told the
+        # library was not on the computer. Found 2026-08-18.
+        global CORPUS_UNRESOLVED_REASON
+        CORPUS_UNRESOLVED_REASON = ""
+        return d
+
     with_shared = [d for d in possible if (d / SHARED_SUBFOLDER).is_dir()]
     if len(with_shared) == 1:
-        return with_shared[0]
+        return _found(with_shared[0])
+
+    # AND ONE LEVEL DEEPER, because the library is not always at the top.
+    #
+    # How OneDrive lays this out depends on WHAT was synced. Sync the firm's
+    # library itself and it lands at the account root, which is the only shape
+    # this used to handle. Sync the parent site's default "Documents" library
+    # instead -- an equally normal thing to click -- and the firm's library
+    # arrives as a FOLDER INSIDE it, one level down, holding exactly the same
+    # documents.
+    #
+    # Measured on a real teammate's machine 2026-08-18, and it explains every
+    # symptom she had: the content check found nothing at the top level, so
+    # detection fell through to the name-shape rule, which matched the parent
+    # "<Org> - Documents" folder and indexed THAT -- picking up her real
+    # property documents (they were inside it) while never finding the team
+    # folder one level below. Everything looked half-right, which is why it
+    # took three rounds to see.
+    #
+    # Two levels is deliberately the limit: each extra level is a directory
+    # listing over OneDrive placeholders, and nothing legitimate is deeper.
+    if not with_shared:
+        deeper = []
+        for parent in possible:
+            try:
+                for child in parent.iterdir():
+                    if child.is_dir() and (child / SHARED_SUBFOLDER).is_dir():
+                        deeper.append(child)
+            except OSError:
+                continue
+        if len(deeper) == 1:
+            return _found(deeper[0])
+        with_shared = deeper
 
     candidates = [d for d in possible if " - " in d.name]
 
@@ -308,7 +351,7 @@ def _find_corpus_subfolder(onedrive_root: Path) -> Path | None:
         CORPUS_UNRESOLVED_REASON = "none_syncing"
 
     if len(candidates) == 1:
-        return candidates[0]
+        return _found(candidates[0])
 
     if len(candidates) > 1:
         # More than one library synced and the content check above did not
@@ -321,7 +364,7 @@ def _find_corpus_subfolder(onedrive_root: Path) -> Path | None:
         if hint:
             hinted = [d for d in candidates if hint in d.name.lower()]
             if len(hinted) == 1:
-                return hinted[0]
+                return _found(hinted[0])
 
         # Deliberately does NOT print the folder names: this message can reach
         # a log or a screen share, and the names are the tenant detail being
