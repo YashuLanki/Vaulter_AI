@@ -157,6 +157,30 @@ _COST = _load_cost_assumptions()
 # where they're stored changed. Absent that file, every one of them is None,
 # and every use site below reports the cost as "no record" rather than
 # guessing a substitute.
+#
+# THE LINE IS MONEY vs NOT-MONEY, and it is deliberate -- recorded here because
+# two security audits in a row have read the remaining literals below as a
+# half-finished migration and re-raised them. They are not. Every key in
+# cost_assumptions.json is a dollar amount or the sentence that quotes one;
+# every value still written here is a ratio, a rate, a duration or a publicly
+# stated target (the MOIC range is on vaulterup.com). A density of lots per acre
+# is not a price, and hiding it would not protect one.
+#
+# Two further reasons not to "finish" the migration:
+#   1. It would BREAK, not merely relocate. lots_per_acre, carry_rate_annual and
+#      hold_years_actual feed bare arithmetic (see add_pricing) with no None
+#      guard, unlike the money keys, which every use site already degrades on.
+#      A machine whose published copy of the JSON lacked the new keys would
+#      crash the screener, not fall back -- and teammates' copies sync from
+#      OneDrive, so that is a whole-team outage, not a local one.
+#   2. It would be theatre. The COMMENTS around these values state the same
+#      measured facts in prose -- the observed hold range, the schedule slip,
+#      the correction to lot yield -- and CLAUDE.md publishes them too, on
+#      purpose. Moving a literal while leaving the sentence that explains it
+#      protects nothing.
+# If the firm ever decides the operating history itself should not be public,
+# that is a different and much larger edit: the prose goes first, here and in
+# CLAUDE.md, and the literals follow. Do not do half of it and call it done.
 
 ASSUMPTIONS = {
     # Vaulter is an opportunistic / value-add predevelopment land investor. It

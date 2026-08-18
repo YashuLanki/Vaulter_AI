@@ -37,6 +37,21 @@ gitignored or redacted, not whether the repo itself should be public.
   paragraph — the fix there is usually rephrasing to drop the specific figure/name, not deleting
   the whole paragraph.
 
+**Settled 2026-08-18 — stop re-raising `fit_screen.py`'s remaining `ASSUMPTIONS` literals.**
+Two audits running flagged `lots_per_acre`, `carry_rate_annual`, `hold_years_*` and
+`schedule_slip_multiple` as a half-finished migration, because neighbouring figures in the same
+dict load from the gitignored `cost_assumptions.json`. They are not half-finished. **The line is
+money vs not-money and it is deliberate:** every key in that JSON is a dollar amount or the
+sentence quoting one; everything still written in the file is a ratio, a rate, a duration, or a
+publicly stated target (the MOIC range is published on vaulterup.com). Moving them would also
+**break rather than relocate** — those three feed bare arithmetic with no `None` guard, unlike
+the money keys, so a teammate whose OneDrive copy lacked the new keys would get a crashed
+screener, not a degraded one. And it would be theatre: the comments around those values state
+the same measured facts in prose, and `CLAUDE.md` publishes them deliberately. If the firm ever
+decides its operating history shouldn't be public, that is a much larger edit where the prose
+goes first — raise *that*, not the literals. The reasoning is recorded in the file itself, above
+`ASSUMPTIONS`.
+
 **Never redact or delete anything unilaterally.** Propose a categorized list — this data belongs
 to the user's actual employer, and only the user can judge what they're comfortable having
 public. This mirrors the same posture `vaulter-onedrive-auditor` takes toward the shared OneDrive
