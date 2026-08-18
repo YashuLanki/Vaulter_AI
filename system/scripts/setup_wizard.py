@@ -796,7 +796,39 @@ def _find_claude_desktop() -> Path | None:
         except OSError:
             pass
 
+    # Windows package identity. Claude Desktop registers one under
+    # %LOCALAPPDATA%\Packages\Claude_<publisher-hash>, and an app installed
+    # that way appears in NONE of the routes above -- not the classic install
+    # folders, not necessarily the uninstall registry, and its Start Menu entry
+    # is not a .lnk file. Added 2026-08-18 after a teammate with Claude Desktop
+    # plainly installed was still told it could not be found, having already
+    # been through three earlier "surely this covers it" detection routes. The
+    # lesson each time is the same: enumerate what the machine reports rather
+    # than guessing where something ought to be.
+    local = os.environ.get("LOCALAPPDATA", "")
+    if local:
+        try:
+            packages = Path(local) / "Packages"
+            if packages.is_dir():
+                for entry in packages.iterdir():
+                    if entry.is_dir() and entry.name.lower().startswith("claude"):
+                        return entry
+        except OSError:
+            pass
+
     return None
+
+
+def _claude_search_locations() -> list:
+    """Every place _find_claude_desktop looks, for a message that has to admit
+    it failed. Naming them turns 'we couldn't find it' into something the
+    person can actually check or send back."""
+    return [
+        "the usual install folders",
+        "the Windows list of installed programs",
+        "Start Menu shortcuts",
+        "Windows app packages",
+    ]
 
 
 def setup_claude_desktop() -> bool:
@@ -827,11 +859,16 @@ def setup_claude_desktop() -> bool:
             print("  Claude Desktop is installed but hasn't been opened yet, so its")
             print("  settings folder didn't exist. Created it and continuing.")
         else:
-            print("  ⚠ Claude Desktop hasn't been opened on this computer yet, and this "
-                  "wizard couldn't find it installed either.")
+            print("  ⚠ Claude Desktop was not found on this computer.")
+            print("     Looked in: " + ", ".join(_claude_search_locations()) + ".")
+            print()
             print("     If you HAVE installed it: open Claude Desktop once (sign in), then")
             print("     double-click \"Setup Vaulter AI\" again -- that is all it needs.")
-            print("     If you haven't: install it from https://claude.ai/download first.")
+            print("     If that still doesn't work, send this window to Yashu. Saying where")
+            print("     it looked is deliberate: this message has been wrong before, and")
+            print("     the list above is what makes it checkable rather than a guess.")
+            print("     If you haven't installed it: get it from https://claude.ai/download")
+            print("     first.")
             return False
 
     from core import safe_io
