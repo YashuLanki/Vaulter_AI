@@ -1,8 +1,18 @@
 # Vaulter AI — Rebuild Plan
 
-**Date:** 2026-07-27, revised 2026-07-29
-**Status:** Sections 1–4 are **built and merged to `main`** — there is no rebuild branch any
-more. Section 5 is still plan. Sections 6–7 describe what exists today.
+**Date:** 2026-07-27, revised 2026-07-29, revised 2026-08-18
+
+**Status:** the rebuild this document planned is **done**. Sections 1–4 are built and merged to
+`main` (there is no rebuild branch any more), §5.0 and §5.1's Tier B are built, and §8's running
+order has been worked through end to end. What is left is §5.1's **Tier A and Tier C** and the
+open questions in §7.
+
+**What this document is now.** Mostly a record of *why*, not a plan — why the connectors were
+rejected, why email is deliberately gone, why the whole ingest stack was deleted, why invented
+costs were replaced with measured ones. That half does not go out of date and is the reason the
+file still exists. The parts that described *what currently exists* were removed on 2026-08-18
+(see §6), because a hand-kept second copy of the codebase map drifted out of date twice.
+`CLAUDE.md` is the maintained description of the system as it stands today.
 
 **Legend:** ✅ done · ⚠️ assumption, needs testing · 🔨 to build · 🛑 decided against
 
@@ -470,7 +480,11 @@ both produce the same format so a candidate and an owned property compare direct
 
 **By name refuses if the property has no hand-verified coordinate.** Do not add a
 geocode-the-name fallback. It was measured at 5 wrong out of 8, two in the wrong country, and
-it fails silently. `property_coordinates.csv` has 44 of 49 properties, all read off deeds.
+it fails silently. `property_coordinates.csv` covered 44 of 49 properties when this was written;
+a re-check on 2026-08-10 found **coverage complete and every point inside its correct state**, and
+added a `precision` column (`parcel` / `section` / `intersection` / `city`) after finding ten
+properties labelled `parcel` while sharing one coordinate with a sibling in the same PLSS section
+— the point was fine, the label overstated what was known.
 
 **The bug worth remembering (found and fixed 2026-07-29).** An in-town Avondale listing
 reported *"0 results found"* after 154.8 seconds. The true answer at that coordinate is 1,200
@@ -506,7 +520,8 @@ Three rules that fell out of it, all of which generalise past Overpass:
 
 ### 5.1 Trajectory — the three tiers 🔨
 
-**Tier A — Quantitative baseline.** Census (population/housing/permits), BLS (employment). Both
+**Tier A — Quantitative baseline.** 🔨 **Not built — and with Tier B shipped, this is the next
+concrete item in this section.** Census (population/housing/permits), BLS (employment). Both
 free-registration keys. This is the part that can be a *number* in the model.
 
 ⚠️ "Free-registration keys" is still a key. Read the no-keys convention in `CLAUDE.md` before
@@ -514,15 +529,22 @@ adding one: adding a key back means adding a dependency on somebody's account, s
 keyless equivalent first. Census and BLS both have unauthenticated endpoints with lower rate
 limits, which for a research pass run quarterly is likely enough.
 
-**Tier B — Jurisdiction dossiers** *(the key structural idea)*. Comp plans, CIPs, and zoning change
-annually but apply to *every* listing in that jurisdiction. Research once, store in the shared
-folder, refresh quarterly:
+**Tier B — Jurisdiction dossiers** *(the key structural idea)*. ✅ **Shipped — this tier is done.**
+Comp plans, CIPs, and zoning change annually but apply to *every* listing in that jurisdiction.
+Research once, store in the shared folder, refresh quarterly.
 
-> ✅ **One exists.** `docs/jurisdictions/coolidge-az.md` (local-only), compiled 2026-07-28,
-> refresh due 2026-10. Coolidge went first because five of the top ten listings in the July
-> 2026 screen sit in or within ~4 miles of it and the firm already holds several properties in
-> the same corridor. It is a hand-written document in the repo, not something any code reads —
-> same decision as §4, for the same reason.
+> ✅ **Built out 2026-08-12.** Four dossiers now exist, they live in
+> `SHARED_DIR/jurisdictions/<city>-<state>.md` so the whole team has the same research, and
+> `system/analysis/screening/jurisdiction_notes.py` reads them into every screen as a
+> `Jurisdiction_Note`. **This reverses the "no code reads it" decision recorded below** — see
+> `CLAUDE.md`'s jurisdiction-dossier section for why, and for the two traps found on the way
+> (matching a state code by prefix sends Arizona's water findings to Arkansas; same-named towns
+> exist in several states). The note never touches `Fit_Score` or `Fit_Tier`.
+>
+> The original entry, kept because its reasoning still holds: Coolidge went first because five of
+> the top ten listings in the July 2026 screen sit in or within ~4 miles of it and the firm
+> already holds several properties in the same corridor. It was then a hand-written document in
+> the repo that no code read — same decision as §4, for the same reason.
 >
 > It also demonstrates why the funded/planned/discussed rule below is not pedantry. Its
 > headline is a **granted** 100-year Assured Water Supply designation to the area's water
@@ -535,7 +557,10 @@ folder, refresh quarterly:
 
 > **Forney, TX** — future land use designates FM 548 corridor Medium Density Residential (Comp
 > Plan 2023, Fig 4.2). CIP FY26–30 funds wastewater extension along FM 548, construction FY27
-> (CIP p.47). Forney ISD passed $290M bond Nov 2025. Impact fees +18% Jan 2026.
+> (CIP p.47). Forney ISD passed a large school bond Nov 2025. Impact fees +18% Jan 2026.
+> *(Bond amount removed 2026-08-18 — the figure did no work in an example about recording
+> funded signals with a source and date, and the leak hook blocks money shorthand in tracked
+> files by design. The dossier itself keeps the number.)*
 
 Same shape as the buy-box standard: expensive research once → durable artifact → cheap reuse.
 
@@ -571,48 +596,25 @@ needs a human calling the county.
 
 ---
 
-## 6. Current structure
+## 6. Current structure — removed 2026-08-18
 
-*Verified against the tree on 2026-07-29. The earlier version of this section claimed 18 tools,
-two optional API keys, and `system/analysis/screening/` as "the 4-phase pipeline — untouched." All
-three were wrong; the pipeline had been deleted three commits earlier.*
+A hand-maintained map of the tree lived here. It is gone rather than corrected, because it
+had drifted out of date **twice**: its own opening note explained that the previous version
+claimed 18 tools and a 4-phase pipeline that had already been deleted, and the corrected
+2026-07-29 version had by August fallen into the identical error — 21 tools against a real 29,
+with the jurisdiction dossiers, portfolio comparison, market eras, passed-on patterns, property
+registry, release signing and three of the four check scripts all missing.
 
-```
-config.py               every path and tunable; NO API keys
-main.py                 mcp | index-corpus | search | screen | properties | stats
-mcp_server.py           21 @mcp.tool() functions, no background threads,
-                        pandas preloaded before the event loop (§3.4)
-portfolio.py            Project Master reader (CSV/.xlsx; only .xlsx marks sold)
+That is what a second copy of a map does. `CLAUDE.md`'s **Repository layout** and
+**Architecture** sections are the maintained copy, and `CLAUDE.md` already says not to
+hand-maintain the tool list at all — get it from the code:
 
-system/corpus/
-├── index.py            SQLite name index, search ranking, resolve_in_corpus() scope guard
-└── extract.py          PDF (OCR), Word, Excel, CSV, text — one file at a time, never in bulk
-
-system/analysis/screening/
-├── fit_screen.py       THE LIVE SCREENER — portfolio-fit ranking, ASSUMPTIONS at the top
-├── geo_federal.py      ground truth: FEMA flood over the parcel AREA, Census TIGER, USGS
-├── geo_providers.py    keyless geodata + the Overpass mirror/cache layer
-├── report.py           builds the self-contained HTML report
-└── report_template.html
-
-system/pipeline/
-├── proximity_tool.py       one Overpass query, all POI categories, CSV + XLSX to the shared folder
-└── property_coordinates.py hand-verified coordinates, 44 of 49 properties, from deeds
-
-system/core/safe_io.py         atomic writes, locking, conflict-copy merge
-system/scripts/                release, apply_update, push_org_setting, setup_wizard, check_screener
-quick_start/            two double-clickable setup launchers (.bat / .command)
-docs/                   this file, PORTFOLIO_STANDARD, COMPANY_PROFILE,
-                        MULTI_USER_TRANSITION, jurisdictions/
-system/data/                   drop/, project_master/, pending_update/, pending_settings/,
-                        corpus_index.db, logs/
+```bash
+python -c "import asyncio; from mcp_server import create_mcp_server; \
+  print(sorted(t.name for t in asyncio.run(create_mcp_server().list_tools())))"
 ```
 
-Gone since the last revision of this section: `system/analysis/screening/pipeline.py`,
-`phase1_rules.py`, `phase2_ranking.py`, `phase3_deep_analysis.py`, `phase4_verification.py`,
-`workbook_builder.py`, `scoring_config.py`, `market_utils.py`, `dashboard_server.py`, the
-screening-local `system/config.py`, and `system/analysis/screening/dashboard/vaulter_dashboard.html`.
-See §3.2.
+The deletions this rebuild made are recorded in §3.2, which is history and does not rot.
 
 ---
 
@@ -632,8 +634,9 @@ Still genuinely open:
    rebuilt. `check_system_health` warns past 30 days. A monthly Windows Scheduled Task on one
    machine would close it — but each person's index is their own, so it needs to be per-machine
    or it closes nothing.
-2. ~~**Confirm the shared folder name across the team.**~~ ✅ **Partially resolved 2026-07-29** —
-   this item actually bundled two different risks with different severity:
+2. ~~**Confirm the shared folder name across the team.**~~ ✅ **Resolved** — partially on
+   2026-07-29, fully on 2026-08-12/13 (see the closing note below).
+   This item actually bundled two different risks with different severity:
    - `SHARED_DIR` ("Vaulter AI Shared") is created by this app itself, with a name this code fully
      controls. It was never actually at risk of a naming mismatch -- every install creates it
      fresh with the identical literal name, so "screening output went somewhere nobody can see"
@@ -646,10 +649,16 @@ Still genuinely open:
      if more than one folder matches, same "pattern, then refuse on ambiguity" rule the CoStar
      column resolver uses.
 
-   **Still genuinely open:** `ONEDRIVE_FOLDER_NAME` (the account root's own name) -- is still
-   an exact-match assumption, unverified on an actual second machine.
-   Confirmed consistent across the team as of 2026-07-29 (standard OneDrive-for-Business naming,
-   tied to the org name), which lowers the risk, but doesn't close it.
+   ✅ **Fully closed 2026-08-12/13**, and by a better route than the one this item imagined. The
+   remaining worry was `ONEDRIVE_FOLDER_NAME` (the account root's own name) still being an
+   exact-match assumption, unverified on a second machine. It has since been verified on a real
+   teammate's machine — and rather than matching names at all, the library is now found by
+   **asking OneDrive itself** (its own sync registry, via `VAULTER_LIBRARY_URL`) and by
+   **content** (ours is the library containing `SHARED_SUBFOLDER`). Both work whatever the folder
+   is called, need nothing typed, and keep the real name out of this public repo. Name-guessing
+   survives only as a last-resort fallback. See `CLAUDE.md`'s setup-messages section — the same
+   first-teammate install found four separate bugs of the shape "the code checks a symptom and
+   the message asserts a cause."
 3. **Does the team's plan include 1M context?** Determines the practical ceiling for how much of
    a long document can go into one conversation.
 4. **Does the screener read `In SFHA`?** *(New, 2026-07-29 — has measurements behind it and no
@@ -676,15 +685,20 @@ Still genuinely open:
 
 ---
 
-## 8. Order of work, as the user set it (2026-07-28)
+## 8. Order of work, as the user set it (2026-07-28) — ✅ both steps done
 
-Stated plainly, and it does not match the order the rest of this document is written in:
+**Historical. This section directed the work and no longer does; it is kept as the record of
+what was prioritised and why.** Stated plainly, and it did not match the order the rest of this
+document is written in:
 
 > **1. Finish screening and proximity. 2. Then installability.**
 
-Which means §5's Tier A/B/C, the analog-matching in §4, and everything in
-`MULTI_USER_TRANSITION.md` Part F wait. The two things in flight are the two things that
-produce an answer somebody acts on.
+Both are now done. Screening and proximity were finished through July and August; installability
+was validated by two real reinstalls, and since 2026-08-13 a teammate other than the maintainer
+has been running the system on her own Claude Desktop — the constraint that now governs every
+change (see `CLAUDE.md`, "There is a live user"). What this ordering deferred at the time — §5's
+Tier A/C and the analog-matching in §4 — is deferred still, and §5.1's Tier A is the next
+concrete item.
 
 **What "finish" looks like for each.** For screening: the open questions at §7.4–7.6 are the
 remaining known-unknowns, and the honest gap is that `check_screener.py` covers `fit_screen.py`
@@ -694,6 +708,7 @@ before. For proximity: it works and is fast now, but it depends on volunteer-run
 the failure mode to keep watching is a *plausible* answer rather than a missing one.
 
 **Then installability**, which is `MULTI_USER_TRANSITION.md` Priority 3 and 4 — the only two
-priorities in that document that survived the rebuild. Priority 4 is built; Priority 3 is
-built and untested on anyone else's machine, and §7.2 above is the specific thing most likely
-to bite.
+priorities in that document that survived the rebuild. Both are now built and both have been
+run on a machine other than this one. §7.2 was correctly called as the thing most likely to
+bite, and it did: the first real teammate install turned up four bugs in ten minutes, all in
+the install path, none visible from a working machine.

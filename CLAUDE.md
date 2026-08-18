@@ -1321,8 +1321,12 @@ mistakes.
 ## Rebuild (2026-07)
 
 - **`docs/REBUILD_PLAN.md`** — read §0 first. It records the "no connectors" verdict, what the
-  rebuild removed and why, and the measurements behind the corpus design. §§1–4 are **built**;
-  §§5–7 (buy-box standard as a document, area intelligence, open questions) are still plan.
+  rebuild removed and why, and the measurements behind the corpus design. **Now mostly a record
+  of *why*, not a plan** (revised 2026-08-18): §§1–4 are built, §5.0 and §5.1's Tier B are built,
+  and §8's running order is worked through. What remains is §5.1's **Tier A (Census/BLS) and
+  Tier C (agenda monitoring)** and the open questions in §7. Its §6 codebase map was **deleted**
+  rather than corrected — it drifted out of date twice, and this file's own Repository layout and
+  Architecture sections are the maintained copy. Don't reintroduce a second map there.
 - **`docs/COMPANY_PROFILE.md`** — the firm's screening standard, derived from the portfolio and
   deal history. Intended to supersede threshold-based screening: the system should reason about
   *fit* against this profile rather than filtering on numeric cutoffs, because a wrong hard
