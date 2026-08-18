@@ -151,10 +151,27 @@ def _should_skip(name: str) -> bool:
     )
 
 
+# Anything the walk could NOT reach, counted rather than merely logged. Windows
+# refuses paths over 260 characters unless long-path support is switched on, and
+# this library has tens of thousands of files past that. On a machine without it
+# the walk simply cannot enter those folders -- and until 2026-08-17 that was a
+# warning scrolling past, with the run still reporting a confident total and a
+# tick. An index quietly missing a slice of the library is the worst shape this
+# system can be in: it produces "no documents found for that property" as a
+# fast, confident, wrong answer. Same rule as everywhere else here -- "couldn't
+# check" must never be reported as "nothing there".
+_UNREACHABLE = {"folders": 0, "files": 0}
+
+
 def _walk(root: Path, progress_every: int):
     """Yield (relative_path, name, size, mtime) for every indexable file."""
     seen = 0
-    for dirpath, dirnames, filenames in os.walk(root, onerror=lambda e: log.warning(f"  skip {e}")):
+
+    def _unreachable(err):
+        _UNREACHABLE["folders"] += 1
+        log.warning(f"  skip {err}")
+
+    for dirpath, dirnames, filenames in os.walk(root, onerror=_unreachable):
         # Prune in place so os.walk doesn't descend into them at all.
         dirnames[:] = [d for d in dirnames if d not in _SKIP_DIR_NAMES and not d.startswith(_SKIP_PREFIXES)]
 
@@ -165,6 +182,7 @@ def _walk(root: Path, progress_every: int):
             try:
                 st = (here / filename).stat()
             except OSError:
+                _UNREACHABLE["files"] += 1
                 continue
             rel = str((here / filename).relative_to(root)).replace("\\", "/")
             yield rel, filename, st.st_size, int(st.st_mtime)
@@ -185,6 +203,7 @@ def build_index(progress_every: int = 25000) -> dict:
     interrupted run leaves the previous index intact rather than a half-built
     one that would silently return incomplete results.
     """
+    _UNREACHABLE.update(folders=0, files=0)
     root = _corpus_root()
     started = time.monotonic()
 
@@ -223,7 +242,9 @@ def build_index(progress_every: int = 25000) -> dict:
 
     tmp_path.replace(CORPUS_INDEX_FILE)
     log.info(f"Indexed {count:,} files in {elapsed:.0f}s -> {CORPUS_INDEX_FILE}")
-    return {"root": str(root), "file_count": count, "build_seconds": round(elapsed, 1)}
+    return {"root": str(root), "file_count": count, "build_seconds": round(elapsed, 1),
+            "unreachable_folders": _UNREACHABLE["folders"],
+            "unreachable_files": _UNREACHABLE["files"]}
 
 
 def _connect() -> sqlite3.Connection | None:

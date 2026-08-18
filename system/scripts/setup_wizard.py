@@ -925,6 +925,21 @@ def build_corpus_index() -> bool:
         from corpus import build_index
         result = build_index()
         print(f"  ✓ Indexed {result['file_count']:,} files in {result['build_seconds']:.0f}s.")
+        # Say what could NOT be reached. Windows refuses paths over 260
+        # characters unless long-path support is switched on, and this library
+        # has tens of thousands of files past that. Without this the run reports
+        # a confident total and a tick while a slice of the library is missing,
+        # and the system then answers "no documents found" for a property whose
+        # files are all in deep folders -- fast, confident and wrong.
+        missed = result.get("unreachable_folders", 0) + result.get("unreachable_files", 0)
+        if missed:
+            print()
+            print(f"  ⚠ {missed:,} folders/files could NOT be read, so they are missing from")
+            print("     the list. This is almost always Windows' 260-character path limit.")
+            print("     Searches will not find those documents, and Vaulter AI will say it")
+            print("     found nothing rather than that it could not look.")
+            print("     Ask IT to switch on \"Enable Win32 long paths\" (Group Policy, or")
+            print("     the LongPathsEnabled setting), then re-run this setup.")
     except Exception as e:
         print(f"  ⚠ Could not build the index: {e}")
         print("     You can try again later by re-running this wizard, or by running")
