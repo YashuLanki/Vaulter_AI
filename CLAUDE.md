@@ -301,7 +301,7 @@ boundary is "is this your own computer, logged in as you." claude.ai (the web ap
 be used with this server: it runs in the cloud and can only reach a network address, never
 a process on someone's own machine. Claude Desktop or Claude Code are required.
 
-**31 tools.** Don't maintain this list by hand — it drifted to 19 entries with one duplicated
+**30 tools.** Don't maintain this list by hand — it drifted to 19 entries with one duplicated
 and two missing. Get the truth from the code:
 
 ```bash
@@ -311,7 +311,7 @@ python -c "import asyncio; from mcp_server import create_mcp_server; \
 
 Grouped by what they're for: **health & updates** — `check_system_health`,
 `apply_pending_update`, `apply_pending_settings`, `get_pending_setup_details`,
-`get_install_status`, `open_install_status`.
+`get_install_status`.
 **Documents** — `search_documents`, `read_document`, `browse_documents`.
 **Team knowledge** (shared-folder files, deliberately outside the document index — each of
 these tools is the ONLY door to its record; see "Where answers live" in the server's own
@@ -1135,9 +1135,8 @@ launched it since the release.
 Each install leaves one small note in `config.INSTALLS_DIR`
 (`Vaulter AI Shared/system/installs/<user>--<machine>--<folder fingerprint>.json`): version,
 channel, last seen, and whether the library, shared folder, portfolio and file index are in good
-shape, plus any update downloaded-but-not-applied. `get_install_status` reads them all;
-`open_install_status` writes and opens a single self-contained page
-(`config.INSTALL_STATUS_PAGE`), same approach as the screening report.
+shape, plus any update downloaded-but-not-applied. `get_install_status` reads them all and
+reports in the conversation.
 
 Five things here are load-bearing:
 
@@ -1157,13 +1156,12 @@ Five things here are load-bearing:
 * **A missing field means "could not check", never "fine".** `_install_problems()` reports only
   what a record positively states. Same rule as `_newer_readable_docs`' "couldn't check ≠
   nothing new".
-* **The page is a snapshot, and says so on its face (2026-08-19).** It is a plain file, rewritten
-  only when `get_install_status` or `open_install_status` runs — nothing regenerates it on a timer.
-  So opening it straight from OneDrive can show figures days old, which would be a particularly
-  bad failure for the one page whose job is spotting staleness. It now states when it was taken
-  and how to rebuild it. Two independent refresh cycles to keep straight: the PAGE refreshes when
-  someone asks, and a person's ROW refreshes when their machine checks in (daily, or right after
-  an update).
+* **There is deliberately no HTML page (removed 2026-08-19, hours after being added).** It was a
+  file, so it only refreshed when someone asked for it — and asking already produces the current
+  answer in the conversation. So the page could never be fresher than the request that made it,
+  which for a feature whose whole job is spotting stale machines is the wrong failure to build in.
+  Deleted rather than maintained. If a visual view is ever wanted again, generate it on demand and
+  do not leave it lying in the shared folder implying it is live.
 * **This list is never a complete roster, and both tools say so.** Someone appears only after
   they install the version that added this, and their entry only refreshes when they open a
   conversation. A stale "last used" is the signal, not a defect — it means that person has not

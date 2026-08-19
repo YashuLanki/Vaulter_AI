@@ -872,14 +872,19 @@ PENDING_SETTINGS_DIR.mkdir(parents=True, exist_ok=True)
 #
 # Shared rather than local for the obvious reason: the whole point is to see
 # machines OTHER than this one. It lives under SHARED_SYSTEM_DIR ("machinery;
-# nobody should need to open this") because the readable view is the page
-# get_install_status writes into SHARED_OUTPUT_DIR, not these raw files.
+# nobody should need to open this") -- the readable view is what
+# get_install_status reports in the conversation, not these raw files.
+#
+# There WAS an HTML page too, dropped 2026-08-19. It was a file, so it only
+# refreshed when someone asked for it -- and asking already produces the current
+# answer in the conversation. A page that can only ever be as fresh as the last
+# request, for a feature whose whole job is spotting stale machines, was the
+# weaker half of the pair and worth deleting rather than maintaining.
 #
 # Nothing here is confidential -- a Windows account name, a computer name, a
 # version and some yes/no flags -- but note it never travels to this repo: it
 # is written to OneDrive only, and the repo has no copy to ignore.
 INSTALLS_DIR = SHARED_SYSTEM_DIR / "installs"
-INSTALL_STATUS_PAGE = SHARED_OUTPUT_DIR / "install_status.html"
 
 INSTALLS_DIR.mkdir(parents=True, exist_ok=True)
 

@@ -40,7 +40,7 @@ LOG_FILE = PROJECT_ROOT / "data" / "logs" / "vaulter.log"
 # that a hand-kept tool list drifted before) -- a count sanity check catches
 # an accidentally-dropped or accidentally-duplicated tool without needing to
 # be updated every time a tool is intentionally added or renamed.
-EXPECTED_TOOL_COUNT = 31
+EXPECTED_TOOL_COUNT = 30
 
 # Generous on purpose: the 2026-07-30 fix bounds check_system_health's own
 # slow path (a stuck git subprocess) to ~5s. Anything past 15s means either

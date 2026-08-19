@@ -834,116 +834,6 @@ def _last_seen_words(raw) -> str:
     return f"{days} days ago"
 
 
-def _write_install_status_page(records: list, published) -> "Path | None":
-    """
-    One self-contained page showing every install, written to the shared
-    folder so it can be opened straight from OneDrive with nothing running.
-    Same approach as the screening report, and for the same reason.
-
-    Deliberately plain English throughout: the reader is whoever wants to
-    know who needs help, not whoever wrote this.
-    """
-    import datetime as _dt
-    import html as _html
-
-    try:
-        from config import INSTALL_STATUS_PAGE
-
-        markers = _published_markers()
-        rows = []
-        current = behind = attention = 0
-        for r in records:
-            version = str(r.get("version") or "unknown")
-            problems = _install_problems(r)
-            standing = _version_standing(r, markers)
-            if standing == "up to date":
-                current += 1
-            elif standing:
-                behind += 1
-            if problems:
-                attention += 1
-
-            if standing == "up to date":
-                badge = '<span class="ok">up to date</span>'
-            elif standing:
-                badge = f'<span class="warn">{_html.escape(standing)}</span>'
-            else:
-                badge = ""
-
-            rows.append(
-                "<tr>"
-                f"<td><strong>{_html.escape(str(r.get('user') or 'unknown'))}</strong></td>"
-                f"<td class=dim>{_html.escape(str(r.get('machine') or 'unknown'))}"
-                + (f"<br><small>in {_html.escape(str(r['install_folder']))}</small>"
-                   if r.get("install_folder") else "")
-                + "</td>"
-                f"<td><code>{_html.escape(version)}</code> {badge}</td>"
-                f"<td>{_html.escape(_last_seen_words(r.get('last_seen')))}</td>"
-                f"<td>{'<br>'.join(_html.escape(p) for p in problems) or '<span class=dim>nothing</span>'}</td>"
-                "</tr>"
-            )
-
-        if not rows:
-            rows.append('<tr><td colspan=5 class=dim>No installs have reported in yet.</td></tr>')
-
-        page = f"""<!doctype html>
-<meta charset="utf-8">
-<title>Vaulter AI — who has it installed</title>
-<style>
- body {{ font-family: "Segoe UI", system-ui, sans-serif; margin: 2rem auto; max-width: 60rem;
-        padding: 0 1rem; color: #1a1a1a; background: #fff; line-height: 1.5; }}
- h1 {{ font-size: 1.4rem; margin-bottom: .2rem; }}
- .sub {{ color: #666; font-size: .9rem; margin-bottom: 1.5rem; }}
- .tiles {{ display: flex; gap: 1rem; flex-wrap: wrap; margin-bottom: 1.5rem; }}
- .tile {{ border: 1px solid #e0e0e0; border-radius: 8px; padding: .8rem 1.2rem; min-width: 8rem; }}
- .tile b {{ display: block; font-size: 1.6rem; line-height: 1.1; }}
- .tile span {{ color: #666; font-size: .85rem; }}
- .wrap {{ overflow-x: auto; }}
- table {{ border-collapse: collapse; width: 100%; font-size: .92rem; }}
- th, td {{ text-align: left; padding: .55rem .7rem; border-bottom: 1px solid #eee;
-           vertical-align: top; }}
- th {{ background: #fafafa; font-weight: 600; }}
- code {{ background: #f4f4f4; padding: .1rem .35rem; border-radius: 3px; font-size: .85em; }}
- .ok {{ color: #1a7f37; font-size: .8rem; }}
- .warn {{ color: #b35000; font-size: .8rem; }}
- .dim {{ color: #888; }}
- .note {{ margin-top: 2rem; font-size: .85rem; color: #666; border-top: 1px solid #eee;
-          padding-top: 1rem; }}
-</style>
-<h1>Who has Vaulter AI installed</h1>
-<div class=sub>Snapshot taken {_dt.datetime.now():%d %B %Y at %H:%M} &mdash; this page does
- not update on its own. Ask Claude &ldquo;who is out of date?&rdquo; to rebuild it with current
- figures.<br>Newest published version: <code>{_html.escape(str(published or 'unknown'))}</code></div>
-<div class=tiles>
- <div class=tile><b>{len(records)}</b><span>machine{'' if len(records) == 1 else 's'} reporting</span></div>
- <div class=tile><b>{current}</b><span>up to date</span></div>
- <div class=tile><b>{behind}</b><span>not on the published version</span></div>
- <div class=tile><b>{attention}</b><span>need attention</span></div>
-</div>
-<div class=wrap>
-<table>
- <tr><th>Person</th><th>Computer</th><th>Version</th><th>Last used</th><th>Needs attention</th></tr>
- {''.join(rows)}
-</table>
-</div>
-<div class=note>
- <p><strong>Two things this page cannot tell you.</strong> A machine only appears here
- <em>after</em> it has installed the version that added this page, so an empty row for
- someone may simply mean they haven't updated yet rather than that they don't have it.</p>
- <p>And "last used" only moves when that person actually opens a conversation with Claude.
- Someone who hasn't opened it in a week shows a week-old date and will not have picked up
- any recent fix — that is the point of the column, not a fault in it.</p>
-</div>
-"""
-        target = Path(INSTALL_STATUS_PAGE)
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(page, encoding="utf-8")
-        return target
-    except Exception as e:
-        log.warning(f"[INSTALLS] Could not write the status page: {e}")
-        return None
-
-
 # ══════════════════════════════════════════════════════════════════
 # Cell Formatting
 # ══════════════════════════════════════════════════════════════════
@@ -2041,8 +1931,7 @@ no score -- it's a diary, not a dial.""".replace(
         machine.
 
         Use when the user asks who has it, who is out of date, whether a fix
-        has reached everyone, or who needs help. Also refreshes the visual
-        page that open_install_status opens.
+        has reached everyone, or who needs help.
 
         IMPORTANT limitation to pass on rather than gloss over: a machine
         only appears here once it has installed the version that added this
@@ -2054,7 +1943,6 @@ no score -- it's a diary, not a dial.""".replace(
         try:
             records = _read_installs()
             published = _published_version()
-            page = _write_install_status_page(records, published)
 
             if not records:
                 return ("No machine has reported in yet.\n\n"
@@ -2088,30 +1976,6 @@ no score -- it's a diary, not a dial.""".replace(
         except Exception as e:
             log.error(f"[MCP] get_install_status failed: {e}", exc_info=True)
             return "Could not read the install list -- check the local logs for details."
-
-    @mcp.tool()
-    def open_install_status() -> str:
-        """
-        Open the visual page showing every install and its version in a
-        browser.
-
-        Use when the user wants to look at who has what rather than read a
-        list in chat. The page is a single self-contained file in the shared
-        folder, so a colleague can open it straight from OneDrive.
-        """
-        import webbrowser
-        try:
-            page = _write_install_status_page(_read_installs(), _published_version())
-            if page is None:
-                return ("Could not write the status page -- check the local logs. "
-                        "The list itself is still available through get_install_status.")
-            if webbrowser.open(page.as_uri()):
-                return f"Opened the install status page.\n\nFile: {page}"
-            return ("Could not confirm a browser opened (no default browser configured?). "
-                    f"Open this file directly: {page}")
-        except Exception as e:
-            log.error(f"[MCP] open_install_status failed: {e}", exc_info=True)
-            return f"Could not open the install status page: {e}"
 
     def _format_hits(hits: list, header: str) -> str:
         """Render search hits as a compact table Claude can pick from."""
