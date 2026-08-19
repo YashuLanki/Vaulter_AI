@@ -384,8 +384,18 @@ test where the team folder *was* inside the library, and was wrong for her actua
 machine whose library detection fails is cut off from the update channel, so it needs a fresh
 package, not a published release.**
 
-`SHARED_DIR_IS_FALLBACK` is **False** here — it is not the local fallback — so the "NOT connected"
-branch does not fire and only the "present but EMPTY" one does. That message now **tests** which
+**Fixed at the root cause the same day: that folder is no longer created or used.** The OneDrive
+root was the team folder's real home until 2026-08-03; returning it afterwards was a leftover from
+the old design, and it did active harm rather than nothing — it put an unrequested folder in
+someone's OneDrive, it left `SHARED_DIR_IS_FALLBACK` **False** so the blunt "NOT connected" warning
+never fired, and it silently became the update channel. `_detect_shared_dir()` now returns
+`_LOCAL_FALLBACK_DIR` instead, which is named for what it is and makes the health check say the
+team folder is not connected — which is true. **A root folder that genuinely HAS content is still
+preferred**, so a machine set up before the move keeps working exactly as it did; only the empty
+case changed. Five layouts asserted, including the two that already worked.
+
+The "present but EMPTY" message still exists for the legacy and still-syncing cases, and now
+**tests** which
 cause applies (library not found at all / library found but the folder is not inside it / still
 syncing) instead of asserting one, and no longer tells anyone to have the folder shared with them
 and use "Add shortcut to My files" — a step deleted 2026-08-03 when the folder moved inside the

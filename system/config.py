@@ -479,9 +479,30 @@ def _detect_shared_dir() -> Path:
                   f"the team's. Using '{SHARED_SUBFOLDER}'; set VAULTER_SHARED_DIR in "
                   f"confidentials/.env to pick one explicitly.", file=sys.stderr)
 
-        # Nothing better available. May be empty -- check_system_health says so
-        # in plain English rather than letting it look connected.
-        return exact
+        # NOTHING at the OneDrive root holds the team folder. Do NOT return this
+        # path, and above all do not let the mkdir below CREATE it (2026-08-19).
+        #
+        # The root was the folder's real home until 2026-08-03, when it moved
+        # INSIDE the document library so that syncing the library would bring it
+        # along and nobody would need a shared-folder shortcut. Returning the
+        # root afterwards was a leftover from the old design, and it did active
+        # harm rather than nothing:
+        #
+        #   * it created an empty folder in the person's OneDrive that nobody
+        #     asked for, which then looks like the team's to anyone browsing;
+        #   * SHARED_DIR_IS_FALLBACK stayed False, so the health check's blunt
+        #     "NOT connected" never fired and the machine read as fine;
+        #   * UPDATES_DIR lives under here, so the machine quietly read its
+        #     update channel from its own empty folder and was NEVER offered an
+        #     update -- meaning no fix could reach it, including a fix for this.
+        #     Found on a real teammate's machine 2026-08-19.
+        #
+        # The local fallback is the honest answer instead: it keeps the program
+        # working, it is named for what it is, and it makes the health check say
+        # the team folder is not connected -- which is true. A root folder that
+        # genuinely HAS content is still preferred, above, so a machine set up
+        # before the move keeps working exactly as it did.
+        return _LOCAL_FALLBACK_DIR
 
     # OneDrive not found on this machine -- fall back to a local folder so
     # nothing crashes, but this means screening results won't actually be
