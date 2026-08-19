@@ -388,6 +388,36 @@ def _check_and_stage_update() -> None:
                     f"missing {PUBLIC_KEY_PATH.name}, or tampering. Not applying.")
         return
 
+    # The launcher/agent-file package, if this release has one. Deliberately
+    # NOT allowed to block the program update: if it is missing or fails
+    # verification, the code update still goes ahead and the extras are simply
+    # not staged, so a corrupt installer package can never hold back a real
+    # fix. Failing closed here means "don't apply THESE files", not "refuse
+    # everything" -- stated out loud in the log either way.
+    extras_name = remote.get("extras_zip_filename")
+    extras_sig = remote.get("extras_signature")
+    staged_extras = ""
+    if extras_name and extras_sig:
+        remote_extras = UPDATES_DIR / extras_name
+        if not remote_extras.exists():
+            log.warning(f"[UPDATE] {marker_path.name} names launcher package {extras_name}, "
+                        f"but it is not there -- staging the program only.")
+        else:
+            local_extras = PENDING_UPDATE_DIR / extras_name
+            _shutil.copy2(remote_extras, local_extras)
+            try:
+                extras_digest = _hashlib.sha256(local_extras.read_bytes()).digest()
+                extras_ok = verify_bytes(extras_digest, _base64.b64decode(extras_sig))
+            except Exception:
+                extras_ok = False
+            if extras_ok:
+                staged_extras = extras_name
+            else:
+                local_extras.unlink(missing_ok=True)
+                log.warning(f"[UPDATE] Launcher package {extras_name} FAILED signature "
+                            f"verification -- staging the program only. The code update is "
+                            f"unaffected.")
+
     ready_path.write_text(json.dumps({
         "version": remote_version,
         "zip_filename": zip_filename,
@@ -395,6 +425,8 @@ def _check_and_stage_update() -> None:
         "notes": remote.get("notes", ""),
         "current_version_at_download": current_version,
         "signature": signature_b64,
+        "extras_zip_filename": staged_extras,
+        "extras_signature": extras_sig if staged_extras else "",
     }, indent=2))
     log.info(f"[UPDATE] Staged version {remote_version} (currently running {current_version}), "
              f"signature verified -- apply it with the apply_pending_update tool, or as a "
@@ -1868,6 +1900,11 @@ no score -- it's a diary, not a dial.""".replace(
                 f"Applied version {result['version']}: {result['files_updated']} file(s) "
                 f"updated, {result['files_deleted']} removed.",
             ]
+            if result.get("extras_written"):
+                lines.append(f"Also refreshed {result['extras_written']} launcher and agent "
+                             f"file(s) beside the program.")
+            if result.get("extras_note"):
+                lines.append(f"Note: {result['extras_note']}.")
             if not result["dependencies_ok"]:
                 lines.append(f"Note: refreshing Python dependencies hit a problem: "
                               f"{result['dependencies_message']}")

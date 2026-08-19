@@ -121,6 +121,70 @@ def apply_update(project_root: Path, zip_path: Path) -> tuple[int, int]:
         return updated, deleted
 
 
+# The only two places a launcher/agent-file package may write, relative to the
+# install root. Anything else in such a package is ignored rather than trusted.
+ALLOWED_EXTRA_TOP_LEVEL = ("quick_start", ".claude")
+
+# Never written even when present in a package: the hooks folder holds the
+# confidential-name list the leak hook uses, and settings files are per-machine.
+# release.py already excludes both; this is the receiving end refusing them
+# independently, so a package built by an older or hand-made script cannot
+# place them either.
+REFUSED_EXTRA_PATHS = (Path(".claude") / "hooks",)
+REFUSED_EXTRA_NAMES = {"settings.json", "settings.local.json", "leak_patterns.txt"}
+
+
+def apply_extras(install_root: Path, zip_path: Path) -> tuple[int, int]:
+    """
+    Copy the launcher (`quick_start/`) and agent/skill files (`.claude/`) into
+    place. Returns (files written, entries refused).
+
+    Two deliberate differences from how the program itself is updated:
+
+    * **Nothing is ever deleted here.** The program folder is synced to match
+      the package exactly, so a file removed upstream does not linger as dead
+      code. These are instructions, not running code, and this folder is also
+      where somebody may reasonably have put an agent of their own -- deleting
+      "anything not in the package" would throw that away to solve a problem
+      (a stale instruction file) that costs nothing.
+    * **Every entry is checked against an allowlist before it is written**,
+      because this is the first thing in the update path that writes OUTSIDE
+      the program folder. A package naming `../confidentials/.env` or an
+      absolute path would otherwise land wherever it liked. Both the folder
+      and the resolved destination are checked, so a crafted path cannot
+      escape the install root.
+    """
+    written = refused = 0
+    with zipfile.ZipFile(zip_path) as zf:
+        for info in zf.infolist():
+            if info.is_dir():
+                continue
+            rel = Path(info.filename)
+            dest = (install_root / rel).resolve()
+
+            ok = (
+                not rel.is_absolute()
+                and ".." not in rel.parts
+                and rel.parts[0] in ALLOWED_EXTRA_TOP_LEVEL
+                and not any(rel.is_relative_to(bad) for bad in REFUSED_EXTRA_PATHS)
+                and rel.name not in REFUSED_EXTRA_NAMES
+                # From .claude/, only instruction files. Mirrors release.py's
+                # own rule so a package built elsewhere, or by an older script,
+                # still cannot drop anything else into that folder.
+                and not (rel.parts[0] == ".claude" and rel.suffix.lower() != ".md")
+                and dest.is_relative_to(install_root.resolve())
+            )
+            if not ok:
+                refused += 1
+                continue
+
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            with zf.open(info) as src, open(dest, "wb") as out:
+                shutil.copyfileobj(src, out)
+            written += 1
+    return written, refused
+
+
 def refresh_dependencies(project_root: Path) -> tuple[bool, str]:
     """
     Re-installs from requirements.txt using the SAME Python interpreter
@@ -200,6 +264,36 @@ def apply_pending_update(project_root: Path = None) -> dict:
         }
 
     updated, deleted = apply_update(project_root, zip_path)
+
+    # The launcher and agent files, if this release staged them. Verified again
+    # here, right before writing, exactly as the program package is -- and any
+    # failure is reported without touching the program update that just
+    # succeeded. Never raises: a broken installer package must not turn a
+    # working code update into an apparent crash.
+    extras_written = 0
+    extras_note = ""
+    extras_name = pending.get("extras_zip_filename")
+    extras_sig = pending.get("extras_signature")
+    if extras_name and extras_sig:
+        extras_path = PENDING_UPDATE_DIR / extras_name
+        try:
+            if not extras_path.exists():
+                extras_note = "the launcher and agent files were not downloaded this time"
+            else:
+                digest = hashlib.sha256(extras_path.read_bytes()).digest()
+                if verify_bytes(digest, base64.b64decode(extras_sig)):
+                    extras_written, refused = apply_extras(project_root.parent, extras_path)
+                    if refused:
+                        extras_note = (f"{refused} item(s) in the launcher package were "
+                                       f"refused for being outside the two folders it is "
+                                       f"allowed to write")
+                else:
+                    extras_note = ("the launcher and agent files failed their signature "
+                                   "check and were not applied -- the program update was")
+        except Exception as e:
+            extras_note = f"the launcher and agent files could not be applied ({e})"
+        extras_path.unlink(missing_ok=True)
+
     deps_ok, deps_message = refresh_dependencies(project_root)
 
     zip_path.unlink(missing_ok=True)
@@ -210,6 +304,8 @@ def apply_pending_update(project_root: Path = None) -> dict:
         "version": version,
         "files_updated": updated,
         "files_deleted": deleted,
+        "extras_written": extras_written,
+        "extras_note": extras_note,
         "dependencies_ok": deps_ok,
         "dependencies_message": deps_message,
     }
@@ -230,6 +326,8 @@ def main() -> None:
     notes = pending.get("notes", "")
     print(f"A staged update is ready: version {version}" + (f" — {notes}" if notes else ""))
     print(f"This will update the code in {PROJECT_ROOT} and refresh its Python dependencies.")
+    if pending.get("extras_zip_filename"):
+        print("It also refreshes the launcher and the agent/skill files beside it.")
     print("Your confidentials/ and data/ are never touched.")
     answer = input("Apply it now? [y/N] ").strip().lower()
     if answer not in ("y", "yes"):
@@ -243,6 +341,10 @@ def main() -> None:
 
     print(f"Applied version {result['version']}: {result['files_updated']} file(s) updated, "
           f"{result['files_deleted']} removed.")
+    if result.get("extras_written"):
+        print(f"Also refreshed {result['extras_written']} launcher and agent file(s).")
+    if result.get("extras_note"):
+        print(f"Note: {result['extras_note']}.")
     if not result["dependencies_ok"]:
         print(f"WARNING: refreshing dependencies had a problem: {result['dependencies_message']}")
 

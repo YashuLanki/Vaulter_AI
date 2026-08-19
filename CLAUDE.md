@@ -407,21 +407,43 @@ change still reaches every teammate normally. Two consequences worth knowing:
   so no release was ever actually published. Structural fix, not a rule change — those folders
   now simply sit outside the tree being walked. **Don't "simplify" `PROJECT_ROOT` back up a
   level.**
-* **`quick_start/` is no longer shipped by updates**, since it lives beside `system/` rather than
-  inside it. Launcher changes therefore only reach *new* installs (via `build_handoff.py`), not
-  existing ones. Low impact — the launchers matter at install time — but it is a real gap: if a
-  launcher fix ever needs to reach installed teammates, release/apply need an explicit
-  `quick_start/` path, which is asymmetric work on both scripts and was deliberately not done
-  during the restructure.
-* **`.claude/` has the exact same gap, for the exact same structural reason** — it also sits
-  beside `system/`, not inside it, so agent and skill instruction fixes never reach an
-  already-installed teammate through `release.py`/`apply_update.py`, only through a fresh
-  install via `build_handoff.py` (which does include `.claude/`). Found concretely on 2026-08-06:
-  a real leaked property-name fragment was fixed in `.claude/agents/vaulter-document-reader.md`
-  and pushed through the normal update pipeline, but the live install's copy of that file simply
-  never changed — confirmed by checking its content directly, not by trusting the update's own
-  success report. Fixed for that one installed machine with a direct file copy as a stopgap.
-  Same asymmetric-work tradeoff as `quick_start/` above, and not fixed here either.
+* **`quick_start/` and `.claude/` now DO reach installed machines (fixed 2026-08-19), in their own
+  separately-signed package.** They sit beside `system/`, so for months a launcher fix or an agent
+  instruction fix could only reach a *new* install via `build_handoff.py` — never an existing one.
+  That was measured, not theoretical: on 2026-08-06 a real leaked property-name fragment was fixed
+  in `.claude/agents/vaulter-document-reader.md` and pushed through the normal pipeline, and the
+  live install's copy simply never changed (confirmed by reading the file, not by trusting the
+  update's own success report; patched by hand as a stopgap).
+
+  **A second zip, not extra entries in the main one, and that choice is the load-bearing part.**
+  An install running the code of that day copies *every* file in the main package into its program
+  folder — so adding `quick_start/` there would have put the installer inside `system/` on a real
+  teammate's machine, and the folders that could never reach her still would not have. A separate
+  file is simply never looked at by code that doesn't know about it, so an older install is
+  genuinely unaffected, and the machinery to receive it ships in the same release. The marker gains
+  two keys (`extras_zip_filename`, `extras_signature`) that old readers never ask for. Consequence
+  worth stating plainly: **the release that adds this carries the receiving machinery, so the
+  launcher/agent files themselves first arrive with the NEXT release.**
+
+  Four rules here:
+  - **Signed and verified exactly like the program.** A launcher is code that runs on someone's
+    machine; it never gets "it's only the installer" treatment. Verified at staging and again
+    immediately before writing.
+  - **It fails closed on the extras WITHOUT blocking the code update.** A missing or
+    signature-failing launcher package must never hold back a real fix, so the program still
+    applies and the skipped extras are stated out loud. "Fail closed" here scopes to those files,
+    not the whole update.
+  - **Nothing under `quick_start/`/`.claude/` is ever DELETED**, unlike the program folder, which
+    is synced to match exactly. These are instructions rather than running code, and someone may
+    reasonably have added an agent of their own — throwing that away to remove a stale instruction
+    file is the wrong trade.
+  - **The receiving end enforces its own allowlist**, because this is the first thing in the
+    update path that writes *outside* the program folder. Only `quick_start/` and `.claude/`;
+    from `.claude/`, only `.md` (its first run caught a per-machine scheduled-task lock file
+    holding a session id); never `.claude/hooks/` (that holds `leak_patterns.txt`, the real-name
+    list) and never `settings*.json`. Absolute paths, `..`, and anything resolving outside the
+    install root are refused. Both ends enforce this independently, so a hand-made or older
+    package cannot bypass it.
 
 Priority 4 in `docs/MULTI_USER_TRANSITION.md`. `system/scripts/release.py` (run by whoever ships a
 reviewed fix, never by staff) packages the current code — excluding `system/confidentials/`,
@@ -1048,8 +1070,10 @@ cost a rebuild on one machine, and now it reaches someone else's working install
 * **`check_system_health` runs at the START of her every conversation.** Anything slow, noisy or
   crashy there is the first thing she experiences, every single time.
 
-`quick_start/` and `.claude/` do **not** reach her — fresh zip only. Known asymmetry, see the
-auto-update section.
+`quick_start/` and `.claude/` reach her too, since 2026-08-19 — in their own signed package, so a
+launcher or agent-instruction fix is no longer fresh-zip-only. There is no remaining category of
+change that cannot reach an installed machine. See the auto-update section for why it is a second
+package and not extra entries in the first.
 
 **The practice this requires: for anything touching library/shared-folder detection, a
 shared-folder reader, or the launcher's install path, simulate the ALREADY-WORKING layouts and

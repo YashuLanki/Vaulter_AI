@@ -45,7 +45,40 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).parent.parent.resolve()
 sys.path.insert(0, str(PROJECT_ROOT))
 
+# The install root -- one level above the program, holding quick_start/ and
+# .claude/. Deliberately NOT folded into PROJECT_ROOT: walking from here would
+# put docs/ and confidentials/ inside the tree being packaged, which is the
+# confidentiality hole the system/ split closed in the first place. These two
+# folders are named explicitly instead, and nothing else up here ever ships.
+REPO_ROOT = PROJECT_ROOT.parent
+
 PRIVATE_KEY_PATH = PROJECT_ROOT / "confidentials" / "release_signing_key.pem"
+
+# The two folders that live beside the program and, until 2026-08-19, could
+# never reach an already-installed teammate at all -- only a fresh zip. They
+# travel in their OWN signed package (see _build_extras_package) rather than
+# in the main one, because an install running older code would copy anything
+# added to the main package into the program folder, where neither belongs.
+# A separate file is simply ignored by code that doesn't know to look for it.
+EXTRA_TOP_LEVEL = ("quick_start", ".claude")
+
+# `.claude/hooks/` must NEVER ship: it holds leak_patterns.txt, the literal
+# list of confidential names the leak hook exists to catch -- the single worst
+# file in the project to publish. settings*.json is per-machine config. Same
+# two exclusions build_handoff.py already makes, for the same reasons.
+EXCLUDED_EXTRA_PATHS = (
+    Path(".claude") / "hooks",
+)
+EXCLUDED_EXTRA_FILE_NAMES = ("settings.json", "settings.local.json")
+
+# Checked against the built extras package by name, whatever path it appears
+# under -- the backstop for "someone moved something and the rules above went
+# stale", exactly as build_handoff.py's own FORBIDDEN_IN_PACKAGE does.
+FORBIDDEN_IN_EXTRAS = {
+    "leak_patterns.txt", ".env", "outlook_token.json",
+    "PORTFOLIO_STANDARD.md", "COMPANY_PROFILE.md", "EVIDENCE_APPENDIX.md",
+    "release_signing_key.pem",
+}
 
 # Never include these in a published package -- secrets, local data,
 # virtual environments, and git/OS metadata are all machine-specific or
@@ -140,6 +173,83 @@ def _build_package(version: str, commit_time: str = "") -> Path:
     return zip_path
 
 
+def _iter_extra_files():
+    """
+    Every file from the folders beside the program that should ship, with its
+    path relative to the install root (so `quick_start/...`, `.claude/...`).
+    """
+    for top in EXTRA_TOP_LEVEL:
+        base = REPO_ROOT / top
+        if not base.is_dir():
+            continue
+        for path in sorted(base.rglob("*")):
+            if not path.is_file():
+                continue
+            rel = path.relative_to(REPO_ROOT)
+            if any(part in EXCLUDED_DIR_NAMES for part in rel.parts):
+                continue
+            if any(rel.is_relative_to(bad) for bad in EXCLUDED_EXTRA_PATHS):
+                continue
+            if path.name in EXCLUDED_EXTRA_FILE_NAMES:
+                continue
+            # From .claude/, ONLY the markdown -- the agents and skills. The
+            # same rule build_handoff.py uses, and it earns its keep: this
+            # folder also accumulates per-machine run state (a scheduled-task
+            # lock file holding a session id and process number was caught by
+            # this on its first run). An allowlist by file type means the next
+            # such file is excluded automatically rather than after it leaks.
+            if rel.parts[0] == ".claude" and path.suffix.lower() != ".md":
+                continue
+            if path.suffix in EXCLUDED_FILE_SUFFIXES or path.name in EXCLUDED_FILE_NAMES:
+                continue
+            yield path, rel
+
+
+def _build_extras_package(version: str) -> Path | None:
+    """
+    Package quick_start/ and .claude/ separately from the program, and refuse
+    to publish if anything confidential got in.
+
+    Why a second package rather than adding these to the main one: an install
+    running the code of the day this was written copies EVERY file in the main
+    package into its program folder. Adding `quick_start/` there would put a
+    copy of the installer inside `system/`, on somebody's real machine, where
+    it does nothing -- so the folders that could never reach her would still
+    not reach her, just untidily. A separate file is invisible to code that
+    does not know to look for it, so nothing happens on an old install at all,
+    and the machinery to receive it arrives in the same release.
+
+    Returns None if there is nothing to package.
+    """
+    from config import UPDATES_DIR
+
+    files = list(_iter_extra_files())
+    if not files:
+        print("  (no quick_start/ or .claude/ found beside the program -- "
+              "publishing the program only)")
+        return None
+
+    offenders = sorted({rel.as_posix() for _p, rel in files
+                        if rel.name in FORBIDDEN_IN_EXTRAS})
+    if offenders:
+        print("  ✗ REFUSING to publish: these must never leave this machine, and the "
+              "exclusion rules did not catch them:", file=sys.stderr)
+        for name in offenders:
+            print(f"      {name}", file=sys.stderr)
+        sys.exit(1)
+
+    zip_path = UPDATES_DIR / f"vaulter_ai_extras_{version}.zip"
+    if zip_path.exists():
+        print(f"  {zip_path.name} already exists — reusing it.")
+        return zip_path
+
+    with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
+        for path, rel in files:
+            zf.write(path, arcname=rel.as_posix())
+    print(f"  Packaged {len(files)} launcher/agent file(s) into {zip_path.name}")
+    return zip_path
+
+
 def _sign_package(zip_path: Path) -> str:
     """
     Signs the package's SHA-256 hash with the private release-signing key
@@ -156,7 +266,8 @@ def _sign_package(zip_path: Path) -> str:
 
 
 def _write_marker(channel: str, version: str, zip_filename: str, notes: str,
-                  signature: str, commit_time: str = "", force: bool = False) -> None:
+                  signature: str, commit_time: str = "", force: bool = False,
+                  extras_zip_filename: str = "", extras_signature: str = "") -> None:
     from config import UPDATES_DIR
     from core import safe_io
 
@@ -164,6 +275,12 @@ def _write_marker(channel: str, version: str, zip_filename: str, notes: str,
     safe_io.save_json_atomic(marker_path, {
         "version": version,
         "zip_filename": zip_filename,
+        # The launcher/agent-file package, added 2026-08-19. Two extra keys
+        # rather than a changed shape on purpose: code that predates them
+        # reads the marker with .get() and simply never asks, so an install
+        # running older code is unaffected instead of confused.
+        "extras_zip_filename": extras_zip_filename,
+        "extras_signature": extras_signature,
         "published_at": datetime.now().isoformat(timespec="seconds"),
         # The commit's own date, so an instance can tell whether this is
         # genuinely NEWER than what it runs rather than merely different.
@@ -200,15 +317,27 @@ def _prune_old_packages() -> None:
     keep_names = set()
     for channel in ("canary", "general"):
         data = safe_io.load_json(UPDATES_DIR / f"latest_version_{channel}.json")
-        if data and data.get("zip_filename"):
-            keep_names.add(data["zip_filename"])
+        if not data:
+            continue
+        # BOTH packages a marker references. Missing the second one would let
+        # the newest-three rule below delete a launcher package that a channel
+        # is actively pointing at -- the extras zips share the same filename
+        # prefix, so they compete for those three slots.
+        for key in ("zip_filename", "extras_zip_filename"):
+            if data.get(key):
+                keep_names.add(data[key])
 
-    zips = sorted(UPDATES_DIR.glob("vaulter_ai_*.zip"),
-                  key=lambda p: p.stat().st_mtime, reverse=True)
-    keep_names.update(p.name for p in zips[:KEEP_RELEASES])
+    all_zips = sorted(UPDATES_DIR.glob("vaulter_ai_*.zip"),
+                      key=lambda p: p.stat().st_mtime, reverse=True)
+    # Counted separately for the same reason: three releases means three of
+    # each kind, not three files between them.
+    extras = [p for p in all_zips if p.name.startswith("vaulter_ai_extras_")]
+    main = [p for p in all_zips if not p.name.startswith("vaulter_ai_extras_")]
+    keep_names.update(p.name for p in main[:KEEP_RELEASES])
+    keep_names.update(p.name for p in extras[:KEEP_RELEASES])
 
     removed = 0
-    for p in zips:
+    for p in all_zips:
         if p.name in keep_names:
             continue
         try:
@@ -233,7 +362,16 @@ def publish(notes: str, force: bool = False) -> None:
 
     zip_path = _build_package(version, commit_time)
     signature = _sign_package(zip_path)
-    _write_marker("canary", version, zip_path.name, notes, signature, commit_time, force)
+
+    # Signed with the same key, and verified the same way on arrival. A launcher
+    # package is code that runs on somebody's machine, so it gets exactly the
+    # same treatment as the program itself -- never "it's only the installer".
+    extras_path = _build_extras_package(version)
+    extras_name = extras_path.name if extras_path else ""
+    extras_signature = _sign_package(extras_path) if extras_path else ""
+
+    _write_marker("canary", version, zip_path.name, notes, signature, commit_time, force,
+                  extras_zip_filename=extras_name, extras_signature=extras_signature)
     _prune_old_packages()
 
     print()
