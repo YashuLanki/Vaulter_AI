@@ -483,6 +483,40 @@ def main() -> int:
         finally:
             _shutil.rmtree(r, ignore_errors=True)
 
+        # ...and inside a folder OneDrive made for the individual, which is a
+        # DIFFERENT case from the one above and was still broken after it.
+        # The nested search walked only the folders eligible to BE a library,
+        # and that list excludes Desktop/Documents/Pictures/... -- so a library
+        # sitting inside a folder literally named `Documents` was skipped
+        # before the search started. Measured on a second teammate's machine
+        # 2026-08-19: her layout was not found, while both layouts above were.
+        #
+        # Descending into a personal folder is not indexing one. Only a CHILD
+        # holding the team's shared folder is ever accepted, which is a signal
+        # this system put there rather than a guess about what a folder holds.
+        r = _fake_root("Desktop", "Pictures", "Documents")
+        (Path(r) / "Documents" / "gamma" / _cf.SHARED_SUBFOLDER).mkdir(parents=True)
+        try:
+            got = _cf._find_corpus_subfolder(r)
+            check("a library nested inside a personal folder is still found",
+                  got is not None and got.name == "gamma",
+                  f"got {got.name if got else None}")
+            check("  ...and the personal folder itself is never returned",
+                  got is not None and got.name.lower() != "documents",
+                  f"got {got.name if got else None}")
+        finally:
+            _shutil.rmtree(r, ignore_errors=True)
+
+        # A personal folder with no library inside it must still be ignored --
+        # the fix above must not turn "descend into it" into "treat it as one".
+        r = _fake_root("Desktop", "Documents")
+        (Path(r) / "Documents" / "Some Personal Project").mkdir(parents=True)
+        try:
+            check("a personal folder with no library in it is still not the library",
+                  _cf._find_corpus_subfolder(r) is None)
+        finally:
+            _shutil.rmtree(r, ignore_errors=True)
+
         r = _fake_root("Desktop", "Other Org - Team", "Acme Co - beta", "sharepointdocs")
         (Path(r) / "sharepointdocs" / _cf.SHARED_SUBFOLDER).mkdir(parents=True)
         try:

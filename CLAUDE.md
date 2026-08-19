@@ -87,7 +87,23 @@ Two libraries synced → it **refuses and asks**, rather than guessing; the warn
 does not print the folder names, since those are the detail being protected. This was also the
 better design regardless of confidentiality: the exact name was never reliable across machines
 (colleagues see different capitalization, confirmed 2026-07-29). `check_portfolio_comparison.py`
-§5 covers all four shapes against throwaway folders.
+§5 covers every shape against throwaway folders.
+
+**The search descends into personal folders, and returning one is still forbidden (2026-08-19).**
+The order is: ask OneDrive's own records, then find the folder that CONTAINS `SHARED_SUBFOLDER`,
+then look one level down, then fall back to the name shape. That "one level down" pass used to
+walk only the folders eligible to *be* a library — which excludes `Desktop`/`Documents`/… — so a
+library sitting inside a folder literally named `Documents` was skipped before the search began.
+Measured on a second teammate's machine: her layout was **not found** while both previously-fixed
+layouts were, which is why this reads as a separate bug from the 2026-08-18 one rather than the
+same one recurring. **Descending into a personal folder is not the same as indexing one**, and
+only the second is the privacy risk: the search may look inside, but the only thing it can ever
+return is a CHILD holding the team folder — a marker this system put there, not an inference about
+what a folder contains. The personal-folder exclusion still applies in full to candidates chosen
+by NAME, where no such marker exists to lean on. A configured `VAULTER_CORPUS_SUBFOLDER` is now
+also looked for one level down, because the handoff package pre-sets that name from the *builder's*
+machine — so on a nested layout the name is right and the path is wrong, and that used to report
+the named library as absent from a computer that has it.
 
 `SECRETS_DIR` is the project's own `system/confidentials/` folder on every OS. Windows also checks
 one legacy hardcoded location (`C:\Users\<USERNAME>\Vaulter AI\confidentials`) as a

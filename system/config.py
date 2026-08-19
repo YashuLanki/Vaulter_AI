@@ -251,6 +251,22 @@ def _find_corpus_subfolder(onedrive_root: Path) -> Path | None:
         exact = onedrive_root / CORPUS_SUBFOLDER
         if exact.is_dir():
             return exact
+        # The SAME name, one level down. The handoff package pre-sets this name
+        # from the machine that built it, where the library sits at the account
+        # root -- so on a machine where OneDrive nested it (inside `Documents`,
+        # say) the pre-set name is CORRECT but the path is not, and this used to
+        # report the named library as missing from a computer that has it.
+        # Checked before giving up, and only ever accepting a folder of exactly
+        # the configured name, so this cannot drift onto something else.
+        try:
+            for parent in onedrive_root.iterdir():
+                if not parent.is_dir() or parent.name == SHARED_SUBFOLDER:
+                    continue
+                nested = parent / CORPUS_SUBFOLDER
+                if nested.is_dir():
+                    return nested
+        except OSError:
+            pass
         print(f"WARNING: VAULTER_CORPUS_SUBFOLDER is set to "
               f"'{CORPUS_SUBFOLDER}' but no such folder exists under "
               f"{onedrive_root}. Falling back to auto-detection.",
@@ -273,15 +289,15 @@ def _find_corpus_subfolder(onedrive_root: Path) -> Path | None:
         return from_records
 
     try:
+        top_level = [d for d in onedrive_root.iterdir()
+                     if d.is_dir() and d.name != SHARED_SUBFOLDER]
         # Everything OneDrive put at the account root that could plausibly be a
         # library -- i.e. not this system's own shared folder, and not one of
         # the personal folders OneDrive makes for the individual. NOTE this is
         # deliberately NOT filtered by name shape yet; see below.
         possible = [
-            d for d in onedrive_root.iterdir()
-            if d.is_dir()
-            and d.name != SHARED_SUBFOLDER
-            and not d.name.lower().startswith(_PERSONAL_ONEDRIVE_FOLDERS)
+            d for d in top_level
+            if not d.name.lower().startswith(_PERSONAL_ONEDRIVE_FOLDERS)
         ]
     except OSError:
         CORPUS_UNRESOLVED_REASON = "unreadable"
@@ -332,9 +348,23 @@ def _find_corpus_subfolder(onedrive_root: Path) -> Path | None:
     #
     # Two levels is deliberately the limit: each extra level is a directory
     # listing over OneDrive placeholders, and nothing legitimate is deeper.
+    # This descends into EVERY top-level folder, personal ones included, and
+    # that distinction is the bug this fixes (found 2026-08-19 on a second
+    # teammate's machine). The nested search used to walk `possible`, which
+    # excludes anything called Desktop/Documents/Pictures/... -- so a library
+    # sitting inside a folder literally named `Documents` was skipped before
+    # the search began. Measured: her layout was NOT FOUND on the code of the
+    # day, while both known-good layouts were.
+    #
+    # Descending into a personal folder is not the same as indexing one, and
+    # only the second is dangerous. What gets returned is the CHILD, and only
+    # a child that itself contains the team's shared folder -- a specific
+    # signal this system put there, not a guess about what a folder is. The
+    # personal-folder exclusion still applies in full to candidates chosen by
+    # NAME below, where there is no such signal to rely on.
     if not with_shared:
         deeper = []
-        for parent in possible:
+        for parent in top_level:
             try:
                 for child in parent.iterdir():
                     if child.is_dir() and (child / SHARED_SUBFOLDER).is_dir():
