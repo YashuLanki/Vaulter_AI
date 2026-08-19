@@ -882,7 +882,7 @@ def _write_install_status_page(records: list, published) -> "Path | None":
 <div class=sub>Checked {_dt.datetime.now():%d %B %Y at %H:%M}.
  Newest published version: <code>{_html.escape(str(published or 'unknown'))}</code></div>
 <div class=tiles>
- <div class=tile><b>{len(records)}</b><span>machines reporting</span></div>
+ <div class=tile><b>{len(records)}</b><span>machine{'' if len(records) == 1 else 's'} reporting</span></div>
  <div class=tile><b>{current}</b><span>up to date</span></div>
  <div class=tile><b>{behind}</b><span>not on the published version</span></div>
  <div class=tile><b>{attention}</b><span>need attention</span></div>
