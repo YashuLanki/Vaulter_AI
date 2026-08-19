@@ -89,6 +89,32 @@ better design regardless of confidentiality: the exact name was never reliable a
 (colleagues see different capitalization, confirmed 2026-07-29). `check_portfolio_comparison.py`
 §5 covers every shape against throwaway folders.
 
+**How far it looks, and why not further (2026-08-19).** Order: **ask OneDrive's own records**,
+then the folder search. The records route is the one that answers "what if shaw is somewhere else
+entirely — another folder, another drive": OneDrive already knows every library's exact mount
+point, so nothing is hunted for, at no filesystem-walking cost. It used to give up unless
+`VAULTER_LIBRARY_URL` was set — which many machines don't have, **including the maintainer's own**
+— so it now also asks OneDrive's list the same question the disk search asks: which synced library
+contains `SHARED_SUBFOLDER`? Checked at each mount and one level inside it (a parent-library sync
+mounts the parent). **Deduplicated by resolved path**: OneDrive commonly records both a library and
+the account root containing it, so a plain list found the same library twice and then refused it as
+"two candidates" — caught on a machine recording three entries for one library.
+
+The folder search itself is breadth-first to `_MAX_LIBRARY_SEARCH_DEPTH` rounds, capped at
+`_MAX_LIBRARY_SEARCH_LISTINGS` directory listings, and never descends into a folder that already
+matched. Measured reach: **four levels below the OneDrive root** (level 5 is refused, asserted in
+§5); 0.1s worst case over a 400-folder tree with no match, 0.001s on the real machine. **Unlimited
+depth is not strictly better and was rejected deliberately**: this runs at import time, so its cost
+lands on the first tool call of every conversation — the same place 5 seconds was just removed
+from — and the library is hundreds of thousands of OneDrive placeholders, so an unbounded walk
+would list its whole tree while a whole-drive walk would read the person's private files, the exact
+boundary this module exists to hold. `VAULTER_CORPUS_DIR` pins a path by hand for anything stranger.
+
+**§5 stubs `_library_from_onedrive_records` for the folder-shape checks, and covers it separately.**
+Without that, every fake-layout check returns THIS machine's real library and passes for the wrong
+reason — which is exactly what happened the moment the records route started working without a
+configured address.
+
 **The search descends into personal folders, and returning one is still forbidden (2026-08-19).**
 The order is: ask OneDrive's own records, then find the folder that CONTAINS `SHARED_SUBFOLDER`,
 then look one level down, then fall back to the name shape. That "one level down" pass used to

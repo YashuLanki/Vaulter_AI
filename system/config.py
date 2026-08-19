@@ -196,13 +196,16 @@ def _library_from_onedrive_records() -> Path | None:
     library simply is not synced here -- all normal, all handled by the
     detection that follows. Never raises: this runs at import time.
     """
-    if not LIBRARY_URL or sys.platform != "win32":
+    if sys.platform != "win32":
         return None
 
     def _norm(u: str) -> str:
         return u.strip().rstrip("/").lower()
 
-    want = _norm(LIBRARY_URL)
+    want = _norm(LIBRARY_URL) if LIBRARY_URL else ""
+
+    # Every library OneDrive is syncing, as (address, local folder) pairs.
+    mounts = []
     try:
         import winreg
         key = r"Software\SyncEngines\Providers\OneDrive"
@@ -211,16 +214,114 @@ def _library_from_onedrive_records() -> Path | None:
                 try:
                     with winreg.OpenKey(root, winreg.EnumKey(root, i)) as sub:
                         url = _norm(str(winreg.QueryValueEx(sub, "UrlNamespace")[0]))
-                        if url != want:
-                            continue
                         mount = Path(str(winreg.QueryValueEx(sub, "MountPoint")[0]))
                         if mount.is_dir():
-                            return mount
+                            mounts.append((url, mount))
                 except OSError:
                     continue
     except Exception:
-        pass
+        return None
+
+    # The address matches exactly -- the strongest signal there is, since the
+    # address is identical on every machine in the firm.
+    if want:
+        for url, mount in mounts:
+            if url == want:
+                return mount
+
+    # No address configured, or none matched. Fall back to asking the same
+    # question of OneDrive's list that the folder search asks of the disk:
+    # which of these libraries contains this system's own folder?
+    #
+    # Added 2026-08-19, and it is the answer to "what if the library is
+    # somewhere else entirely -- another folder, another drive?". OneDrive
+    # already knows where it mounted every library, so nothing has to be
+    # guessed or hunted for: this finds it at any path, on any drive, at no
+    # filesystem-walking cost at all. The previous version gave up here unless
+    # VAULTER_LIBRARY_URL happened to be set, which many machines do not have
+    # -- including the maintainer's own, measured the day this was written.
+    #
+    # Checked at the mount itself and one level inside it, because syncing a
+    # parent site's default library mounts the parent and puts ours inside.
+    # That is two directory listings per synced library, not a search.
+    # Keyed by resolved path, because the SAME folder is often reachable more
+    # than one way: OneDrive commonly records both a library and the account
+    # root that contains it, so a plain list found the firm's library twice and
+    # then refused it as "two candidates". Caught on the maintainer's own
+    # machine, which records three entries for one library.
+    found = {}
+    for _url, mount in mounts:
+        try:
+            if (mount / SHARED_SUBFOLDER).is_dir():
+                found[mount.resolve()] = mount
+                continue
+            for child in mount.iterdir():
+                if child.is_dir() and (child / SHARED_SUBFOLDER).is_dir():
+                    found[child.resolve()] = child
+        except OSError:
+            continue
+
+    # Exactly one, or nothing. Two GENUINELY different folders would mean this
+    # cannot tell them apart, and guessing which one holds the firm's documents
+    # is the thing this whole function exists to avoid.
+    if len(found) == 1:
+        return next(iter(found.values()))
     return None
+
+
+# How far below the OneDrive root to look for the library, and how many folder
+# listings that search may spend. Both are limits on purpose.
+#
+# Unlimited depth sounds strictly better and is not. This runs at import time,
+# so its cost lands on the FIRST TOOL CALL OF EVERY CONVERSATION -- the same
+# place five seconds was just removed from. Worse, the library holds hundreds of
+# thousands of files that exist locally only as OneDrive placeholders, so an
+# unbounded walk would list its entire tree, and a walk of the whole drive would
+# read the person's private folders -- the exact boundary this module exists to
+# keep. So: a few levels, a hard ceiling on listings, and OneDrive's own records
+# (see _library_from_onedrive_records) for a library that is somewhere else
+# entirely. Those records give the exact path on any drive at no walking cost,
+# which is what actually answers "what if it is not under OneDrive at all";
+# VAULTER_CORPUS_DIR pins it by hand for anything stranger still.
+# Three rounds of descent, which reaches a library up to FOUR levels below the
+# OneDrive root (measured, not inferred: level 4 is found, level 5 is not).
+_MAX_LIBRARY_SEARCH_DEPTH = 3
+_MAX_LIBRARY_SEARCH_LISTINGS = 200
+
+
+def _search_below(roots: list) -> list:
+    """
+    Folders under `roots` that contain this system's own folder, searched
+    breadth-first to _MAX_LIBRARY_SEARCH_DEPTH and stopping after
+    _MAX_LIBRARY_SEARCH_LISTINGS directory listings.
+
+    Breadth-first so the shallowest match wins, and a matching folder is never
+    descended into -- without that, finding the library would immediately walk
+    the library, which is the expensive thing this avoids.
+    """
+    matches, listings, level = [], 0, list(roots)
+    for _depth in range(_MAX_LIBRARY_SEARCH_DEPTH):
+        nxt = []
+        for parent in level:
+            if listings >= _MAX_LIBRARY_SEARCH_LISTINGS:
+                return matches
+            try:
+                children = [c for c in parent.iterdir() if c.is_dir()]
+            except OSError:
+                continue
+            listings += 1
+            for child in children:
+                try:
+                    if (child / SHARED_SUBFOLDER).is_dir():
+                        matches.append(child)      # found: do not go inside it
+                    else:
+                        nxt.append(child)
+                except OSError:
+                    continue
+        if matches or not nxt:
+            break
+        level = nxt
+    return matches
 
 
 def _find_corpus_subfolder(onedrive_root: Path) -> Path | None:
@@ -363,14 +464,7 @@ def _find_corpus_subfolder(onedrive_root: Path) -> Path | None:
     # personal-folder exclusion still applies in full to candidates chosen by
     # NAME below, where there is no such signal to rely on.
     if not with_shared:
-        deeper = []
-        for parent in top_level:
-            try:
-                for child in parent.iterdir():
-                    if child.is_dir() and (child / SHARED_SUBFOLDER).is_dir():
-                        deeper.append(child)
-            except OSError:
-                continue
+        deeper = _search_below(top_level)
         if len(deeper) == 1:
             return _found(deeper[0])
         with_shared = deeper

@@ -425,6 +425,33 @@ def main() -> int:
         personal = ("Desktop", "Documents", "Pictures",
                     "Microsoft Teams Chat Files", "Attachments")
 
+        # These checks are about the rules for reading folders off disk, so
+        # OneDrive's own records are switched off for them -- otherwise they all
+        # return THIS machine's real library and pass or fail for the wrong
+        # reason (which is exactly what happened when the records lookup started
+        # working without a configured address, 2026-08-19). The records route
+        # gets its own check immediately below, rather than going uncovered.
+        _real_records = _cf._library_from_onedrive_records
+
+        r = _fake_root("Desktop", "Acme Co - alpha")
+        (Path(r) / "Acme Co - alpha" / _cf.SHARED_SUBFOLDER).mkdir(parents=True)
+        elsewhere = Path(_tempfile.mkdtemp(prefix="vlt_elsewhere_"))
+        (elsewhere / "zeta" / _cf.SHARED_SUBFOLDER).mkdir(parents=True)
+        try:
+            _cf._library_from_onedrive_records = lambda: elsewhere / "zeta"
+            got = _cf._find_corpus_subfolder(r)
+            check("what OneDrive itself reports wins over anything found on disk",
+                  got is not None and got.name == "zeta",
+                  f"got {got.name if got else None}")
+            check("  ...which is how a library on another drive is found at all",
+                  got is not None and not str(got).startswith(str(r)))
+        finally:
+            _cf._library_from_onedrive_records = _real_records
+            _shutil.rmtree(r, ignore_errors=True)
+            _shutil.rmtree(elsewhere, ignore_errors=True)
+
+        _cf._library_from_onedrive_records = lambda: None
+
         r = _fake_root(*personal, "Acme Co - somelibrary")
         try:
             got = _cf._find_corpus_subfolder(r)
@@ -517,6 +544,31 @@ def main() -> int:
         finally:
             _shutil.rmtree(r, ignore_errors=True)
 
+        # How deep the search reaches, and that it STOPS. Both matter: a library
+        # two or three folders down is a real layout, and an unbounded walk would
+        # list the library's own hundreds of thousands of placeholder files at
+        # the start of every conversation. The measured reach is four levels
+        # below the OneDrive root; five is refused rather than chased.
+        r = _fake_root("Desktop", "Documents")
+        (Path(r) / "Documents" / "Work" / "Clients" / "delta"
+         / _cf.SHARED_SUBFOLDER).mkdir(parents=True)
+        try:
+            got = _cf._find_corpus_subfolder(r)
+            check("a library four levels down is still found",
+                  got is not None and got.name == "delta",
+                  f"got {got.name if got else None}")
+        finally:
+            _shutil.rmtree(r, ignore_errors=True)
+
+        r = _fake_root("Desktop", "a")
+        (Path(r) / "a" / "b" / "c" / "d" / "epsilon"
+         / _cf.SHARED_SUBFOLDER).mkdir(parents=True)
+        try:
+            check("  ...but the search gives up rather than walking forever",
+                  _cf._find_corpus_subfolder(r) is None)
+        finally:
+            _shutil.rmtree(r, ignore_errors=True)
+
         r = _fake_root("Desktop", "Other Org - Team", "Acme Co - beta", "sharepointdocs")
         (Path(r) / "sharepointdocs" / _cf.SHARED_SUBFOLDER).mkdir(parents=True)
         try:
@@ -567,6 +619,7 @@ def main() -> int:
                     os.environ[v] = was
             if _saved_profile is not None:
                 os.environ["USERPROFILE"] = _saved_profile
+            _cf._library_from_onedrive_records = _real_records
     except Exception as e:
         check("document-library detection checks ran", False, f"{type(e).__name__}: {e}")
 
