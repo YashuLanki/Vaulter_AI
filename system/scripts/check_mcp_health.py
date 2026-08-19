@@ -86,7 +86,16 @@ async def _run_checks() -> list[str]:
                         f"updating after an intentional change"
                     )
 
-                for tool_name, args in (("check_system_health", {}), ("get_portfolio_list", {})):
+                # Three tools, not two (2026-08-19). A tool broke in a shipped
+                # release -- a leftover reference to something deleted -- and
+                # this check passed anyway, because it only ever called two of
+                # the thirty. Deleting code and confirming the deleted NAMES are
+                # gone is not the same as running what is left. Every tool added
+                # here must be read-only and fast; get_install_status reads small
+                # files from the shared folder and returns text.
+                for tool_name, args in (("check_system_health", {}),
+                                        ("get_portfolio_list", {}),
+                                        ("get_install_status", {})):
                     t0 = time.perf_counter()
                     try:
                         result = await asyncio.wait_for(

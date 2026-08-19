@@ -1970,8 +1970,6 @@ no score -- it's a diary, not a dial.""".replace(
             out.append("Two limits worth telling the user: someone only appears after they "
                        "install the version that added this, and their entry only refreshes "
                        "when they open a conversation.")
-            if page:
-                out.append(f"\nVisual version refreshed: {page}")
             return "\n".join(out)
         except Exception as e:
             log.error(f"[MCP] get_install_status failed: {e}", exc_info=True)
