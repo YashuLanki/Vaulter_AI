@@ -80,7 +80,14 @@ sys.path.insert(0, str(PROJECT_ROOT))
 # broken source build -- exactly the "author's bleeding-edge Python" risk
 # flagged in docs/MULTI_USER_TRANSITION.md. This is much less likely than
 # it was before the rebuild dropped chromadb/onnxruntime.
-RECOMMENDED_PYTHON = [(3, 11), (3, 12)]
+# Versions the pinned dependencies are actually known to work on. 3.14 was added
+# 2026-08-19 on evidence, not optimism: the maintainer's own live install runs it,
+# and on it all three regression suites pass along with a real connector session
+# (111 + 68 + 7 checks, 31 tools served). Anyone on a current Python was being
+# shown a warning about a combination that demonstrably works, which is the kind
+# of needless alarm this project keeps removing from setup. 3.13 is deliberately
+# NOT listed -- nobody has run it, and claiming otherwise would be inventing.
+RECOMMENDED_PYTHON = [(3, 11), (3, 12), (3, 14)]
 MIN_PYTHON = (3, 10)  # this codebase uses `X | None` type hints (3.10+)
 
 
