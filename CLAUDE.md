@@ -394,6 +394,31 @@ over real stdio rather than importing `system/mcp_server.py` and calling a tool 
 because the 2026-07-30 hang never reproduced through the in-process shortcut, only through the
 real transport.
 
+### "Claude Desktop isn't installed" — stop making detection load-bearing (2026-08-19)
+
+Four separate fixes have gone into finding Claude Desktop, each adding a place to look after a real
+machine defeated the last one: the settings folder vs the program folder (2026-08-12), the uninstall
+registry (2026-08-13), Windows app packages (2026-08-18), and now the **running process** — the most
+direct proof there is, and the only route that cannot be wrong about whether the app exists. Worth
+knowing why packages matter: Claude Desktop is commonly a Microsoft Store app executing from
+`Program Files\WindowsApps\Claude_...`, a path none of the folder checks cover. Verified on the
+maintainer's own machine, which has BOTH a classic install folder and a Store package, and is
+actually running the Store one.
+
+**The real fix was not a sixth place to look.** `_find_claude_desktop()`'s result is used ONLY as
+proof the app exists — the connection is written to Claude Desktop's own settings file, whose
+location is fixed and independent of where the program lives. So a failed search was withholding
+something it did not gate. `setup_claude_desktop()` now **writes the connection anyway** and says
+what it could not confirm: harmless if the app is genuinely absent, exactly right if it is present
+and merely unrecognised, and either way the person installs the app later and it works on first
+launch with nothing to redo. It still returns False so the summary flags it, because claiming
+"connected" would state something the run never verified.
+
+The generalisable lesson, and it applies well beyond this function: **when a check has been wrong
+four times, stop improving the check and ask what it is gating.** Often the answer is nothing that
+needs gating. A dead end built on an unreliable signal is worse than proceeding with an honest
+caveat. Same family as `_newer_readable_docs`' "couldn't check ≠ nothing there".
+
 ### The empty team folder at the OneDrive root is a SYMPTOM (2026-08-19)
 
 Seen on a real teammate's machine: `Vaulter AI Shared` sitting at her OneDrive **root**, beside

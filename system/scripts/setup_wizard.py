@@ -786,6 +786,22 @@ def _find_claude_desktop() -> Path | None:
     except Exception:
         pass
 
+    # RUNNING RIGHT NOW is the most direct proof there is, and it was missing
+    # (added 2026-08-19). Every route above asks "is it in a place we expect?";
+    # this one asks Windows what is actually executing, which cannot be wrong
+    # about whether the app exists. It matters because Claude Desktop can be a
+    # Microsoft Store app running from Program Files\WindowsApps -- a path none
+    # of the folder checks cover -- and someone running setup very often has it
+    # open. Cheap: one process listing, with a short timeout.
+    try:
+        import subprocess
+        out = subprocess.run(["tasklist", "/FI", "IMAGENAME eq Claude.exe", "/NH"],
+                             capture_output=True, text=True, timeout=10)
+        if "claude.exe" in (out.stdout or "").lower():
+            return Path("Claude Desktop (running now)")
+    except Exception:
+        pass
+
     for menu in (os.environ.get("APPDATA", ""), os.environ.get("PROGRAMDATA", "")):
         if not menu:
             continue
@@ -828,11 +844,13 @@ def _claude_search_locations() -> list:
         "the Windows list of installed programs",
         "Start Menu shortcuts",
         "Windows app packages",
+        "programs running right now",
     ]
 
 
 def setup_claude_desktop() -> bool:
     _print_header("6. Claude Desktop connection")
+    unconfirmed = False
     config_path = _claude_desktop_config_path()
     if config_path is None:
         print("  ✗ Could not determine where Claude Desktop's config file lives on this OS.")
@@ -859,17 +877,38 @@ def setup_claude_desktop() -> bool:
             print("  Claude Desktop is installed but hasn't been opened yet, so its")
             print("  settings folder didn't exist. Created it and continuing.")
         else:
-            print("  ⚠ Claude Desktop was not found on this computer.")
+            # NOT FOUND used to stop here, and stopping was the wrong call
+            # (changed 2026-08-19). The install location is only ever used as
+            # PROOF that the app exists -- the connection itself is written to
+            # Claude Desktop's own settings file, whose location is fixed and
+            # does not depend on where the program lives. So failing to find the
+            # program is not a reason to withhold the connection: writing it is
+            # harmless if the app is genuinely absent, and exactly right if the
+            # app is there and merely wasn't recognised.
+            #
+            # This matters because "we couldn't find it" has been wrong four
+            # times now, each time for a machine set up in a way nobody had
+            # thought of. Rather than add a seventh place to look, stop letting
+            # the answer block anything. The connection is written, the person is
+            # told plainly what could not be confirmed, and if they install the
+            # app later it works on first launch with nothing to redo.
+            unconfirmed = True
+            try:
+                config_path.parent.mkdir(parents=True, exist_ok=True)
+            except OSError as e:
+                print(f"  ⚠ Could not create Claude Desktop's settings folder ({e}).")
+                print("     Install Claude Desktop, open it once, then double-click")
+                print("     \"Setup Vaulter AI\" again.")
+                return False
+            print("  ⚠ Could not confirm Claude Desktop is on this computer.")
             print("     Looked in: " + ", ".join(_claude_search_locations()) + ".")
             print()
-            print("     If you HAVE installed it: open Claude Desktop once (sign in), then")
-            print("     double-click \"Setup Vaulter AI\" again -- that is all it needs.")
-            print("     If that still doesn't work, send this window to Yashu. Saying where")
-            print("     it looked is deliberate: this message has been wrong before, and")
-            print("     the list above is what makes it checkable rather than a guess.")
-            print("     If you haven't installed it: get it from https://claude.ai/download")
-            print("     first.")
-            return False
+            print("     Setting up the connection anyway, because that does not depend on")
+            print("     finding the program -- so if it IS installed, this is now done.")
+            print("     If you have NOT installed it yet: get it from")
+            print("     https://claude.ai/download and it will already be connected when")
+            print("     you first open it.")
+            print("     Either way, nothing here needs to be run again.")
 
     from core import safe_io
 
@@ -885,7 +924,10 @@ def setup_claude_desktop() -> bool:
     print("     Every other entry already in that file (other MCP servers, preferences) "
           "was left untouched.")
     print("     Restart Claude Desktop (fully quit and reopen) for this to take effect.")
-    return True
+    # Deliberately still reported as needing attention when the app could not be
+    # confirmed: the connection is written, but claiming "connected" would state
+    # something this run never verified.
+    return not unconfirmed
 
 
 def build_corpus_index() -> bool:
