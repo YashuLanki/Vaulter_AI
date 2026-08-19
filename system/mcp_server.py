@@ -911,8 +911,9 @@ def _write_install_status_page(records: list, published) -> "Path | None":
           padding-top: 1rem; }}
 </style>
 <h1>Who has Vaulter AI installed</h1>
-<div class=sub>Checked {_dt.datetime.now():%d %B %Y at %H:%M}.
- Newest published version: <code>{_html.escape(str(published or 'unknown'))}</code></div>
+<div class=sub>Snapshot taken {_dt.datetime.now():%d %B %Y at %H:%M} &mdash; this page does
+ not update on its own. Ask Claude &ldquo;who is out of date?&rdquo; to rebuild it with current
+ figures.<br>Newest published version: <code>{_html.escape(str(published or 'unknown'))}</code></div>
 <div class=tiles>
  <div class=tile><b>{len(records)}</b><span>machine{'' if len(records) == 1 else 's'} reporting</span></div>
  <div class=tile><b>{current}</b><span>up to date</span></div>

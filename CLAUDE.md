@@ -1157,6 +1157,13 @@ Five things here are load-bearing:
 * **A missing field means "could not check", never "fine".** `_install_problems()` reports only
   what a record positively states. Same rule as `_newer_readable_docs`' "couldn't check ≠
   nothing new".
+* **The page is a snapshot, and says so on its face (2026-08-19).** It is a plain file, rewritten
+  only when `get_install_status` or `open_install_status` runs — nothing regenerates it on a timer.
+  So opening it straight from OneDrive can show figures days old, which would be a particularly
+  bad failure for the one page whose job is spotting staleness. It now states when it was taken
+  and how to rebuild it. Two independent refresh cycles to keep straight: the PAGE refreshes when
+  someone asks, and a person's ROW refreshes when their machine checks in (daily, or right after
+  an update).
 * **This list is never a complete roster, and both tools say so.** Someone appears only after
   they install the version that added this, and their entry only refreshes when they open a
   conversation. A stale "last used" is the signal, not a defect — it means that person has not
