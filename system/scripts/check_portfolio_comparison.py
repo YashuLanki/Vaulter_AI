@@ -450,6 +450,23 @@ def main() -> int:
             _shutil.rmtree(r, ignore_errors=True)
             _shutil.rmtree(elsewhere, ignore_errors=True)
 
+        # The marker is a strong signal but must never override the privacy
+        # boundary. A real teammate had an EMPTY marker folder at her OneDrive
+        # ROOT, left by her own install, and "the folder containing the marker"
+        # therefore described her whole account root -- Desktop, Documents,
+        # Pictures and all. Caught 2026-08-19 before it reached her.
+        r = _fake_root("Desktop", "Documents", "Pictures", _cf.SHARED_SUBFOLDER)
+        (Path(r) / "Documents" / "zeta" / _cf.SHARED_SUBFOLDER).mkdir(parents=True)
+        try:
+            got = _cf._find_corpus_subfolder(r)
+            check("an empty marker at the account root never makes the ROOT the library",
+                  got is None or got.resolve() != Path(r).resolve(),
+                  f"got {got}")
+            check("  ...and a personal folder is never returned as the library",
+                  got is None or not (got / "Desktop").is_dir())
+        finally:
+            _shutil.rmtree(r, ignore_errors=True)
+
         _cf._library_from_onedrive_records = lambda: None
 
         r = _fake_root(*personal, "Acme Co - somelibrary")

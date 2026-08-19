@@ -90,7 +90,7 @@ better design regardless of confidentiality: the exact name was never reliable a
 §5 covers every shape against throwaway folders.
 
 **How far it looks, and why not further (2026-08-19).** Order: **ask OneDrive's own records**,
-then the folder search. The records route is the one that answers "what if shaw is somewhere else
+then the folder search. The records route is the one that answers "what if the library is somewhere else
 entirely — another folder, another drive": OneDrive already knows every library's exact mount
 point, so nothing is hunted for, at no filesystem-walking cost. It used to give up unless
 `VAULTER_LIBRARY_URL` was set — which many machines don't have, **including the maintainer's own**

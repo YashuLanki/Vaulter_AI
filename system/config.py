@@ -101,6 +101,31 @@ _PERSONAL_ONEDRIVE_FOLDERS = (
 )
 
 
+def _looks_like_personal_root(d: Path) -> bool:
+    """
+    True if `d` is somebody's OneDrive account root rather than a document
+    library -- it holds the folders OneDrive creates for the individual.
+
+    This exists because of a bug that nearly shipped on 2026-08-19. Detection
+    identifies the firm's library as "the folder containing SHARED_SUBFOLDER",
+    and on a real teammate's machine an EMPTY SHARED_SUBFOLDER was sitting at
+    her OneDrive **root** (created by her own install, back when a missing
+    library made it fall back there). Asking OneDrive's records which synced
+    folder contained it therefore answered "the whole account root" -- which
+    would have indexed her Desktop, Documents and Pictures. The marker is a
+    good signal; it is not a good enough signal to override the one boundary
+    this module exists to hold.
+
+    Two of the three names is the test, not one: a library could plausibly
+    contain a folder called Documents, but not Desktop and Pictures as well.
+    """
+    try:
+        names = {c.name.lower() for c in d.iterdir() if c.is_dir()}
+    except OSError:
+        return False
+    return sum(1 for n in ("desktop", "documents", "pictures") if n in names) >= 2
+
+
 def _detect_onedrive_root() -> Path | None:
     """
     The synced OneDrive-for-Business account root, or None if not found.
@@ -252,11 +277,15 @@ def _library_from_onedrive_records() -> Path | None:
     found = {}
     for _url, mount in mounts:
         try:
-            if (mount / SHARED_SUBFOLDER).is_dir():
+            # A mount that is an account ROOT is never the library, however
+            # convincing the marker inside it looks -- see
+            # _looks_like_personal_root for the machine this was found on.
+            if (mount / SHARED_SUBFOLDER).is_dir() and not _looks_like_personal_root(mount):
                 found[mount.resolve()] = mount
                 continue
             for child in mount.iterdir():
-                if child.is_dir() and (child / SHARED_SUBFOLDER).is_dir():
+                if (child.is_dir() and (child / SHARED_SUBFOLDER).is_dir()
+                        and not _looks_like_personal_root(child)):
                     found[child.resolve()] = child
         except OSError:
             continue
@@ -313,7 +342,10 @@ def _search_below(roots: list) -> list:
             for child in children:
                 try:
                     if (child / SHARED_SUBFOLDER).is_dir():
-                        matches.append(child)      # found: do not go inside it
+                        # Same refusal as the records route: a folder holding
+                        # someone's Desktop and Pictures is not the library.
+                        if not _looks_like_personal_root(child):
+                            matches.append(child)   # found: do not go inside it
                     else:
                         nxt.append(child)
                 except OSError:
