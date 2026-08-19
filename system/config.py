@@ -175,7 +175,7 @@ LIBRARY_URL = os.getenv("VAULTER_LIBRARY_URL", "").strip()
 
 
 def _library_from_onedrive_records() -> Path | None:
-    """
+    r"""
     Ask OneDrive itself where it put the firm's document library.
 
     Windows keeps a map of every synced library -- local folder to SharePoint

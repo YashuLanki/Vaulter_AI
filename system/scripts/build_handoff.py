@@ -104,7 +104,7 @@ def _should_skip(path: Path, rel: Path) -> bool:
 
 
 def _detected_library_url() -> str | None:
-    """
+    r"""
     The SharePoint web address of the firm's document library, as recorded by
     OneDrive on THIS machine.
 
