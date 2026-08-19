@@ -1625,16 +1625,48 @@ no score -- it's a diary, not a dial.""".replace(
                 lines.append(f"Shared folder: connected ({SHARED_DIR})")
             else:
                 lines.append(f"Shared folder: present but EMPTY ({SHARED_DIR})")
-                issues.append(
-                    "The shared folder exists on this machine but has nothing in it. If "
-                    "teammates have data there, this is probably a private empty folder "
-                    "that got created automatically, not the team's shared one — which "
-                    "would explain missing portfolio data and no shared CoStar exports. "
-                    "Ask whoever set up Vaulter AI to share the 'Vaulter AI Shared' "
-                    "folder with you, then use OneDrive's \"Add shortcut to My files\" so "
-                    "it appears in the same place. (If you're the first person setting "
-                    "this up, an empty folder is expected and this will resolve itself.)"
-                )
+                # An empty team folder has more than one cause, and until
+                # 2026-08-19 this said only one of them -- and the wrong one.
+                # It told the person to have the folder shared with them and use
+                # OneDrive's "Add shortcut to My files", a step deliberately
+                # DELETED on 2026-08-03 when the team folder moved inside the
+                # document library precisely so nobody would need it. Found on a
+                # real teammate's machine, being given advice for a system that
+                # had not existed for six weeks.
+                #
+                # The team folder lives INSIDE the library, so an empty one here
+                # means this is a private folder created at the OneDrive root
+                # instead. WHY that happened is now actually tested rather than
+                # guessed, per this project's own rule about never naming an
+                # untested cause.
+                from config import CORPUS_AVAILABLE, SHARED_SUBFOLDER
+                if not CORPUS_AVAILABLE:
+                    issues.append(
+                        "This is an empty private folder, not the team's — so the portfolio "
+                        "data, everyone's screening results and the shared CoStar exports are "
+                        "all missing, and this machine cannot receive program updates either. "
+                        "The cause is the one above: the firm's document library wasn't found "
+                        "on this computer, and the team's folder lives INSIDE that library. "
+                        "Fix the library first and this clears by itself. Nothing needs to be "
+                        "shared with you and no folder needs moving."
+                    )
+                elif not (CORPUS_DIR / SHARED_SUBFOLDER).is_dir():
+                    issues.append(
+                        f"The firm's document library IS on this computer, but the team's "
+                        f"'{SHARED_SUBFOLDER}' folder isn't inside it, so this is an empty "
+                        f"private folder instead — which is why the portfolio data and shared "
+                        f"exports are missing. That folder is part of the library for "
+                        f"everyone, so the usual cause is OneDrive not syncing all of it: "
+                        f"open OneDrive settings and check the whole library is set to sync. "
+                        f"(If you are the first person setting Vaulter AI up, an empty folder "
+                        f"is expected and this resolves itself.)"
+                    )
+                else:
+                    issues.append(
+                        "The team's folder was found inside the document library but looks "
+                        "empty from here, which usually means OneDrive is still downloading "
+                        "it. If it is still empty in a few minutes, say so."
+                    )
 
         # ── Portfolio file ───────────────────────────────────────
         try:

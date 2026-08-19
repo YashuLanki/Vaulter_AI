@@ -368,6 +368,36 @@ over real stdio rather than importing `system/mcp_server.py` and calling a tool 
 because the 2026-07-30 hang never reproduced through the in-process shortcut, only through the
 real transport.
 
+### The empty team folder at the OneDrive root is a SYMPTOM (2026-08-19)
+
+Seen on a real teammate's machine: `Vaulter AI Shared` sitting at her OneDrive **root**, beside
+`Documents`, while the firm's library sat nested *inside* `Documents`. That root folder is not the
+team's — it is an empty one **her own install created**. `_detect_shared_dir()` prefers
+`corpus / SHARED_SUBFOLDER`, falls back to `ONEDRIVE_ROOT / SHARED_SUBFOLDER` when the library
+cannot be found, and the `mkdir` at import time then brings it into existence.
+
+**Why that matters far more than it looks:** `UPDATES_DIR` lives under `SHARED_DIR`, so an install
+in this state reads its update channel from its own empty folder and is **never offered an
+update** — which means no fix can reach it automatically, including a fix for this. Measured
+2026-08-19; an earlier claim in the same session that "updates can still reach her" came from a
+test where the team folder *was* inside the library, and was wrong for her actual layout. **A
+machine whose library detection fails is cut off from the update channel, so it needs a fresh
+package, not a published release.**
+
+`SHARED_DIR_IS_FALLBACK` is **False** here — it is not the local fallback — so the "NOT connected"
+branch does not fire and only the "present but EMPTY" one does. That message now **tests** which
+cause applies (library not found at all / library found but the folder is not inside it / still
+syncing) instead of asserting one, and no longer tells anyone to have the folder shared with them
+and use "Add shortcut to My files" — a step deleted 2026-08-03 when the folder moved inside the
+library precisely so nobody would need it. That wording had survived six weeks past the design it
+described.
+
+The robust route out is `_library_from_onedrive_records()`: it matches OneDrive's own records by
+**SharePoint address**, which is identical on every machine and finds a library wherever it is
+mounted. It needs `VAULTER_LIBRARY_URL`, which `build_handoff.py` writes into the package — so a
+package built before that existed (or any install whose `.env` lacks it) has no access to the one
+check that does not care where the folder sits.
+
 ### Setup messages: never name a cause the code didn't test (2026-08-12)
 
 The first real teammate install found four bugs in ten minutes, all the same shape: **the code
