@@ -705,14 +705,62 @@ def _read_installs() -> list:
         return []
 
 
-def _published_version() -> str | None:
-    """The version currently published to the general channel, or None."""
+def _published_markers() -> dict:
+    """Both channels' published markers, keyed by channel. Missing ones absent."""
+    out = {}
     try:
         from config import UPDATES_DIR
-        marker = _json_object(Path(UPDATES_DIR) / "latest_version_general.json")
-        return (marker or {}).get("version") or None
+        for channel in ("general", "canary"):
+            marker = _json_object(Path(UPDATES_DIR) / f"latest_version_{channel}.json")
+            if marker and marker.get("version"):
+                out[channel] = marker
     except Exception:
-        return None
+        pass
+    return out
+
+
+def _published_version() -> str | None:
+    """The version currently published to the general channel, or None."""
+    return (_published_markers().get("general") or {}).get("version") or None
+
+
+def _version_standing(record: dict, markers: dict) -> str:
+    """
+    How this install's version relates to what is published, in words -- and
+    only words the comparison can actually support.
+
+    A commit hash carries no order, so "behind" must never be inferred merely
+    from "different". Measured 2026-08-19: an install running the newer test
+    release was reported as "running something older" purely because it did not
+    match the general channel. Direction is claimed only when both sides carry a
+    date to compare; otherwise this says they differ and stops there. Same rule
+    as `_newer_readable_docs`: no claim beyond what was checked.
+    """
+    import datetime as _dt
+
+    version = record.get("version")
+    if not version or not markers:
+        return ""
+
+    general = markers.get("general") or {}
+    if version == general.get("version"):
+        return "up to date"
+    if version == (markers.get("canary") or {}).get("version"):
+        return "on the test version, ahead of everyone else"
+
+    def _parse(raw):
+        try:
+            return _dt.datetime.fromisoformat(str(raw))
+        except (TypeError, ValueError):
+            return None
+
+    mine, theirs = _parse(record.get("version_built")), _parse(general.get("commit_time"))
+    if mine and theirs:
+        if mine < theirs:
+            days = (theirs - mine).days
+            return f"behind by {days} day(s)" if days else "behind"
+        return "newer than the published version"
+    return "a different version from the published one"
 
 
 def _install_problems(record: dict) -> list:
@@ -769,23 +817,24 @@ def _write_install_status_page(records: list, published) -> "Path | None":
     try:
         from config import INSTALL_STATUS_PAGE
 
+        markers = _published_markers()
         rows = []
         current = behind = attention = 0
         for r in records:
             version = str(r.get("version") or "unknown")
             problems = _install_problems(r)
-            is_current = bool(published) and version == published
-            if is_current:
+            standing = _version_standing(r, markers)
+            if standing == "up to date":
                 current += 1
-            elif published:
+            elif standing:
                 behind += 1
             if problems:
                 attention += 1
 
-            if is_current:
+            if standing == "up to date":
                 badge = '<span class="ok">up to date</span>'
-            elif published:
-                badge = '<span class="warn">behind</span>'
+            elif standing:
+                badge = f'<span class="warn">{_html.escape(standing)}</span>'
             else:
                 badge = ""
 
@@ -835,7 +884,7 @@ def _write_install_status_page(records: list, published) -> "Path | None":
 <div class=tiles>
  <div class=tile><b>{len(records)}</b><span>machines reporting</span></div>
  <div class=tile><b>{current}</b><span>up to date</span></div>
- <div class=tile><b>{behind}</b><span>running something older</span></div>
+ <div class=tile><b>{behind}</b><span>not on the published version</span></div>
  <div class=tile><b>{attention}</b><span>need attention</span></div>
 </div>
 <div class=wrap>
@@ -1946,10 +1995,10 @@ no score -- it's a diary, not a dial.""".replace(
 
             out = [f"{len(records)} machine(s) have reported in.",
                    f"Newest published version: {published or 'unknown'}", ""]
+            markers = _published_markers()
             for r in records:
                 version = r.get("version") or "unknown"
-                state = "up to date" if published and version == published else (
-                    "running something older" if published else "")
+                state = _version_standing(r, markers)
                 where = f" (in {r['install_folder']})" if r.get("install_folder") else ""
                 out.append(f"{r.get('user', 'unknown')} on {r.get('machine', 'unknown')}{where}")
                 out.append(f"  version {version}"
