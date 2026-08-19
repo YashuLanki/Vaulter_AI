@@ -472,6 +472,397 @@ def _check_and_stage_org_settings() -> None:
 
 
 # ══════════════════════════════════════════════════════════════════
+# Who has this installed, and what are they running
+# ══════════════════════════════════════════════════════════════════
+
+# Bumped only for a genuinely breaking change in the record's shape, never
+# for adding a field. Unlike the screening manifest -- which IGNORES any
+# entry stamped newer than it understands, because misreading a cached
+# result there is worse than recomputing -- the reader here deliberately
+# still shows a record from a newer format, reading only the fields it
+# knows. Hiding a teammate entirely is the exact failure this feature
+# exists to fix, and a partly-read roster row is honest about itself.
+INSTALL_RECORD_FORMAT = 1
+
+
+def _install_record_name() -> str:
+    """
+    The filename this machine writes its own note under -- account name, computer
+    name, and a short fingerprint of the install's own folder.
+
+    All three parts are needed. Account plus computer alone would make one
+    person on two machines two entries, correctly, but would silently merge two
+    installs on the SAME machine into one -- which is not hypothetical: the
+    maintainer runs a working install and a development copy side by side, and
+    without the folder fingerprint whichever ran last would erase the other's
+    entry and the list would quietly under-report.
+    """
+    import hashlib
+    import re
+    here = hashlib.sha256(str(Path(__file__).parent.resolve()).lower().encode()).hexdigest()[:8]
+    # Lower-cased deliberately. Windows reports the same computer as both
+    # "JIM-220" (the environment variable) and "Jim-220" (the OS call), and two
+    # spellings would be two files -- the same double-counting the "unknown-pc"
+    # fallback already caused once. The record itself keeps the real spelling
+    # for display; only the filename is flattened.
+    slug = re.sub(r"[^A-Za-z0-9._-]", "_", f"{_who()}--{_where()}--{here}".lower())
+    return f"{slug}.json"
+
+
+def _who() -> str:
+    """This machine's account name."""
+    import getpass
+    import os
+    try:
+        return os.environ.get("USERNAME") or os.environ.get("USER") or getpass.getuser()
+    except Exception:
+        return "unknown"
+
+
+def _where() -> str:
+    """
+    This computer's name.
+
+    Asks the operating system (`platform.node()`) before trusting environment
+    variables, because the variables are not always there: measured 2026-08-19
+    that a shell without COMPUTERNAME set produced a SECOND record for an
+    install that already had one, under the name "unknown-pc". A roster that
+    double-counts one machine is worse than useless -- it invents a teammate.
+    """
+    import os
+    import platform
+    try:
+        node = platform.node().strip()
+        if node:
+            return node
+    except Exception:
+        pass
+    return os.environ.get("COMPUTERNAME") or os.environ.get("HOSTNAME") or "unknown"
+
+
+def _checkin_stamp_path() -> "Path":
+    """Local record of when this install last checked in. Local on purpose --
+    reading it must not cost another shared-folder round trip."""
+    from config import DATA_DIR
+    return Path(DATA_DIR) / "last_checkin.txt"
+
+
+def _checkin_due() -> bool:
+    """
+    Whether to write a check-in now. Once a day: the stamp holds a date and
+    nothing else, so answering this costs one small local file read.
+
+    The gate is measured, not tidiness. Checking in on every conversation
+    added **5 seconds to the first tool call of every conversation**, and the
+    5 seconds is not the shared-folder write (0.05s warm) -- it is
+    `_get_code_version()` falling through to a `git` call that times out,
+    which happens whenever no VERSION file is present. check_system_health
+    runs before whatever the user actually asked for, so that is five seconds
+    of every conversation.
+
+    Hence the deliberate ordering: this gate must NOT need the version, or it
+    pays the same cost it exists to avoid. An earlier draft compared versions
+    here and saved nothing at all -- measured, not assumed. Reporting
+    immediately after an update instead comes from apply_pending_update
+    clearing this stamp, so the next conversation re-reports rather than
+    waiting for tomorrow.
+
+    Daily costs nothing in usefulness: the roster reports "last used" in whole
+    days anyway.
+    """
+    import datetime as _dt
+    try:
+        stamped = _checkin_stamp_path().read_text(encoding="utf-8").strip()
+    except OSError:
+        return True
+    return stamped != _dt.date.today().isoformat()
+
+
+def _write_install_checkin() -> None:
+    """
+    Leave a small note in the shared folder saying what this install is and
+    how healthy it is, so `get_install_status` can answer "who is out of
+    date, and who needs fixing" for the whole team.
+
+    Called from check_system_health, which already runs once at the start of
+    every conversation -- there is no background process, per this file's own
+    rule. That timing is also the honest limit of the whole feature: a record
+    only refreshes when its owner actually opens a conversation, so a stale
+    "last seen" is not a bug, it IS the signal (measured 2026-08-19: an
+    install sat 17 versions behind purely because nothing had launched it).
+
+    Every signal is gathered in its own try/except and simply omitted when it
+    cannot be determined -- an absent field means "could not check", which is
+    never the same claim as a healthy one. Same rule `_newer_readable_docs`
+    follows for "couldn't check" versus "nothing there". The whole function
+    swallows its own failures too: nothing about reporting status is worth
+    disturbing the first tool call of somebody's conversation.
+    """
+    import datetime as _dt
+    import json
+    import os
+    import sys as _sys
+
+    try:
+        from config import (INSTALLS_DIR, VAULTER_UPDATE_CHANNEL,
+                            PENDING_UPDATE_DIR, CORPUS_AVAILABLE,
+                            SHARED_DIR_IS_FALLBACK)
+
+        # Gate FIRST, then look the version up -- see _checkin_due's own note
+        # on why this order is the whole point.
+        if not _checkin_due():
+            return
+        version = _get_code_version()
+
+        record = {
+            "format_version": INSTALL_RECORD_FORMAT,
+            "user": _who(),
+            "machine": _where(),
+            "last_seen": _dt.datetime.now().astimezone().isoformat(timespec="seconds"),
+            "version": version,
+            "channel": VAULTER_UPDATE_CHANNEL,
+            "python": f"{_sys.version_info.major}.{_sys.version_info.minor}",
+            "library_connected": bool(CORPUS_AVAILABLE),
+            "shared_folder_ok": not SHARED_DIR_IS_FALLBACK,
+            # Which folder this install lives in -- the only way to tell two
+            # installs on one machine apart in the list. The INSTALL's own name
+            # ("Vaulter AI"), not this file's parent, which is "system" on every
+            # machine and so distinguishes nothing. Just the name, never the
+            # full path: it is all a reader needs.
+            "install_folder": Path(__file__).parent.parent.resolve().name,
+        }
+
+        built = _get_code_build_time()
+        if built is not None:
+            record["version_built"] = built.isoformat(timespec="seconds")
+
+        # The file list: how many names it holds and how old it is. A missing
+        # pair means "not built yet"; an absent key means the check itself
+        # failed. Those are different states and are kept different.
+        try:
+            from corpus import index_age
+            age = index_age()
+            if age is None:
+                record["index_files"] = None
+                record["index_days"] = None
+            else:
+                count, when = age
+                record["index_files"] = int(count)
+                record["index_days"] = (
+                    _dt.datetime.now(_dt.timezone.utc) - when).days
+        except Exception:
+            pass
+
+        try:
+            from portfolio import find_project_file
+            from config import SMARTSHEET_PORTFOLIO_DIR
+            pfile = find_project_file()
+            record["portfolio_found"] = pfile is not None
+            if pfile is not None:
+                record["portfolio_source"] = (
+                    "shared" if pfile.parent == SMARTSHEET_PORTFOLIO_DIR else "local")
+        except Exception:
+            pass
+
+        # An update sitting downloaded-but-not-applied. This is the one flag
+        # that says "this person has been offered the fix and has not taken
+        # it yet", which is a different thing from simply being behind.
+        try:
+            staged = _json_object(Path(PENDING_UPDATE_DIR) / "ready.json")
+            record["update_waiting"] = (staged or {}).get("version") or None
+        except Exception:
+            pass
+
+        target = Path(INSTALLS_DIR) / _install_record_name()
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(json.dumps(record, indent=2), encoding="utf-8")
+
+        # Stamped only after the write actually succeeded, so a failed or
+        # half-synced write is retried next conversation rather than being
+        # recorded as done.
+        _checkin_stamp_path().write_text(_dt.date.today().isoformat(), encoding="utf-8")
+    except Exception as e:
+        log.warning(f"[INSTALLS] Could not record this install's status (continuing): {e}")
+
+
+def _read_installs() -> list:
+    """
+    Every install's note, newest-active first. Skips anything unreadable or
+    of the wrong shape -- these files sit in a folder every teammate can
+    write to, so `_json_object`'s shape check is the point, not decoration.
+    """
+    try:
+        from config import INSTALLS_DIR
+        found = []
+        for path in sorted(Path(INSTALLS_DIR).glob("*.json")):
+            record = _json_object(path)
+            if record:
+                found.append(record)
+        found.sort(key=lambda r: str(r.get("last_seen") or ""), reverse=True)
+        return found
+    except Exception as e:
+        log.warning(f"[INSTALLS] Could not read the install records: {e}")
+        return []
+
+
+def _published_version() -> str | None:
+    """The version currently published to the general channel, or None."""
+    try:
+        from config import UPDATES_DIR
+        marker = _json_object(Path(UPDATES_DIR) / "latest_version_general.json")
+        return (marker or {}).get("version") or None
+    except Exception:
+        return None
+
+
+def _install_problems(record: dict) -> list:
+    """
+    What is actually wrong on one machine, in plain words. Only states things
+    the record positively reports -- a missing field means the machine could
+    not check, which is never reported here as if it were fine.
+    """
+    problems = []
+    if record.get("library_connected") is False:
+        problems.append("the firm's document library isn't syncing, so searches find nothing")
+    if record.get("shared_folder_ok") is False:
+        problems.append("not connected to the team's shared folder")
+    if record.get("portfolio_found") is False:
+        problems.append("no portfolio file, so property lookups fall back to the built-in list")
+    if "index_files" in record and record.get("index_files") is None:
+        problems.append("file list never built, so document search can't run")
+    days = record.get("index_days")
+    if isinstance(days, int) and days > 10:
+        problems.append(f"file list is {days} days old — the nightly refresh has stopped")
+    if record.get("update_waiting"):
+        problems.append(f"update {record['update_waiting']} downloaded but not installed yet")
+    return problems
+
+
+def _last_seen_words(raw) -> str:
+    """"Today", "3 days ago", or the raw text if it cannot be read as a date."""
+    import datetime as _dt
+    try:
+        when = _dt.datetime.fromisoformat(str(raw))
+    except (TypeError, ValueError):
+        return str(raw or "unknown")
+    now = _dt.datetime.now(when.tzinfo) if when.tzinfo else _dt.datetime.now()
+    days = (now - when).days
+    if days <= 0:
+        return "today"
+    if days == 1:
+        return "yesterday"
+    return f"{days} days ago"
+
+
+def _write_install_status_page(records: list, published) -> "Path | None":
+    """
+    One self-contained page showing every install, written to the shared
+    folder so it can be opened straight from OneDrive with nothing running.
+    Same approach as the screening report, and for the same reason.
+
+    Deliberately plain English throughout: the reader is whoever wants to
+    know who needs help, not whoever wrote this.
+    """
+    import datetime as _dt
+    import html as _html
+
+    try:
+        from config import INSTALL_STATUS_PAGE
+
+        rows = []
+        current = behind = attention = 0
+        for r in records:
+            version = str(r.get("version") or "unknown")
+            problems = _install_problems(r)
+            is_current = bool(published) and version == published
+            if is_current:
+                current += 1
+            elif published:
+                behind += 1
+            if problems:
+                attention += 1
+
+            if is_current:
+                badge = '<span class="ok">up to date</span>'
+            elif published:
+                badge = '<span class="warn">behind</span>'
+            else:
+                badge = ""
+
+            rows.append(
+                "<tr>"
+                f"<td><strong>{_html.escape(str(r.get('user') or 'unknown'))}</strong></td>"
+                f"<td class=dim>{_html.escape(str(r.get('machine') or 'unknown'))}"
+                + (f"<br><small>in {_html.escape(str(r['install_folder']))}</small>"
+                   if r.get("install_folder") else "")
+                + "</td>"
+                f"<td><code>{_html.escape(version)}</code> {badge}</td>"
+                f"<td>{_html.escape(_last_seen_words(r.get('last_seen')))}</td>"
+                f"<td>{'<br>'.join(_html.escape(p) for p in problems) or '<span class=dim>nothing</span>'}</td>"
+                "</tr>"
+            )
+
+        if not rows:
+            rows.append('<tr><td colspan=5 class=dim>No installs have reported in yet.</td></tr>')
+
+        page = f"""<!doctype html>
+<meta charset="utf-8">
+<title>Vaulter AI — who has it installed</title>
+<style>
+ body {{ font-family: "Segoe UI", system-ui, sans-serif; margin: 2rem auto; max-width: 60rem;
+        padding: 0 1rem; color: #1a1a1a; background: #fff; line-height: 1.5; }}
+ h1 {{ font-size: 1.4rem; margin-bottom: .2rem; }}
+ .sub {{ color: #666; font-size: .9rem; margin-bottom: 1.5rem; }}
+ .tiles {{ display: flex; gap: 1rem; flex-wrap: wrap; margin-bottom: 1.5rem; }}
+ .tile {{ border: 1px solid #e0e0e0; border-radius: 8px; padding: .8rem 1.2rem; min-width: 8rem; }}
+ .tile b {{ display: block; font-size: 1.6rem; line-height: 1.1; }}
+ .tile span {{ color: #666; font-size: .85rem; }}
+ .wrap {{ overflow-x: auto; }}
+ table {{ border-collapse: collapse; width: 100%; font-size: .92rem; }}
+ th, td {{ text-align: left; padding: .55rem .7rem; border-bottom: 1px solid #eee;
+           vertical-align: top; }}
+ th {{ background: #fafafa; font-weight: 600; }}
+ code {{ background: #f4f4f4; padding: .1rem .35rem; border-radius: 3px; font-size: .85em; }}
+ .ok {{ color: #1a7f37; font-size: .8rem; }}
+ .warn {{ color: #b35000; font-size: .8rem; }}
+ .dim {{ color: #888; }}
+ .note {{ margin-top: 2rem; font-size: .85rem; color: #666; border-top: 1px solid #eee;
+          padding-top: 1rem; }}
+</style>
+<h1>Who has Vaulter AI installed</h1>
+<div class=sub>Checked {_dt.datetime.now():%d %B %Y at %H:%M}.
+ Newest published version: <code>{_html.escape(str(published or 'unknown'))}</code></div>
+<div class=tiles>
+ <div class=tile><b>{len(records)}</b><span>machines reporting</span></div>
+ <div class=tile><b>{current}</b><span>up to date</span></div>
+ <div class=tile><b>{behind}</b><span>running something older</span></div>
+ <div class=tile><b>{attention}</b><span>need attention</span></div>
+</div>
+<div class=wrap>
+<table>
+ <tr><th>Person</th><th>Computer</th><th>Version</th><th>Last used</th><th>Needs attention</th></tr>
+ {''.join(rows)}
+</table>
+</div>
+<div class=note>
+ <p><strong>Two things this page cannot tell you.</strong> A machine only appears here
+ <em>after</em> it has installed the version that added this page, so an empty row for
+ someone may simply mean they haven't updated yet rather than that they don't have it.</p>
+ <p>And "last used" only moves when that person actually opens a conversation with Claude.
+ Someone who hasn't opened it in a week shows a week-old date and will not have picked up
+ any recent fix — that is the point of the column, not a fault in it.</p>
+</div>
+"""
+        target = Path(INSTALL_STATUS_PAGE)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(page, encoding="utf-8")
+        return target
+    except Exception as e:
+        log.warning(f"[INSTALLS] Could not write the status page: {e}")
+        return None
+
+
+# ══════════════════════════════════════════════════════════════════
 # Cell Formatting
 # ══════════════════════════════════════════════════════════════════
 
@@ -1095,22 +1486,36 @@ no score -- it's a diary, not a dial.""".replace(
             except Exception as e:
                 lines.append(f"  Index: could not check ({e})")
 
-        # ── Staged update / settings check ───────────────────────
-        # Was a 5am scheduled job; see this tool's docstring. Both of these
-        # only ever download and stage -- neither applies anything.
-        for _stage_check in (_check_and_stage_update, _check_and_stage_org_settings):
+        # ── Staged update / settings check, and this install's check-in ──
+        # The first two were a 5am scheduled job; see this tool's docstring.
+        # Both only ever download and stage -- neither applies anything. The
+        # third writes this machine's own status note for get_install_status;
+        # it rides along here because this is already the once-per-conversation
+        # shared-folder visit, and adding a background process is not allowed.
+        for _stage_check in (_check_and_stage_update, _check_and_stage_org_settings,
+                             _write_install_checkin):
             _ts = _t.perf_counter()
             try:
                 _stage_check()
             except Exception as e:
                 log.warning(f"[HEALTH] Staging check failed (continuing): {e}")
             took = _t.perf_counter() - _ts
-            # These read the shared OneDrive folder. A cloud-only file can block
-            # for minutes while OneDrive fetches it, and that delay lands on the
-            # first tool call of the conversation.
+            # Each of these reads the shared OneDrive folder, where a cloud-only
+            # file can block for minutes while OneDrive fetches it, and each also
+            # looks up the running version, which falls back to a `git` call that
+            # can time out. Both delays land on the first tool call of the
+            # conversation.
+            #
+            # So the warning names the SYMPTOM and lists the candidates rather
+            # than asserting one -- measured 2026-08-19: this line blamed OneDrive
+            # while the real cost was the git fallback, and it cost real time
+            # chasing the wrong thing. Exactly the failure CLAUDE.md's own
+            # "never name a cause the code didn't test" rule is about.
             if took > 5:
-                log.warning(f"[HEALTH] {_stage_check.__name__} took {took:.0f}s "
-                            f"— shared OneDrive folder is slow to read")
+                log.warning(f"[HEALTH] {_stage_check.__name__} took {took:.0f}s — too slow for "
+                            f"the start of a conversation. Usual causes: OneDrive fetching a "
+                            f"cloud-only file, or the version lookup falling through to git "
+                            f"(no VERSION file present). This does not say which.")
 
         # ── Shared folder ────────────────────────────────────────
         from config import SHARED_DIR, SHARED_DIR_IS_FALLBACK
@@ -1400,6 +1805,16 @@ no score -- it's a diary, not a dial.""".replace(
             if not result["applied"]:
                 return f"Nothing to apply: {result['reason']}"
 
+            # Clear the daily check-in stamp so the next conversation reports
+            # the NEW version to the team straight away, instead of leaving the
+            # roster claiming the old one until tomorrow. "Did that fix reach
+            # everyone?" is the one question this list exists to answer, and
+            # the moment right after an update is when it gets asked.
+            try:
+                _checkin_stamp_path().unlink(missing_ok=True)
+            except OSError:
+                pass
+
             lines = [
                 f"Applied version {result['version']}: {result['files_updated']} file(s) "
                 f"updated, {result['files_deleted']} removed.",
@@ -1498,6 +1913,86 @@ no score -- it's a diary, not a dial.""".replace(
         except Exception as e:
             log.error(f"[MCP] apply_pending_settings failed: {e}", exc_info=True)
             return "Could not finish setting this up — check the local logs for details."
+
+    @mcp.tool()
+    def get_install_status() -> str:
+        """
+        Who on the team has Vaulter AI installed, which version each is
+        running, when they last used it, and what needs fixing on their
+        machine.
+
+        Use when the user asks who has it, who is out of date, whether a fix
+        has reached everyone, or who needs help. Also refreshes the visual
+        page that open_install_status opens.
+
+        IMPORTANT limitation to pass on rather than gloss over: a machine
+        only appears here once it has installed the version that added this
+        feature, and its entry only refreshes when that person actually opens
+        a conversation. So a missing person may simply not have updated yet,
+        and an old "last used" date means they will not have picked up recent
+        fixes. Never report this list as a complete roster of the firm.
+        """
+        try:
+            records = _read_installs()
+            published = _published_version()
+            page = _write_install_status_page(records, published)
+
+            if not records:
+                return ("No machine has reported in yet.\n\n"
+                        "That is expected until at least one install has picked up the "
+                        "version that added this feature -- each one reports itself at the "
+                        "start of a conversation, so entries appear as people use it. It "
+                        "does NOT mean nobody has Vaulter AI installed.")
+
+            out = [f"{len(records)} machine(s) have reported in.",
+                   f"Newest published version: {published or 'unknown'}", ""]
+            for r in records:
+                version = r.get("version") or "unknown"
+                state = "up to date" if published and version == published else (
+                    "running something older" if published else "")
+                where = f" (in {r['install_folder']})" if r.get("install_folder") else ""
+                out.append(f"{r.get('user', 'unknown')} on {r.get('machine', 'unknown')}{where}")
+                out.append(f"  version {version}"
+                           + (f" ({state})" if state else "")
+                           + f", last used {_last_seen_words(r.get('last_seen'))}")
+                problems = _install_problems(r)
+                for p in problems:
+                    out.append(f"  NEEDS ATTENTION: {p}")
+                out.append("")
+
+            out.append("Two limits worth telling the user: someone only appears after they "
+                       "install the version that added this, and their entry only refreshes "
+                       "when they open a conversation.")
+            if page:
+                out.append(f"\nVisual version refreshed: {page}")
+            return "\n".join(out)
+        except Exception as e:
+            log.error(f"[MCP] get_install_status failed: {e}", exc_info=True)
+            return "Could not read the install list -- check the local logs for details."
+
+    @mcp.tool()
+    def open_install_status() -> str:
+        """
+        Open the visual page showing every install and its version in a
+        browser.
+
+        Use when the user wants to look at who has what rather than read a
+        list in chat. The page is a single self-contained file in the shared
+        folder, so a colleague can open it straight from OneDrive.
+        """
+        import webbrowser
+        try:
+            page = _write_install_status_page(_read_installs(), _published_version())
+            if page is None:
+                return ("Could not write the status page -- check the local logs. "
+                        "The list itself is still available through get_install_status.")
+            if webbrowser.open(page.as_uri()):
+                return f"Opened the install status page.\n\nFile: {page}"
+            return ("Could not confirm a browser opened (no default browser configured?). "
+                    f"Open this file directly: {page}")
+        except Exception as e:
+            log.error(f"[MCP] open_install_status failed: {e}", exc_info=True)
+            return f"Could not open the install status page: {e}"
 
     def _format_hits(hits: list, header: str) -> str:
         """Render search hits as a compact table Claude can pick from."""

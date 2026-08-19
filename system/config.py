@@ -687,6 +687,25 @@ PENDING_SETTINGS_DIR = DATA_DIR / "pending_settings"
 ORG_SETTINGS_DIR.mkdir(parents=True, exist_ok=True)
 PENDING_SETTINGS_DIR.mkdir(parents=True, exist_ok=True)
 
+# Where each install leaves a small note about itself -- which version it is
+# running, when it was last active, and whether its library/portfolio/index
+# are in good shape. One file per machine, written by check_system_health at
+# the start of a conversation (there is no background process, per this
+# project's own rule), and read back by get_install_status.
+#
+# Shared rather than local for the obvious reason: the whole point is to see
+# machines OTHER than this one. It lives under SHARED_SYSTEM_DIR ("machinery;
+# nobody should need to open this") because the readable view is the page
+# get_install_status writes into SHARED_OUTPUT_DIR, not these raw files.
+#
+# Nothing here is confidential -- a Windows account name, a computer name, a
+# version and some yes/no flags -- but note it never travels to this repo: it
+# is written to OneDrive only, and the repo has no copy to ignore.
+INSTALLS_DIR = SHARED_SYSTEM_DIR / "installs"
+INSTALL_STATUS_PAGE = SHARED_OUTPUT_DIR / "install_status.html"
+
+INSTALLS_DIR.mkdir(parents=True, exist_ok=True)
+
 # Which release channel this instance follows -- "general" (the default)
 # only picks up versions that have been explicitly promoted after a
 # canary check; "canary" picks up every new release immediately, before

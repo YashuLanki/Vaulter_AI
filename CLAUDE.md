@@ -36,8 +36,8 @@ python system/main.py properties                # list the portfolio from the Pr
 python system/main.py stats                     # what this instance has available
 
 # Checks -- run the one that matches what you touched (see "Three regression suites" below)
-python system/scripts/check_screener.py             # 106 checks on the screener's arithmetic
-python system/scripts/check_portfolio_comparison.py # 58 checks on the comparison index
+python system/scripts/check_screener.py             # 111 checks on the screener's arithmetic
+python system/scripts/check_portfolio_comparison.py # 59 checks on the comparison index
 python system/scripts/check_answers.py              # 7 checks on the knowledge answers come from
 ```
 
@@ -259,7 +259,7 @@ boundary is "is this your own computer, logged in as you." claude.ai (the web ap
 be used with this server: it runs in the cloud and can only reach a network address, never
 a process on someone's own machine. Claude Desktop or Claude Code are required.
 
-**29 tools.** Don't maintain this list by hand — it drifted to 19 entries with one duplicated
+**31 tools.** Don't maintain this list by hand — it drifted to 19 entries with one duplicated
 and two missing. Get the truth from the code:
 
 ```bash
@@ -268,7 +268,8 @@ python -c "import asyncio; from mcp_server import create_mcp_server; \
 ```
 
 Grouped by what they're for: **health & updates** — `check_system_health`,
-`apply_pending_update`, `apply_pending_settings`, `get_pending_setup_details`.
+`apply_pending_update`, `apply_pending_settings`, `get_pending_setup_details`,
+`get_install_status`, `open_install_status`.
 **Documents** — `search_documents`, `read_document`, `browse_documents`.
 **Team knowledge** (shared-folder files, deliberately outside the document index — each of
 these tools is the ONLY door to its record; see "Where answers live" in the server's own
@@ -621,10 +622,10 @@ ranks or weights selection factors. They need a senior partner's judgment, not a
 (Real names and figures behind every genericized citation in this file live in
 `docs/EVIDENCE_APPENDIX.md`, local-only — this repo is deliberately public.)
 
-`system/scripts/check_screener.py` runs **106 checks** across deformed market shapes. Run it after
+`system/scripts/check_screener.py` runs **111 checks** across deformed market shapes. Run it after
 any change to `fit_screen.py`. Note it covers the screener only — **`geo_providers.py` has no
 automated coverage at all**, and that is where the worst measured bug of 2026-07-29 lived (see
-the proximity note below). It is one of three suites: `check_portfolio_comparison.py` (58 checks)
+the proximity note below). It is one of three suites: `check_portfolio_comparison.py` (59 checks)
 covers the comparison index, and `check_answers.py` (7) covers the shared knowledge answers are
 built from — see "Three regression suites" below for what each one can and cannot catch.
 
@@ -985,6 +986,51 @@ threw out 60 of 69 real listings). If a pattern eventually emerges in these note
 decides whether the screener should change. The server's own instructions tell Claude to offer
 to save a decision when the user states one, once, without nagging.
 
+### Who has it installed (`get_install_status` / `open_install_status`) — 2026-08-19
+
+Built to answer a question nothing could answer before: **who has Vaulter AI, what version are
+they running, and does anything need fixing on their machine?** Until this existed the only way
+to know was to read a file on that person's own computer. The prompting case was concrete — the
+maintainer's own install sat **17 versions behind for six days**, invisible, because nothing had
+launched it since the release.
+
+Each install leaves one small note in `config.INSTALLS_DIR`
+(`Vaulter AI Shared/system/installs/<user>--<machine>--<folder fingerprint>.json`): version,
+channel, last seen, and whether the library, shared folder, portfolio and file index are in good
+shape, plus any update downloaded-but-not-applied. `get_install_status` reads them all;
+`open_install_status` writes and opens a single self-contained page
+(`config.INSTALL_STATUS_PAGE`), same approach as the screening report.
+
+Five things here are load-bearing:
+
+* **Written from `check_system_health`, never a background process** — that is already the
+  once-per-conversation shared-folder visit, and this project does not run threads.
+* **Gated to once a day, and the gate must not need the version.** Checking in every
+  conversation added **5 seconds to the first tool call of every conversation**. The 5 seconds
+  was not the shared write (0.05s warm) — it was `_get_code_version()` falling through to a
+  `git` call that times out whenever no `VERSION` file is present. An earlier draft compared
+  versions inside the gate and therefore saved **nothing**; measured, not assumed. Daily costs
+  no usefulness, since the page reports "last used" in whole days. `apply_pending_update`
+  deletes the stamp so a freshly-updated install reports its new version immediately rather
+  than tomorrow.
+* **The filename needs all three parts.** Account plus computer alone silently merges two
+  installs on one machine into one entry — not hypothetical, that is exactly the maintainer's
+  working install plus development copy, and whichever ran last would erase the other.
+* **A missing field means "could not check", never "fine".** `_install_problems()` reports only
+  what a record positively states. Same rule as `_newer_readable_docs`' "couldn't check ≠
+  nothing new".
+* **This list is never a complete roster, and both tools say so.** Someone appears only after
+  they install the version that added this, and their entry only refreshes when they open a
+  conversation. A stale "last used" is the signal, not a defect — it means that person has not
+  picked up recent fixes. Reading it as "everyone who has it" would be exactly the confident
+  empty answer this project distrusts everywhere else.
+
+Records are read through `_json_object()`, so a wrong-shaped file in that
+every-teammate-can-write-to folder is skipped rather than crashing the tool. A record stamped
+with a **newer** `format_version` is still shown, reading only known fields — the opposite of the
+screening manifest's ignore-newer rule, and deliberately: hiding a teammate is the failure this
+feature exists to fix.
+
 ## There is a live user (2026-08-13)
 
 **A teammate other than the maintainer is connected to `vaulter_ai` on her own Claude Desktop and
@@ -1020,7 +1066,7 @@ one particular name, OCR installed and Python already working. Every teammate bu
 
 ## Three regression suites, and the third one checks answers (2026-08-14)
 
-`check_screener.py` (**106 checks**) and `check_portfolio_comparison.py` (**58**) both test
+`check_screener.py` (**111 checks**) and `check_portfolio_comparison.py` (**59**) both test
 deterministic Python, and both pass while the answer a person actually receives is still wrong —
 because the wrongness lives in the knowledge the answer was built from, not in the arithmetic.
 `system/scripts/check_answers.py` (**7 checks**) is the third suite, and that knowledge is what it
