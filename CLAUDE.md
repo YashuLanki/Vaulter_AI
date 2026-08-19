@@ -398,8 +398,17 @@ real transport.
 
 Four separate fixes have gone into finding Claude Desktop, each adding a place to look after a real
 machine defeated the last one: the settings folder vs the program folder (2026-08-12), the uninstall
-registry (2026-08-13), Windows app packages (2026-08-18), and now the **running process** — the most
-direct proof there is, and the only route that cannot be wrong about whether the app exists. Worth
+registry (2026-08-13), Windows app packages (2026-08-18), and now two more — **Windows' own package
+registration** and the **running process**, the latter being the only route that cannot be wrong
+about whether the app exists.
+
+The registration route closes a gap every earlier route shared, and it was found by declining to
+accept "we already check five places" as an answer: `LOCALAPPDATA\Packages\Claude*` is created when
+a Store app first **runs**, while `HKCU\Software\Classes\ActivatableClasses\Package` is written
+when it is **installed**. So a Store install that has never been opened appeared in none of the
+checked places — which is exactly the state that began this whole bug family on 2026-08-12.
+Confirmed present on a real machine before being added, and asserted both ways (never-opened →
+found; genuinely absent → still not found). Worth
 knowing why packages matter: Claude Desktop is commonly a Microsoft Store app executing from
 `Program Files\WindowsApps\Claude_...`, a path none of the folder checks cover. Verified on the
 maintainer's own machine, which has BOTH a classic install folder and a Store package, and is

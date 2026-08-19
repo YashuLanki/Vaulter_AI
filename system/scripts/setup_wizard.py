@@ -786,6 +786,35 @@ def _find_claude_desktop() -> Path | None:
     except Exception:
         pass
 
+    # WINDOWS' OWN PACKAGE REGISTRATION, added 2026-08-19 after a question that
+    # deserved a better answer than "we already check five places".
+    #
+    # This closes a real gap the other routes share. A Store app's per-user
+    # folder under LOCALAPPDATA\Packages appears once the app has RUN; the
+    # registration below is written when it is INSTALLED. So a Store install
+    # that has never been opened -- which is precisely the state that started
+    # this whole family of bugs on 2026-08-12 -- is recorded here and nowhere
+    # else that gets checked. Confirmed present on a real machine before adding.
+    try:
+        import winreg
+        for hive, path in (
+            (winreg.HKEY_CURRENT_USER, r"Software\Classes\ActivatableClasses\Package"),
+            (winreg.HKEY_CURRENT_USER,
+             r"Software\Microsoft\Windows\CurrentVersion\AppModel\Repository\Packages"),
+            (winreg.HKEY_LOCAL_MACHINE,
+             r"SOFTWARE\Microsoft\Windows\CurrentVersion\AppModel\Repository\Packages"),
+        ):
+            try:
+                with winreg.OpenKey(hive, path) as root:
+                    for i in range(winreg.QueryInfoKey(root)[0]):
+                        name = winreg.EnumKey(root, i)
+                        if name.lower().startswith("claude"):
+                            return Path(f"Windows app package: {name}")
+            except OSError:
+                continue
+    except Exception:
+        pass
+
     # RUNNING RIGHT NOW is the most direct proof there is, and it was missing
     # (added 2026-08-19). Every route above asks "is it in a place we expect?";
     # this one asks Windows what is actually executing, which cannot be wrong
@@ -844,6 +873,7 @@ def _claude_search_locations() -> list:
         "the Windows list of installed programs",
         "Start Menu shortcuts",
         "Windows app packages",
+        "Windows' record of installed app packages",
         "programs running right now",
     ]
 
@@ -876,6 +906,10 @@ def setup_claude_desktop() -> bool:
                 return False
             print("  Claude Desktop is installed but hasn't been opened yet, so its")
             print("  settings folder didn't exist. Created it and continuing.")
+            # Naming what was found, not just where it looked on failure. This
+            # message has been wrong four times; showing the evidence makes a
+            # wrong answer checkable by whoever is reading the screen.
+            print(f"     Found it here: {installed_at}")
         else:
             # NOT FOUND used to stop here, and stopping was the wrong call
             # (changed 2026-08-19). The install location is only ever used as
