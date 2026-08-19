@@ -716,14 +716,57 @@ def check_shared_folder() -> bool:
     return False
 
 
+def _claude_desktop_config_paths() -> list:
+    r"""
+    EVERY place Claude Desktop might keep its settings on this machine.
+
+    There is more than one, and assuming otherwise cost a real teammate a
+    working install on 2026-08-19: setup reported the connection written, and
+    Claude Desktop showed nothing at all.
+
+    The cause is how Windows treats apps installed from the Microsoft Store.
+    Such an app does not read the ordinary `AppData\Roaming\Claude` folder --
+    Windows gives it a private one at
+    `AppData\Local\Packages\Claude_<id>\LocalCache\Roaming\Claude`. Writing
+    to the ordinary location is then perfectly successful and completely
+    useless.
+
+    Why this was missed: the maintainer's machine has BOTH the Store app and a
+    classic install, so the ordinary folder is the one his reads, and a check
+    for a redirected copy there found nothing. A machine with only the Store
+    app was never tested. Same shape as every other install bug in this file --
+    a working machine only ever exercises the path that already works.
+
+    So: write to all of them rather than guessing which one is real. A settings
+    file in a folder nothing reads is harmless; missing the one that matters is
+    not. Package folders are only included when they actually exist -- this
+    never invents a location.
+    """
+    if sys.platform != "win32":
+        return [Path.home() / "Library" / "Application Support" / "Claude"
+                / "claude_desktop_config.json"]
+
+    paths = []
+    appdata = os.environ.get("APPDATA")
+    if appdata:
+        paths.append(Path(appdata) / "Claude" / "claude_desktop_config.json")
+
+    local = os.environ.get("LOCALAPPDATA")
+    if local:
+        try:
+            for pkg in (Path(local) / "Packages").glob("Claude*"):
+                if pkg.is_dir():
+                    paths.append(pkg / "LocalCache" / "Roaming" / "Claude"
+                                 / "claude_desktop_config.json")
+        except OSError:
+            pass
+    return paths
+
+
 def _claude_desktop_config_path() -> Path | None:
-    if sys.platform == "win32":
-        appdata = os.environ.get("APPDATA")
-        if not appdata:
-            return None
-        return Path(appdata) / "Claude" / "claude_desktop_config.json"
-    else:
-        return Path.home() / "Library" / "Application Support" / "Claude" / "claude_desktop_config.json"
+    """The first place to look, kept for callers that want a single answer."""
+    paths = _claude_desktop_config_paths()
+    return paths[0] if paths else None
 
 
 def _find_claude_desktop() -> Path | None:
@@ -953,16 +996,39 @@ def setup_claude_desktop() -> bool:
 
     from core import safe_io
 
-    existing = safe_io.load_json(config_path) if config_path.exists() else {}
-    existing.setdefault("mcpServers", {})
     main_py = str(PROJECT_ROOT / "main.py")
-    existing["mcpServers"]["vaulter_ai"] = {
-        "command": sys.executable,
-        "args": [main_py, "mcp"],
-    }
-    safe_io.save_json_atomic(config_path, existing)
-    print(f"  ✓ Added/updated the \"vaulter_ai\" entry in {config_path}")
-    print("     Every other entry already in that file (other MCP servers, preferences) "
+    entry = {"command": sys.executable, "args": [main_py, "mcp"]}
+
+    # Write to EVERY place Claude Desktop might read from, not just the first.
+    # A Microsoft Store install reads a private folder of its own, so writing
+    # only the ordinary one succeeds and achieves nothing -- which is exactly
+    # what happened to a real teammate on 2026-08-19. Each file keeps whatever
+    # was already in it; only the vaulter_ai entry is added or replaced.
+    written = []
+    for path in _claude_desktop_config_paths():
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            existing = safe_io.load_json(path) if path.exists() else {}
+            if not isinstance(existing, dict):
+                existing = {}
+            existing.setdefault("mcpServers", {})
+            existing["mcpServers"]["vaulter_ai"] = entry
+            safe_io.save_json_atomic(path, existing)
+            written.append(path)
+        except OSError as e:
+            print(f"  ⚠ Could not write {path} ({e}) -- continuing with the others.")
+
+    if not written:
+        print("  ✗ Could not write Claude Desktop's settings anywhere.")
+        return False
+
+    for path in written:
+        print(f"  ✓ Added the \"vaulter_ai\" entry to {path}")
+    if len(written) > 1:
+        print("     More than one, on purpose: Claude Desktop keeps its settings in a "
+              "different place depending on how it was installed, so all of them are "
+              "written rather than guessing which one yours reads.")
+    print("     Every other entry already in those files (other connections, preferences) "
           "was left untouched.")
     print("     Restart Claude Desktop (fully quit and reopen) for this to take effect.")
     # Deliberately still reported as needing attention when the app could not be
