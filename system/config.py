@@ -477,16 +477,19 @@ def _find_corpus_subfolder(onedrive_root: Path) -> Path | None:
                     return nested
         except OSError:
             pass
-        print(f"WARNING: VAULTER_CORPUS_SUBFOLDER is set to "
-              f"'{CORPUS_SUBFOLDER}' but no such folder exists under "
-              f"{onedrive_root}. Falling back to auto-detection.",
-              file=sys.stderr)
-        # Recorded so the setup wizard can SAY this, rather than reporting on
-        # whatever library it fell back to as though that were the intended
-        # one. This warning goes to stderr and scrolls past; the person then
-        # sees a later step confidently describing the wrong library. Found
-        # 2026-08-14 -- the package now names the library, so "the named one
-        # is not on this machine" became a distinct and likely state.
+        # RECORDED, NOT PRINTED (changed 2026-08-20). It used to print a
+        # WARNING right here, and that line was the most alarming thing on a
+        # real teammate's screen -- while being, by the end of the same run,
+        # untrue. The name we ship comes from the machine that built the
+        # package, so it not matching is the ORDINARY case on somebody else's
+        # computer, and the routes below then find the folder anyway. Shouting
+        # about a step that is about to succeed teaches people to distrust the
+        # output.
+        #
+        # The reason is still recorded, and the setup wizard still says all of
+        # this plainly IF detection genuinely ends up failing -- see its
+        # "configured_missing" branch. _found() clears it the moment any later
+        # route succeeds, so the message only ever appears when it is true.
         globals()["CORPUS_UNRESOLVED_REASON"] = "configured_missing"
 
     global CORPUS_UNRESOLVED_REASON
