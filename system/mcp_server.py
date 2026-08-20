@@ -610,6 +610,129 @@ def _checkin_due() -> bool:
     return stamped != _dt.date.today().isoformat()
 
 
+# Lines in this machine's own log worth telling the team about. Warnings are
+# deliberately NOT here: the log carries plenty of routine ones, and a report
+# full of things that turned out fine is a report nobody reads -- which is the
+# lesson the setup summary taught three times over.
+_ERROR_MARKERS = ("[ERROR]", "[CRITICAL]", "Traceback (most recent call last)")
+
+# How much of a crash to carry across, and how big the shared file may get.
+_TRACEBACK_LINES = 14
+_MAX_REPORT_BYTES = 200_000
+
+
+def _error_marker_path() -> "Path":
+    """How far through the local log we have already looked. Local on purpose --
+    answering "anything new?" must not cost a shared-folder round trip."""
+    from config import DATA_DIR
+    return Path(DATA_DIR) / "last_error_report.txt"
+
+
+def _report_errors_to_team() -> None:
+    """
+    Copy anything that actually broke on this machine into the shared folder, so
+    whoever supports this can read it without asking anyone for a screenshot.
+
+    Built 2026-08-20 to close the gap the setup record left. A setup run now
+    reports itself; the running system did not, so anything that went wrong
+    AFTER installing stayed in a log file on that person's own computer and
+    nobody else ever saw it.
+
+    Three things keep this cheap enough to sit in the health check, which runs
+    at the start of every conversation:
+
+      * It remembers how far through the log it has already read, so the usual
+        answer is "nothing new" after a single check of the file's size.
+      * It only writes when something actually broke. A quiet machine never
+        touches the shared folder at all.
+      * Errors only -- never warnings. The log is full of routine warnings, and
+        a report full of things that turned out fine is one nobody reads. That
+        lesson cost three attempts on the setup summary.
+
+    Never raises: reporting a problem must not become one.
+    """
+    import datetime as _dt
+
+    try:
+        from config import LOG_DIR, SHARED_DIR, SHARED_DIR_IS_FALLBACK
+        log_path = Path(LOG_DIR) / "vaulter.log"
+        if not log_path.exists() or SHARED_DIR_IS_FALLBACK:
+            return
+
+        marker = _error_marker_path()
+        try:
+            already_read = int(marker.read_text(encoding="utf-8").strip())
+        except (OSError, ValueError):
+            already_read = 0
+
+        size = log_path.stat().st_size
+        if size < already_read:
+            already_read = 0          # the log was rotated or cleared
+        if size == already_read:
+            return                    # nothing new -- the usual case, one stat()
+
+        with open(log_path, "r", encoding="utf-8", errors="replace") as fh:
+            fh.seek(already_read)
+            fresh = fh.read()
+        marker.parent.mkdir(parents=True, exist_ok=True)
+        marker.write_text(str(size), encoding="utf-8")
+
+        lines = fresh.splitlines()
+        picked, i = [], 0
+        while i < len(lines):
+            line = lines[i]
+            if any(m in line for m in _ERROR_MARKERS):
+                picked.append(line.rstrip())
+                # A crash is a block of lines, not one; carry enough of it to be
+                # worth reading, and stop at the next ordinary log line.
+                if "Traceback" in line:
+                    for follow in lines[i + 1:i + 1 + _TRACEBACK_LINES]:
+                        picked.append(follow.rstrip())
+                        i += 1
+            i += 1
+        if not picked:
+            return
+
+        report_dir = Path(SHARED_DIR) / "system" / "error_reports"
+        report_dir.mkdir(parents=True, exist_ok=True)
+        name = _install_record_name().replace(".json", ".log")
+        report = report_dir / name
+
+        header = ""
+        if not report.exists():
+            rule = "=" * 64
+            header = "\n".join([
+                rule,
+                "Vaulter AI -- problems reported by this machine",
+                f"  Person   : {_who()}",
+                f"  Computer : {_where()}",
+                f"  Version  : {_get_code_version()}",
+                rule,
+                "Errors only. Warnings and ordinary activity stay in the log on",
+                "that computer. Newest entries are at the bottom.",
+                "", "",
+            ])
+
+        stamp = _dt.datetime.now().strftime("%d %b %Y %H:%M")
+        block = "\n".join(["", f"--- {stamp} ---"] + picked + [""])
+
+        existing = ""
+        if report.exists():
+            try:
+                existing = report.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                existing = ""
+        combined = header + existing + block
+        if len(combined) > _MAX_REPORT_BYTES:
+            # Keep the newest. Bounded so one machine having a bad week cannot
+            # fill the team's folder.
+            combined = combined[-_MAX_REPORT_BYTES:]
+        report.write_text(combined, encoding="utf-8")
+        log.info(f"[ERRORS] Reported {len(picked)} line(s) to {report.name}")
+    except Exception as e:
+        log.warning(f"[ERRORS] Could not report errors to the team folder: {e}")
+
+
 def _write_install_checkin() -> None:
     """
     Leave a small note in the shared folder saying what this install is and
@@ -1465,7 +1588,7 @@ no score -- it's a diary, not a dial.""".replace(
         # it rides along here because this is already the once-per-conversation
         # shared-folder visit, and adding a background process is not allowed.
         for _stage_check in (_check_and_stage_update, _check_and_stage_org_settings,
-                             _write_install_checkin):
+                             _write_install_checkin, _report_errors_to_team):
             _ts = _t.perf_counter()
             try:
                 _stage_check()
