@@ -590,6 +590,83 @@ def _offer_library_link() -> None:
               "your browser.)")
 
 
+def _ask_for_library_path():
+    """
+    Last resort: ask the person to paste the folder, then use it and carry on.
+
+    Every automatic route has to recognise the library from something -- our own
+    folder inside it, its name, its address. When none of those work, the person
+    looking at the screen can simply SEE where it is, and typing it once beats
+    being told to go and fix their OneDrive. Added 2026-08-20 after a real
+    teammate spent two rounds of setup being told her library was missing while
+    she was looking straight at it.
+
+    Saved into their own settings file, so it is asked once and never again.
+
+    Two refusals worth keeping:
+      * A folder that holds Desktop, Documents and Pictures is somebody's own
+        OneDrive, and pointing the file index at it would read their private
+        files. A typo must not be able to do that, so this is not overridable.
+      * No console, or an empty answer, means skip quietly rather than crash --
+        setup must still work when nobody is sitting there to answer.
+    """
+    print()
+    print("    You can point it at the folder directly instead, if you can see it.")
+    print("    In File Explorer, click the address bar, copy the whole path, paste it")
+    print("    here and press Enter. Or just press Enter to skip.")
+    print()
+    try:
+        answer = input("    Paste the folder path (or Enter to skip): ").strip()
+    except (EOFError, KeyboardInterrupt, OSError):
+        print("    (skipped)")
+        return None
+
+    if not answer:
+        print("    Skipped -- nothing changed.")
+        return None
+
+    # Paths pasted from Explorer often arrive wrapped in quotes.
+    folder = Path(answer.strip('"').strip("'"))
+    if not folder.is_dir():
+        print(f"    That folder isn't there: {folder}")
+        print("    Nothing was changed. Run setup again when you have the right path.")
+        return None
+
+    import config
+    if config._looks_like_personal_root(folder):
+        print("    That looks like your own OneDrive folder rather than the firm's")
+        print("    document library -- it holds your Desktop and Documents. Vaulter AI")
+        print("    will not read a personal folder, so this was not saved.")
+        print("    Point it at the firm's document folder itself.")
+        return None
+
+    if not (folder / config.SHARED_SUBFOLDER).is_dir():
+        print(f"    Note: '{config.SHARED_SUBFOLDER}' isn't inside that folder, so the")
+        print("    team's data may not appear until OneDrive finishes syncing it.")
+        print("    Using the folder anyway, since you chose it deliberately.")
+
+    try:
+        from dotenv import set_key
+        env_path = config.SECRETS_DIR / ".env"
+        env_path.touch(exist_ok=True)
+        set_key(str(env_path), "VAULTER_CORPUS_DIR", str(folder))
+    except Exception as e:
+        print(f"    Could not save that setting ({e}). Nothing changed.")
+        return None
+
+    # Re-read the settings so the rest of setup uses the folder just given,
+    # rather than making them run the whole thing a second time.
+    try:
+        import importlib
+        importlib.reload(config)
+    except Exception:
+        print("    Saved. Double-click \"Setup Vaulter AI\" once more to use it.")
+        return folder
+
+    print(f"    ✓ Saved. Using: {folder}")
+    return folder
+
+
 def check_shared_folder() -> bool:
     """
     Make sure this machine can see the TEAM's shared folder, not a private
@@ -713,6 +790,21 @@ def check_shared_folder() -> bool:
     print()
     print("    Then double-click 'Setup Vaulter AI' again — it will find it")
     print("    automatically, wherever OneDrive puts it.")
+
+    # Every branch above ends in "go and fix your OneDrive, then run this
+    # again". That is the right advice when the library genuinely is not here --
+    # and useless when the person is looking straight at the folder on their own
+    # screen, which happened twice to a real teammate. So offer the direct route
+    # before giving up: paste the folder, save it, carry on in the same run.
+    chosen = _ask_for_library_path()
+    if chosen:
+        import config
+        if not config.SHARED_DIR_IS_FALLBACK and _looks_like_team_folder(config.SHARED_DIR):
+            print("  ✓ Found, with team data in it:")
+            print(f"      {config.SHARED_DIR}")
+            return True
+        print("  Saved the folder. The team's data will appear once OneDrive has")
+        print("  finished syncing it.")
     return False
 
 
