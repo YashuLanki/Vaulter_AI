@@ -1442,9 +1442,18 @@ class _Transcript:
     without asking anyone for anything.
     """
 
+    # Lines worth pulling out into a summary at the end. A support person should
+    # not have to read a whole transcript to find out what went wrong on
+    # somebody's machine -- especially once several people have run this.
+    _TROUBLE = ("⚠", "✗", "WARNING", "ERROR", "Traceback",
+                "could not", "Could not", "couldn't", "Couldn't",
+                "not found", "isn't", "cannot", "Cannot", "failed", "Failed")
+
     def __init__(self, stream, handle):
         self._stream = stream
         self._handle = handle
+        self._buffer = ""
+        self.problems = []
 
     def write(self, text):
         self._stream.write(text)
@@ -1452,6 +1461,15 @@ class _Transcript:
             self._handle.write(text)
         except Exception:
             pass
+        # Collected line by line, because a single print arrives as several
+        # writes and matching on fragments would catch half-words.
+        self._buffer += text
+        while "\n" in self._buffer:
+            line, self._buffer = self._buffer.split("\n", 1)
+            stripped = line.strip()
+            if stripped and any(m in stripped for m in self._TROUBLE):
+                if stripped not in self.problems and len(self.problems) < 40:
+                    self.problems.append(stripped)
         return len(text)
 
     def flush(self):
@@ -1477,6 +1495,34 @@ def _start_transcript():
         handle = open(path, "w", encoding="utf-8", errors="replace")
     except Exception:
         return None, None
+
+    # Says WHOSE run this is, at the top, in the file itself. The filename
+    # carries it too, but a file that has been forwarded, renamed or pasted
+    # into a message should still be able to say who it belongs to.
+    version = "unknown"
+    try:
+        version = (PROJECT_ROOT / "VERSION").read_text(
+            encoding="utf-8").splitlines()[0].strip() or "unknown"
+    except Exception:
+        pass
+    try:
+        rule = "=" * 64
+        header = [
+            rule,
+            "Vaulter AI setup",
+            f"  Person   : {os.environ.get('USERNAME', 'unknown')}",
+            f"  Computer : {os.environ.get('COMPUTERNAME', 'unknown')}",
+            f"  When     : {datetime.datetime.now():%d %B %Y, %H:%M}",
+            f"  Version  : {version}",
+            f"  Folder   : {PROJECT_ROOT}",
+            rule,
+            "",
+        ]
+        handle.write("\n".join(header) + "\n")
+        handle.flush()
+    except Exception:
+        pass
+
     sys.stdout = _Transcript(sys.stdout, handle)
     sys.stderr = _Transcript(sys.stderr, handle)
     return path, handle
@@ -1501,8 +1547,28 @@ def _finish_transcript(path, handle):
     except Exception:
         shared_copy = None
 
+    # Everything that looked like a problem, gathered in one place and headed
+    # with the person's name -- so a support person reading several of these
+    # can tell at a glance whose machine had what.
+    who_ran = os.environ.get("USERNAME", "unknown")
+    problems = []
+    try:
+        problems = list(getattr(sys.stdout, "problems", []))
+        problems += [p for p in getattr(sys.stderr, "problems", [])
+                     if p not in problems]
+    except Exception:
+        pass
+
     print()
     print("=" * 64)
+    if problems:
+        print(f"  WHAT WENT WRONG FOR {who_ran} ({len(problems)} item(s)):")
+        for item in problems:
+            print(f"    - {item}")
+        print()
+    else:
+        print(f"  Nothing went wrong for {who_ran}.")
+        print()
     print("  A record of this setup run was saved:")
     print(f"    {path}")
     if shared_copy:
