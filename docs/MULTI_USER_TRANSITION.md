@@ -74,46 +74,9 @@ Where each part stands:
 
 ---
 
-## Part A — Checking the recent work
+## Part A — Checking the recent work *(removed)*
 
-An independent review re-verified this session's changes. It explicitly confirmed the
-following are correct: the duplicate-address handling in screening, the Excel sold-property
-fix, the crash-safe/atomic file writes, the email sender-whitelist logic, the removed dead
-code, the manifest cache-key consistency, and the divide-by-zero guard in scoring.
-
-Three small loose ends remain. None are urgent; all are quick.
-
-> **🛑 2026-07-29: all three are moot** — A1 and A2 lived in `ingestion/`, A3 in the embedder,
-> and none of those files exist. **A1's lesson is not moot and has been promoted to a hard rule
-> in `CLAUDE.md`:** *never scan a PDF without a timeout.* The OCR fallback described below
-> reached **6.5 GB** before it was killed. `system/corpus/extract.py` inherited the per-page rendering
-> fix along with the warning.
-
-### A1. OCR memory spike on mixed PDFs *(regression introduced this session)*
-The fix that lets a mostly-digital PDF still capture its occasional scanned page currently
-renders the **entire** PDF to images the moment **any** single page has no text — including a
-blank separator page. On a 300-page document with one scanned page, that's a large, needless
-memory and time spike.
-**Fix:** render only the specific page that needs OCR, not the whole document.
-*For implementers: `ingestion/extractor.py`, `_extract_pdf` — pass `first_page=page_num,
-last_page=page_num` to `convert_from_path`, or render lazily per-page, instead of rendering the
-whole file once.*
-
-### A2. A brand-new *state* isn't recognized until restart
-The property-list auto-refresh added this session correctly picks up new *properties* without
-a restart, but adding a brand-new *state* (e.g. "Nevada") to the Project Master can cause the
-first file in that state to be misfiled to `processed/unknown/` until the next file for an
-already-known state, or a restart.
-**Fix:** refresh the valid-states set on the same file-change signal the property list uses.
-*For implementers: `ingestion/watcher.py` — `_get_valid_states()` is consulted before
-`_load_properties()` refreshes; give it its own mtime check.*
-
-### A3. Search quietly degrades after an upgrade unless `reindex` is run
-Switching to real semantic search means a database created before the upgrade needs a one-time
-`python system/main.py reindex`, or search silently returns weaker results. This is wired up and
-documented, but it's manual and the failure is invisible.
-**Fix:** detect the mismatch and surface a plain-English prompt (and fold it into the health
-check in Part D).
+Three loose ends in `ingestion/`, which was deleted in the 2026-07 rebuild. A1's lesson survives as a hard rule in `CLAUDE.md`: **never scan a PDF without a timeout** — the OCR fallback that rendered a whole document because one page had no text reached **6.5 GB** before it was killed.
 
 ---
 
@@ -172,109 +135,9 @@ It turns out to apply to all portfolio documents, not only the Project Master fi
 
 ---
 
-## Part C — The shared-folder concurrency issues (most technically serious)
+## Part C — Shared-folder concurrency *(removed)*
 
-> **2026-07-29 status — the whole of Part C dissolved, and not by being fixed.**
->
-> C1's fix did land where it was scoped to land: in `safe_io.py`, so it would cover every
-> caller rather than one. `system/core/safe_io.py` gained `locked_json_update()` (which refuses to
-> overwrite a file it could not read, rather than treating a torn mid-sync read as "empty") and
-> `merge_conflict_copies()` for C2.
->
-> Then all four of the shared JSON state files went away. `phase3_listing_cache.json`,
-> `phase4_verdict_cache.json` and `market_geocode_cache.json` went with the phase modules that
-> wrote them. **`manifest.json` went too** — the result cache existed to stop the team
-> re-paying for Claude and Google Maps calls, and there is nothing left to re-pay for. A screen
-> is free and takes seconds, so `screen_listings` simply runs it. Nothing in the project calls
-> `locked_json_update()` or `merge_conflict_copies()` today; `safe_io` is used only for its
-> atomic single-writer `save_json_atomic()`, by `geo_federal.py`, `release.py` and
-> `push_org_setting.py`.
->
-> **Both of those functions are therefore live code with no callers.** They are not proposed for
-> deletion — they are the correct implementations of a hazard that returns the moment anything
-> writes shared read-modify-write state again, and re-deriving them would cost more than
-> keeping them. But nobody should read Part C and conclude the protection is currently *in
-> effect*, because there is nothing for it to protect.
->
-> **C3 (two people paying for the same file the same morning) is no longer a cost problem** at
-> all — it survives only as duplicated effort measured in seconds.
->
-> **C5's dashboard item is moot**: `dashboard_server.py` and `vaulter_dashboard.html` are gone.
-> `report.py` writes a single self-contained HTML file with its data inlined, so there is no
-> mid-sync fetch to hang on.
->
-> **What is still exposed:** the screening *output* files (workbook + HTML report) written into
-> the shared OneDrive folder, and `geo_federal.py`'s coordinate cache. Those are ordinary
-> independent files written atomically by one writer, which is the low-risk category Part G
-> describes at its end — not the shared-state category this part is about.
-
-Ordered by seriousness. The first is the one to take most seriously.
-
-### C1. The team's saved results can be silently wiped *(most serious)*
-If one person's app reads the shared results record at the exact instant OneDrive is
-mid-way through syncing a new copy of it, the app can misread the half-written file as
-*empty* — and then overwrite the shared record with **only its own single latest entry**,
-discarding everyone else's saved (already-paid-for) results. The leftover result files become
-orphans that can never be matched again, so those files get re-screened and re-paid.
-**Impact: silent loss of shared data + guaranteed re-spend.**
-**Fix direction:** teach the file layer to tell apart "file is genuinely empty" from "file is
-present but currently unreadable," and in the unreadable case **refuse to overwrite** rather
-than replacing good data with a fresh single-entry file. Small, safe, localized change.
-
-**This is not limited to manifest.json.** The exact same mechanism — `locked_json_update()`
-re-reading the file fresh inside the lock via `load_json()`, which silently treats a torn/
-mid-sync read as "the file is empty" — is also how `phase3_deep_analysis.py` writes
-`phase3_listing_cache.json` and how `phase4_verification.py` writes
-`phase4_verdict_cache.json` and `market_geocode_cache.json`. All three live in the same
-shared `SCREENING_OUTPUT_DIR` and are just as exposed: a mid-sync read during any of their
-updates can wipe the whole team's previously cached (already-paid-for) Phase 3/4 analyses
-and geocode lookups down to just the one entry being added. The fix belongs in `safe_io.py`
-itself (as already scoped above) specifically because that's what makes it cover all four
-files at once — a fix scoped only to `pipeline.py`'s manifest functions would leave the
-other three just as exposed to the same silent wipe.
-
-### C2. Two people finishing at the same time — one entry lost
-Two people finishing screening runs at nearly the same moment can each save their result, and
-OneDrive keeps one as the official file and quietly renames the other to a "conflict copy" that
-nothing ever reads. One person's completed, paid-for result vanishes from the shared record.
-**Fix direction:** a small routine that, on startup, finds OneDrive conflict-copy files, merges
-their contents back into the official record (safe because entries are uniquely keyed), and
-deletes them.
-
-### C3. Two people screening the same file the same morning both pay full price
-The cost-saving cache only helps *after* a run has finished and synced. There's no "someone is
-already working on this" marker, so if a broker emails one file to the whole team and three
-people screen it that morning, all three pay in full for the Claude and Google Maps calls.
-**Fix direction:** drop a short-lived "in progress" marker in the shared folder at the start of
-a run; if a fresh one from someone else exists, wait for their result instead of paying again.
-
-### C4. A cached result can point to a file that hasn't finished downloading
-The record can say a result exists and point to its file before that (large) file has finished
-syncing to the reader's machine — so the reader correctly skips paying, but the file they open
-is incomplete.
-**Fix direction:** before trusting a cached result, confirm the results file is actually fully
-present and valid, not just that a placeholder exists.
-
-### C5. Smaller items
-- Result files are written directly (not atomically), so a reader can briefly catch a
-  half-written file. Fix: write to a temp file and rename into place (the pattern already used
-  elsewhere in the code).
-- Two people screening *different* files for the same market within the same second can produce
-  the identical filename. Fix: add a short unique suffix to result filenames.
-- The dashboard can show a blank/broken view if it reads a file mid-sync — and for the
-  per-market workbook fetch specifically, it's worse than a blank view: `fetchAndParseWorkbook()`
-  in `vaulter_dashboard.html` has no error handling at all, so a mid-sync/incomplete workbook
-  leaves the UI stuck on "Loading..." indefinitely with a silent, unhandled JS error, not even
-  a visible failure state. Fix: retry, and skip a single unavailable entry (or show a clear
-  per-market error) rather than blanking or hanging the whole view.
-
-*For implementers: `safe_io.py` (`load_json`/`locked_json_update`), `system/analysis/screening/
-pipeline.py` (`_update_manifest`, `_find_cached_result`, `run_full_screening`),
-`system/analysis/screening/phase3_deep_analysis.py` and `system/analysis/screening/phase4_verification.py`
-(their own `locked_json_update` cache read/write call sites -- same root cause as C1),
-`system/analysis/screening/workbook_builder.py` (non-atomic save), `system/analysis/screening/
-dashboard_server.py` and `dashboard/vaulter_dashboard.html`'s `fetchAndParseWorkbook`/
-`onMarketChange`.*
+Five hazards in code that no longer exists. C1 and C2 were fixed in `safe_io.py`, and then all four shared state files those fixes protected were deleted, so the fixes have no callers. The framing that survives is in `CLAUDE.md`'s own conventions: a shared file can be the wrong **shape**, not just missing or corrupt, because every teammate can write to that folder.
 
 ---
 
@@ -287,53 +150,11 @@ Each item is independent and can be done on its own. Recommended order:
 > built. Priority 2 dissolved rather than completing — the fix landed, then the files it
 > protected were deleted (Part C).
 
-### Priority 0 — Tidy the loose ends from recent work *(fast)*
-Fix A1, A2, A3 above. Small, self-contained, no rollout dependencies.
+### Priorities 0–2 *(removed)*
 
-### Priority 1 — Health-check tool *(highest leverage)*
+Superseded. They describe code that no longer exists. Priority 1's argument did survive and became `check_system_health`: **a system built never to crash looks exactly like a working system when it is half broken**, which is why that check exists and why it stays silent when healthy.
 
-> **✅ Built as `check_system_health`.** Both design predictions below held up in practice: the
-> tool description does instruct Claude to call it at conversation start, and Claude Desktop
-> does reliably do so — which the section correctly flags as a behavioural convention rather
-> than a technical guarantee. It stays silent when healthy. It also absorbed the one job the
-> deleted scheduler thread was worth keeping: the once-daily check for a published update.
-> That is *why* it lives here — so no thread is needed.
-A read-only "is my copy working?" check covering, in plain English: Outlook sign-in status,
-how much data is in the database and when it last ingested, whether the background scheduler
-is running and its last error per job, whether the shared folder is really connected (vs
-silently fallen back to local), which portfolio file is in effect and its date, and the
-running code version. This turns every silent failure in Theme 2 and Theme 4 into something
-checkable.
-
-**Proactive, not on-demand.** For non-technical staff, a tool they have to remember to ask for
-defeats the purpose — the whole problem is failures that are silent, and someone who doesn't
-know to ask never finds out. Since Claude reads each MCP tool's own description when it
-connects, the health-check tool's description should instruct Claude to run it automatically
-at the start of every conversation, before anything else — not something the user has to
-request. Two things make this work well rather than becoming a nuisance:
-- **Silent when healthy.** If everything checks out, Claude says nothing about it at all and
-  just proceeds with whatever the user actually asked. The check should only surface into the
-  conversation when it finds something actually wrong (auth expired, scheduler dead, shared
-  folder disconnected, etc.) — otherwise every single conversation would open with a "yep,
-  all good!" that becomes noise nobody reads.
-- **One check per session, not per message.** It should run once when a conversation starts,
-  not be re-run on every message — a lightweight local check is cheap, but running it
-  constantly for no reason is still unnecessary overhead and risks feeling naggy.
-
-*For implementers: this depends on Claude actually following an instruction embedded in a tool
-description rather than a hard technical guarantee (MCP doesn't have a true server-push
-mechanism into an existing chat) — worth explicitly testing that Claude Desktop reliably calls
-it at conversation start before relying on it as the primary safety net.*
-
-### Priority 2 — Shared-folder safety *(protects real money and data)*
-
-> **🛑 Closed, by the problem going away.** C1 and C2 were implemented in `system/core/safe_io.py`;
-> C3–C5 were overtaken. There is no shared read-modify-write state left in the project — see
-> the note at the head of Part C. "Protects real money" no longer applies either: nothing in
-> the screening path costs money.
-
-Fix C1 first (the silent-wipe), then C2 (conflict-copy merge), then C3 (in-progress marker),
-then C4/C5. C1 alone removes the only data-loss risk in the whole shared-folder story.
+---
 
 ### Priority 3 — Easy onboarding *(unblocks the actual rollout)*
 
@@ -539,126 +360,9 @@ This is the "what could go wrong with the fix itself" analysis.
 
 ---
 
-## Part F — New capability: searchable Monday-meeting transcripts
+## Part F — Searchable meeting transcripts *(removed)*
 
-> **🛑 2026-07-29: dead, on two independent counts.** Every option here routes through Teams —
-> and the connector verdict came back **no connectors**, not M365 and not Teams
-> (`REBUILD_PLAN.md` §0). Option B's Microsoft Graph path needed exactly the admin consent that
-> was declined. Separately, the "reuses the existing search pipeline" argument that made this
-> cheap no longer holds: there is no ingest pipeline and no ChromaDB to ingest into. Search
-> matches **filenames**, not contents, so a transcript dropped in a folder would be findable by
-> its name and nothing else.
->
-> If this ever comes back, the shape that would work now is completely different: a transcript
-> saved as `.docx` into the synced document library, found by `search_documents` on its name and
-> date, and read whole by `read_document` into the conversation. No ingest, no database, no
-> `.vtt` parser, no Graph permission. Whether that is worth doing depends entirely on whether
-> anyone actually files the transcripts, which nobody has yet been asked to do.
->
-> The one durable warning below is worth keeping regardless: **do NOT share one ChromaDB across
-> machines over OneDrive.** A synced SQLite-backed store will corrupt. Applies to
-> `system/data/corpus_index.db` today just as much as it applied to ChromaDB then — each person's
-> index is local, and it must stay local.
-
-**Goal:** record the weekly Monday meeting, and let anyone later ask Claude what was said —
-"what did we decide about that deal last Monday?" — and get back the actual spoken
-passages. Purely to refresh memory, so nothing is forgotten.
-
-**Decisions made during brainstorming:**
-- **Capture:** meetings run on Microsoft Teams. This is the smoothest path — Teams can
-  auto-record and auto-transcribe, and it fits the existing Microsoft/OneDrive setup.
-- **What we want back:** a **searchable transcript** (the exact spoken passages). This is the
-  simplest, reuses the existing search pipeline, and costs **no extra API money**. Richer
-  options (auto summaries/action items, links back to the recording, speaker-by-speaker
-  attribution) were considered and deferred — they can be layered on later.
-- **Sharing:** meeting transcripts are **shared** across everyone in the meeting (like the
-  screening results, unlike private email). This fits the privacy model cleanly.
-
-### How it fits the existing system
-The transcript is just text that flows into the same ingest → search → retrieve pipeline
-already used for PDFs and emails. Transcripts live in a shared team folder (a sibling of the
-screening folder in OneDrive); each person's own local Claude instance ingests its own
-searchable copy. That keeps search fast and local while the *source* stays shared — and it's
-safe to share because a transcript isn't private the way one person's inbox is.
-
-*For implementers: do NOT try to share one ChromaDB across machines over OneDrive — a shared
-SQLite-backed store synced by OneDrive will corrupt. The correct pattern is: shared transcript
-**files** in OneDrive, ingested into each person's **local** ChromaDB, tagged `type="meeting"`.*
-
-### What to do first (in order)
-
-**Step 1 — Turn on Teams recording + transcription (no code; do this first).**
-Set the recurring Monday meeting to auto-record and auto-transcribe so no one has to remember.
-This is an admin/organizer setting and can happen in parallel with the code work. Until
-transcripts exist, there's nothing to ingest.
-
-**Step 2 — The simple pipeline (first code version).**
-A shared "Meetings" folder in the team OneDrive. A transcript goes in; each person's local
-instance ingests it (date + title as metadata, tagged as a meeting); a friendly tool answers
-plain-English questions like "what did we discuss last meeting?" or "search meetings for X."
-Small amount of new code; reuses the whole existing pipeline.
-
-**Step 3 — Automate the capture (later polish).**
-Have the system fetch the transcript from Teams automatically after each meeting, so no human
-touches a file.
-
-### The one real choice: how the transcript reaches the shared folder
-
-- **Option A — Someone drops it in (manual capture, automatic everything else).** After the
-  meeting, one person downloads the Teams transcript and drops it into the shared Meetings
-  folder; everything downstream is automatic.
-  *Pros:* works immediately, no special permissions, zero risk. *Cons:* one manual step weekly.
-- **Option B — Fully automatic fetch from Teams.** The system reads the transcript from Teams
-  itself (via Microsoft Graph).
-  *Pros:* nobody lifts a finger. *Cons:* needs a one-time IT/admin approval to let the app read
-  meeting transcripts, so more setup before it works.
-
-**Recommendation: build Option A now, design the folder and file format so Option B slots in
-later with no rework.** Immediate value; automate once admin approval is arranged.
-
-*For implementers: Teams recordings/transcripts for a non-channel meeting save to the
-organizer's OneDrive "Recordings" area; the transcript can be downloaded as `.vtt` or `.docx`.
-Option B uses the Microsoft Graph online-meeting transcript endpoints, which require an
-application permission (e.g. `OnlineMeetingTranscript.Read.All`) and admin consent — a heavier
-lift than the file-drop path. The existing scheduler thread is the natural place to poll for
-new transcripts once B is built.*
-
-### Ideas to keep it smooth for non-technical staff
-- **Make capture invisible:** auto-record the recurring meeting, and ideally point Teams to
-  save straight into the folder the app already watches, so even the "drop it in" step
-  disappears.
-- **No filing or organizing:** date and title come from the meeting itself; users never name
-  or sort anything.
-- **Natural questions, not folders:** users ask Claude in plain English and never think about
-  where transcripts live.
-- **It just appears:** ingestion runs in the background (the watcher already does this), so a
-  searched meeting shows up on its own.
-
-### Things to design around (to head off bugs)
-- **Transcript format.** Teams transcripts arrive as a subtitle-style `.vtt` file full of
-  timestamps, which the current extractor doesn't handle. Two clean options: save/export the
-  transcript as a Word document (already read cleanly by the pipeline via `mammoth`), or add a
-  small `.vtt` parser that strips timestamps and keeps the spoken text (and speaker names, if
-  attribution is on). Decide up front.
-  *For implementers: `.vtt` is not in `ingestion/extractor.py`'s `SUPPORTED_EXTENSIONS`; either
-  route to the existing `.docx` path or add a `.vtt` handler.*
-- **Meetings don't belong to a property.** The current filing is organized by State/Property,
-  and a meeting isn't tied to one property. Meetings need their own lane — a separate "meeting"
-  category and ingest path — rather than being forced into the State/Property folder structure.
-  *For implementers: the watcher's `_resolve_from_path` and the State/Property folder validation
-  assume a property context; a meetings ingest path should bypass that and tag `type="meeting"`
-  with date/title metadata instead.*
-- **Shared-folder concurrency.** Multiple people *reading/ingesting* the same shared transcript
-  is safe (read-only for them). Only the *write* side (dropping/fetching the transcript) has any
-  concurrency concern, and that's a single designated flow — so the Part C hazards mostly don't
-  apply here, but the same atomic-write discipline should be used when the automated fetch (B)
-  writes into the shared folder.
-
-### Suggested priority placement
-This is independent of the multi-user workstreams in Part D and can proceed on its own timeline.
-A sensible sequence: **Step 1 (Teams setting) immediately**, then the **Step 2 simple pipeline**
-as a small standalone piece of work, with **Step 3 automation** grouped alongside the Part D
-"easy onboarding / Graph" work since it shares the admin-consent setup.
+Dead. It depended on the Teams connector, which was rejected, and on the ingest pipeline, which was deleted. See `docs/REBUILD_PLAN.md` §0 for the connector verdict.
 
 ---
 

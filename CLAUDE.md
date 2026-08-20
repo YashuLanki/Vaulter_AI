@@ -2,11 +2,23 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+**How to read this file.** It is long on purpose: the explanations are why the
+same mistakes have not come back. You rarely need all of it at once.
+
+| If you are… | Read |
+|---|---|
+| new here | **What this is**, then **Repository layout** |
+| running it | **Commands** |
+| changing a component | that component under **Architecture** |
+| about to ship to a teammate | **There is a live user**, **Hard-won lessons** |
+| touching anything | **Conventions to preserve** |
+| writing for a person to read | **Working guidelines** §0 |
+
 ## What this is
 
 Vaulter AI Property Intelligence System — a Python system for a real estate investment
 company that gives each team member searchable access to the firm's document library and
-runs a 4-phase CoStar listing screening pipeline, entirely through their own local MCP
+ranks CoStar listings by fit against the existing portfolio, entirely through their own local MCP
 server connected to their own Claude Desktop (no separate UI). `system/main.py` is the single CLI
 entry point; `system/mcp_server.py` is what actually runs in production, serving MCP tools over
 stdio on the main thread with **no background threads**.
@@ -37,7 +49,7 @@ python system/main.py stats                     # what this instance has availab
 
 # Checks -- run the one that matches what you touched (see "Three regression suites" below)
 python system/scripts/check_screener.py             # 111 checks on the screener's arithmetic
-python system/scripts/check_portfolio_comparison.py # 59 checks on the comparison index
+python system/scripts/check_portfolio_comparison.py # 73 checks on the comparison index
 python system/scripts/check_answers.py              # 7 checks on the knowledge answers come from
 ```
 
@@ -238,6 +250,30 @@ lazy: properties nobody asks about never get a file here, so this never becomes 
 the whole corpus. Each summary stamps the newest source file's mtime it was built from, so a
 later check can tell whether new documents have shown up since and the summary might be stale.
 
+### The portfolio (`system/portfolio.py`)
+Reads the Smartsheet Project Master export. CSV and .xlsx only — the PDF/OCR parsing path
+was dropped in the rebuild. Note only .xlsx can represent a sold deal (strikethrough via
+`cell.font.strike`); a CSV export yields every row active and an empty sold list.
+
+**Two locations, local first (2026-08-03).** `_portfolio_dirs()` checks this machine's own
+`system/data/project_master/` and then `config.SMARTSHEET_PORTFOLIO_DIR`
+(`Vaulter AI Shared/Smartsheet Portfolio`). The shared folder exists because a fresh install
+had **no** portfolio data at all: `system/scripts/build_handoff.py` deliberately ships no firm data,
+so a new teammate got "Portfolio: unavailable", cities falling back to state names, and
+`run_proximity_for_property` refusing every property by name — verified live, not theorised.
+Publishing the export to the shared folder once fixes all three for everyone. Local wins so
+an existing machine's behaviour is unchanged and a deliberately-placed local file always
+beats the team copy; `check_system_health` names which copy it used, because a stale local
+file silently beating a fresh team one is the obvious way this goes wrong. The same
+local-then-shared lookup covers `property_coordinates.csv` and `builtin_properties.json` —
+but `coords_path()` returns the *local* path when neither exists, so a caller writing a new
+table never writes into the folder the whole team reads.
+
+`find_project_file()` explicitly skips `property_coordinates.csv` **and**
+`builtin_properties.json` — both live alongside the Project Master and neither is one. The
+second exclusion was a latent bug: an export whose filename lacked "project"/"master" could
+lose the tie-break to `builtin_properties.json` and be silently ignored.
+
 ### Proximity (`system/pipeline/proximity_tool.py`)
 One Overpass query returns every POI category at once within a radius, classified locally, and
 exports CSV + XLSX to the shared folder. It is the only remaining OpenStreetMap consumer —
@@ -262,30 +298,6 @@ up to ~0.7 miles off, immaterial at a 5-mile radius — but the label overstated
 known. Added `section` as its own precision level rather than silently leaving this as `parcel`,
 and `proximity_tool.py` now says so out loud: two properties in the same section return
 byte-identical results, and a user comparing them needs to know why.
-
-### The portfolio (`system/portfolio.py`)
-Reads the Smartsheet Project Master export. CSV and .xlsx only — the PDF/OCR parsing path
-was dropped in the rebuild. Note only .xlsx can represent a sold deal (strikethrough via
-`cell.font.strike`); a CSV export yields every row active and an empty sold list.
-
-**Two locations, local first (2026-08-03).** `_portfolio_dirs()` checks this machine's own
-`system/data/project_master/` and then `config.SMARTSHEET_PORTFOLIO_DIR`
-(`Vaulter AI Shared/Smartsheet Portfolio`). The shared folder exists because a fresh install
-had **no** portfolio data at all: `system/scripts/build_handoff.py` deliberately ships no firm data,
-so a new teammate got "Portfolio: unavailable", cities falling back to state names, and
-`run_proximity_for_property` refusing every property by name — verified live, not theorised.
-Publishing the export to the shared folder once fixes all three for everyone. Local wins so
-an existing machine's behaviour is unchanged and a deliberately-placed local file always
-beats the team copy; `check_system_health` names which copy it used, because a stale local
-file silently beating a fresh team one is the obvious way this goes wrong. The same
-local-then-shared lookup covers `property_coordinates.csv` and `builtin_properties.json` —
-but `coords_path()` returns the *local* path when neither exists, so a caller writing a new
-table never writes into the folder the whole team reads.
-
-`find_project_file()` explicitly skips `property_coordinates.csv` **and**
-`builtin_properties.json` — both live alongside the Project Master and neither is one. The
-second exclusion was a latent bug: an export whose filename lacked "project"/"master" could
-lose the tie-break to `builtin_properties.json` and be silently ignored.
 
 ### MCP server (`system/mcp_server.py`)
 The production entry point. `create_mcp_server()` registers all `@mcp.tool()`-decorated
@@ -393,118 +405,6 @@ is the deterministic check it runs first — it drives a genuine `python system/
 over real stdio rather than importing `system/mcp_server.py` and calling a tool function in-process,
 because the 2026-07-30 hang never reproduced through the in-process shortcut, only through the
 real transport.
-
-### "Claude Desktop isn't installed" — stop making detection load-bearing (2026-08-19)
-
-Four separate fixes have gone into finding Claude Desktop, each adding a place to look after a real
-machine defeated the last one: the settings folder vs the program folder (2026-08-12), the uninstall
-registry (2026-08-13), Windows app packages (2026-08-18), and now two more — **Windows' own package
-registration** and the **running process**, the latter being the only route that cannot be wrong
-about whether the app exists.
-
-The registration route closes a gap every earlier route shared, and it was found by declining to
-accept "we already check five places" as an answer: `LOCALAPPDATA\Packages\Claude*` is created when
-a Store app first **runs**, while `HKCU\Software\Classes\ActivatableClasses\Package` is written
-when it is **installed**. So a Store install that has never been opened appeared in none of the
-checked places — which is exactly the state that began this whole bug family on 2026-08-12.
-Confirmed present on a real machine before being added, and asserted both ways (never-opened →
-found; genuinely absent → still not found). Worth
-knowing why packages matter: Claude Desktop is commonly a Microsoft Store app executing from
-`Program Files\WindowsApps\Claude_...`, a path none of the folder checks cover. Verified on the
-maintainer's own machine, which has BOTH a classic install folder and a Store package, and is
-actually running the Store one.
-
-**The real fix was not a sixth place to look.** `_find_claude_desktop()`'s result is used ONLY as
-proof the app exists — the connection is written to Claude Desktop's own settings file, whose
-location is fixed and independent of where the program lives. So a failed search was withholding
-something it did not gate. `setup_claude_desktop()` now **writes the connection anyway** and says
-what it could not confirm: harmless if the app is genuinely absent, exactly right if it is present
-and merely unrecognised, and either way the person installs the app later and it works on first
-launch with nothing to redo. It still returns False so the summary flags it, because claiming
-"connected" would state something the run never verified.
-
-The generalisable lesson, and it applies well beyond this function: **when a check has been wrong
-four times, stop improving the check and ask what it is gating.** Often the answer is nothing that
-needs gating. A dead end built on an unreliable signal is worse than proceeding with an honest
-caveat. Same family as `_newer_readable_docs`' "couldn't check ≠ nothing there".
-
-### The empty team folder at the OneDrive root is a SYMPTOM (2026-08-19)
-
-Seen on a real teammate's machine: `Vaulter AI Shared` sitting at her OneDrive **root**, beside
-`Documents`, while the firm's library sat nested *inside* `Documents`. That root folder is not the
-team's — it is an empty one **her own install created**. `_detect_shared_dir()` prefers
-`corpus / SHARED_SUBFOLDER`, falls back to `ONEDRIVE_ROOT / SHARED_SUBFOLDER` when the library
-cannot be found, and the `mkdir` at import time then brings it into existence.
-
-**Why that matters far more than it looks:** `UPDATES_DIR` lives under `SHARED_DIR`, so an install
-in this state reads its update channel from its own empty folder and is **never offered an
-update** — which means no fix can reach it automatically, including a fix for this. Measured
-2026-08-19; an earlier claim in the same session that "updates can still reach her" came from a
-test where the team folder *was* inside the library, and was wrong for her actual layout. **A
-machine whose library detection fails is cut off from the update channel, so it needs a fresh
-package, not a published release.**
-
-**Fixed at the root cause the same day: that folder is no longer created or used.** The OneDrive
-root was the team folder's real home until 2026-08-03; returning it afterwards was a leftover from
-the old design, and it did active harm rather than nothing — it put an unrequested folder in
-someone's OneDrive, it left `SHARED_DIR_IS_FALLBACK` **False** so the blunt "NOT connected" warning
-never fired, and it silently became the update channel. `_detect_shared_dir()` now returns
-`_LOCAL_FALLBACK_DIR` instead, which is named for what it is and makes the health check say the
-team folder is not connected — which is true. **A root folder that genuinely HAS content is still
-preferred**, so a machine set up before the move keeps working exactly as it did; only the empty
-case changed. Five layouts asserted, including the two that already worked.
-
-The "present but EMPTY" message still exists for the legacy and still-syncing cases, and now
-**tests** which
-cause applies (library not found at all / library found but the folder is not inside it / still
-syncing) instead of asserting one, and no longer tells anyone to have the folder shared with them
-and use "Add shortcut to My files" — a step deleted 2026-08-03 when the folder moved inside the
-library precisely so nobody would need it. That wording had survived six weeks past the design it
-described.
-
-The robust route out is `_library_from_onedrive_records()`: it matches OneDrive's own records by
-**SharePoint address**, which is identical on every machine and finds a library wherever it is
-mounted. It needs `VAULTER_LIBRARY_URL`, which `build_handoff.py` writes into the package — so a
-package built before that existed (or any install whose `.env` lacks it) has no access to the one
-check that does not care where the folder sits.
-
-### Setup messages: never name a cause the code didn't test (2026-08-12)
-
-The first real teammate install found four bugs in ten minutes, all the same shape: **the code
-checks a symptom and the message confidently asserts a cause.** This is invisible on the
-maintainer's machine, because a working setup only ever exercises the success path. Only a
-machine in a state yours has never been in reaches these branches.
-
-* **"Claude Desktop isn't installed"** — when she had it. `setup_claude_desktop()` checked
-  Desktop's *settings* folder (`%APPDATA%\Claude`), which the app creates on first **run**, while
-  the program installs at `%LOCALAPPDATA%\AnthropicClaude`. A missing settings folder means
-  "never opened", not "not installed". This one genuinely **blocked** — it returned False and
-  never wrote the connection. Now it looks for the program and, finding it, creates the folder
-  and writes the config, removing the round trip entirely.
-* **"The document library isn't on this machine"** — one message for three conditions, and wrong
-  for one of them: a machine syncing two SharePoint libraries *has* the library;
-  `_find_corpus_subfolder` refuses to guess, by design. Telling someone their files are missing
-  when they can see them is the same failure. Each cause now gets its own instruction.
-* **Shared-folder advice for a step deleted six weeks earlier** — "ask someone to share it, then
-  Add shortcut to My files" was true until `SHARED_DIR` moved *inside* `CORPUS_DIR` on
-  2026-08-03, specifically so that step would disappear. The function's own docstring still
-  asserted the old model, which is how it survived.
-* **Refusing to guess was itself a dead end** for a non-technical person who doesn't know the
-  folder name — the goal is just "connect to the firm's drive". Now the library is identified by
-  **content, not name**: ours is the one containing `SHARED_SUBFOLDER`. That works whatever it is
-  called on a given machine, needs nothing typed, and keeps the real name out of this public
-  repo. `VAULTER_CORPUS_HINT` (a distinctive word) is an opt-in last resort, deliberately blank
-  in the tracked `.env.template` — the word belongs in a machine's own gitignored `.env`.
-
-**The rule, which generalises well past install:** before shipping a message that tells someone
-*why* something failed, confirm the code actually tested that. When one condition can be false
-for several reasons, either distinguish them or describe only the symptom. **A confidently wrong
-cause is worse than "something isn't right here"** — it sends people to solve a problem they do
-not have. Same family as `_newer_readable_docs`' "couldn't check ≠ nothing new" and
-`geo_providers`' "unreachable ≠ nothing there".
-
-Worth keeping in proportion: the system itself was never broken. A full wipe-and-reinstall the
-same morning passed end to end. What was broken was its ability to explain itself.
 
 ### Auto-update (`system/scripts/release.py`, `system/scripts/apply_update.py`)
 
@@ -775,7 +675,7 @@ ranks or weights selection factors. They need a senior partner's judgment, not a
 `system/scripts/check_screener.py` runs **111 checks** across deformed market shapes. Run it after
 any change to `fit_screen.py`. Note it covers the screener only — **`geo_providers.py` has no
 automated coverage at all**, and that is where the worst measured bug of 2026-07-29 lived (see
-the proximity note below). It is one of three suites: `check_portfolio_comparison.py` (59 checks)
+the proximity note below). It is one of three suites: `check_portfolio_comparison.py` (73 checks)
 covers the comparison index, and `check_answers.py` (7) covers the shared knowledge answers are
 built from — see "Three regression suites" below for what each one can and cannot catch.
 
@@ -1136,7 +1036,7 @@ threw out 60 of 69 real listings). If a pattern eventually emerges in these note
 decides whether the screener should change. The server's own instructions tell Claude to offer
 to save a decision when the user states one, once, without nagging.
 
-### Who has it installed (`get_install_status` / `open_install_status`) — 2026-08-19
+### Who has it installed (`get_install_status`) — 2026-08-19
 
 Built to answer a question nothing could answer before: **who has Vaulter AI, what version are
 they running, and does anything need fixing on their machine?** Until this existed the only way
@@ -1343,6 +1243,122 @@ that were the checker being wrong about the thing it was checking: it demanded a
 heading when real ones vary (`## Gaps / caveats`, `### Gaps (this verification pass)`), and it
 counted deliberately-abbreviated citations as fabricated. Both fixed. A new check has no track
 record, so its first failures are evidence about the check at least as much as about the data.
+
+## Hard-won lessons
+
+Each of these cost a real failure on a real machine. They are kept in full because the reasoning is the part that transfers.
+
+### "Claude Desktop isn't installed" — stop making detection load-bearing (2026-08-19)
+
+Four separate fixes have gone into finding Claude Desktop, each adding a place to look after a real
+machine defeated the last one: the settings folder vs the program folder (2026-08-12), the uninstall
+registry (2026-08-13), Windows app packages (2026-08-18), and now two more — **Windows' own package
+registration** and the **running process**, the latter being the only route that cannot be wrong
+about whether the app exists.
+
+The registration route closes a gap every earlier route shared, and it was found by declining to
+accept "we already check five places" as an answer: `LOCALAPPDATA\Packages\Claude*` is created when
+a Store app first **runs**, while `HKCU\Software\Classes\ActivatableClasses\Package` is written
+when it is **installed**. So a Store install that has never been opened appeared in none of the
+checked places — which is exactly the state that began this whole bug family on 2026-08-12.
+Confirmed present on a real machine before being added, and asserted both ways (never-opened →
+found; genuinely absent → still not found). Worth
+knowing why packages matter: Claude Desktop is commonly a Microsoft Store app executing from
+`Program Files\WindowsApps\Claude_...`, a path none of the folder checks cover. Verified on the
+maintainer's own machine, which has BOTH a classic install folder and a Store package, and is
+actually running the Store one.
+
+**The real fix was not a sixth place to look.** `_find_claude_desktop()`'s result is used ONLY as
+proof the app exists — the connection is written to Claude Desktop's own settings file, whose
+location is fixed and independent of where the program lives. So a failed search was withholding
+something it did not gate. `setup_claude_desktop()` now **writes the connection anyway** and says
+what it could not confirm: harmless if the app is genuinely absent, exactly right if it is present
+and merely unrecognised, and either way the person installs the app later and it works on first
+launch with nothing to redo. It still returns False so the summary flags it, because claiming
+"connected" would state something the run never verified.
+
+The generalisable lesson, and it applies well beyond this function: **when a check has been wrong
+four times, stop improving the check and ask what it is gating.** Often the answer is nothing that
+needs gating. A dead end built on an unreliable signal is worse than proceeding with an honest
+caveat. Same family as `_newer_readable_docs`' "couldn't check ≠ nothing there".
+
+### The empty team folder at the OneDrive root is a SYMPTOM (2026-08-19)
+
+Seen on a real teammate's machine: `Vaulter AI Shared` sitting at her OneDrive **root**, beside
+`Documents`, while the firm's library sat nested *inside* `Documents`. That root folder is not the
+team's — it is an empty one **her own install created**. `_detect_shared_dir()` prefers
+`corpus / SHARED_SUBFOLDER`, falls back to `ONEDRIVE_ROOT / SHARED_SUBFOLDER` when the library
+cannot be found, and the `mkdir` at import time then brings it into existence.
+
+**Why that matters far more than it looks:** `UPDATES_DIR` lives under `SHARED_DIR`, so an install
+in this state reads its update channel from its own empty folder and is **never offered an
+update** — which means no fix can reach it automatically, including a fix for this. Measured
+2026-08-19; an earlier claim in the same session that "updates can still reach her" came from a
+test where the team folder *was* inside the library, and was wrong for her actual layout. **A
+machine whose library detection fails is cut off from the update channel, so it needs a fresh
+package, not a published release.**
+
+**Fixed at the root cause the same day: that folder is no longer created or used.** The OneDrive
+root was the team folder's real home until 2026-08-03; returning it afterwards was a leftover from
+the old design, and it did active harm rather than nothing — it put an unrequested folder in
+someone's OneDrive, it left `SHARED_DIR_IS_FALLBACK` **False** so the blunt "NOT connected" warning
+never fired, and it silently became the update channel. `_detect_shared_dir()` now returns
+`_LOCAL_FALLBACK_DIR` instead, which is named for what it is and makes the health check say the
+team folder is not connected — which is true. **A root folder that genuinely HAS content is still
+preferred**, so a machine set up before the move keeps working exactly as it did; only the empty
+case changed. Five layouts asserted, including the two that already worked.
+
+The "present but EMPTY" message still exists for the legacy and still-syncing cases, and now
+**tests** which
+cause applies (library not found at all / library found but the folder is not inside it / still
+syncing) instead of asserting one, and no longer tells anyone to have the folder shared with them
+and use "Add shortcut to My files" — a step deleted 2026-08-03 when the folder moved inside the
+library precisely so nobody would need it. That wording had survived six weeks past the design it
+described.
+
+The robust route out is `_library_from_onedrive_records()`: it matches OneDrive's own records by
+**SharePoint address**, which is identical on every machine and finds a library wherever it is
+mounted. It needs `VAULTER_LIBRARY_URL`, which `build_handoff.py` writes into the package — so a
+package built before that existed (or any install whose `.env` lacks it) has no access to the one
+check that does not care where the folder sits.
+
+### Setup messages: never name a cause the code didn't test (2026-08-12)
+
+The first real teammate install found four bugs in ten minutes, all the same shape: **the code
+checks a symptom and the message confidently asserts a cause.** This is invisible on the
+maintainer's machine, because a working setup only ever exercises the success path. Only a
+machine in a state yours has never been in reaches these branches.
+
+* **"Claude Desktop isn't installed"** — when she had it. `setup_claude_desktop()` checked
+  Desktop's *settings* folder (`%APPDATA%\Claude`), which the app creates on first **run**, while
+  the program installs at `%LOCALAPPDATA%\AnthropicClaude`. A missing settings folder means
+  "never opened", not "not installed". This one genuinely **blocked** — it returned False and
+  never wrote the connection. Now it looks for the program and, finding it, creates the folder
+  and writes the config, removing the round trip entirely.
+* **"The document library isn't on this machine"** — one message for three conditions, and wrong
+  for one of them: a machine syncing two SharePoint libraries *has* the library;
+  `_find_corpus_subfolder` refuses to guess, by design. Telling someone their files are missing
+  when they can see them is the same failure. Each cause now gets its own instruction.
+* **Shared-folder advice for a step deleted six weeks earlier** — "ask someone to share it, then
+  Add shortcut to My files" was true until `SHARED_DIR` moved *inside* `CORPUS_DIR` on
+  2026-08-03, specifically so that step would disappear. The function's own docstring still
+  asserted the old model, which is how it survived.
+* **Refusing to guess was itself a dead end** for a non-technical person who doesn't know the
+  folder name — the goal is just "connect to the firm's drive". Now the library is identified by
+  **content, not name**: ours is the one containing `SHARED_SUBFOLDER`. That works whatever it is
+  called on a given machine, needs nothing typed, and keeps the real name out of this public
+  repo. `VAULTER_CORPUS_HINT` (a distinctive word) is an opt-in last resort, deliberately blank
+  in the tracked `.env.template` — the word belongs in a machine's own gitignored `.env`.
+
+**The rule, which generalises well past install:** before shipping a message that tells someone
+*why* something failed, confirm the code actually tested that. When one condition can be false
+for several reasons, either distinguish them or describe only the symptom. **A confidently wrong
+cause is worse than "something isn't right here"** — it sends people to solve a problem they do
+not have. Same family as `_newer_readable_docs`' "couldn't check ≠ nothing new" and
+`geo_providers`' "unreachable ≠ nothing there".
+
+Worth keeping in proportion: the system itself was never broken. A full wipe-and-reinstall the
+same morning passed end to end. What was broken was its ability to explain itself.
 
 ## Conventions to preserve
 
