@@ -1590,8 +1590,19 @@ def _start_transcript():
     return path, handle
 
 
-def _finish_transcript(path, handle):
-    """Close the recording and put a copy where support can read it."""
+def _finish_transcript(path, handle, results=None):
+    """Close the recording and put a copy where support can read it.
+
+    `results` is what each step actually returned. The summary is built from
+    that, NOT from every alarming line that scrolled past -- because a line can
+    be true when printed and false by the end of the same run.
+
+    Auggie's install (2026-08-20) proved the point: both OCR tools were missing,
+    setup downloaded and installed them, both finished with a tick, and the
+    summary still listed four problems. A clean install read as a failure. What
+    a person needs to know is which steps ENDED badly, not every worrying thing
+    said along the way.
+    """
     import re as _re
     import shutil as _shutil
     if handle is None:
@@ -1613,13 +1624,29 @@ def _finish_transcript(path, handle):
     # with the person's name -- so a support person reading several of these
     # can tell at a glance whose machine had what.
     who_ran = os.environ.get("USERNAME", "unknown")
+
+    # Steps that genuinely ended badly.
     problems = []
+    failed_steps = [name for name, ok in (results or {}).items() if not ok]
+    for name in failed_steps:
+        problems.append(f"{name} — did not finish")
+
+    # Plus anything that actually broke, which a step's own result cannot
+    # convey: a crash, or a component refusing to install.
     try:
-        problems = list(getattr(sys.stdout, "problems", []))
-        problems += [p for p in getattr(sys.stderr, "problems", [])
-                     if p not in problems]
+        collected = list(getattr(sys.stdout, "problems", []))
+        collected += [p for p in getattr(sys.stderr, "problems", [])
+                      if p not in collected]
     except Exception:
-        pass
+        collected = []
+    for line in collected:
+        if any(k in line for k in ("ERROR", "Traceback", "✗")):
+            problems.append(line)
+
+    if not results:
+        # Nothing told us how the steps went -- fall back to the scraped lines
+        # rather than claiming all was well.
+        problems = collected
 
     print()
     print("=" * 64)
@@ -1664,13 +1691,14 @@ def _finish_transcript(path, handle):
 
 def main() -> None:
     _log_path, _log_handle = _start_transcript()
+    _results = {}
     try:
-        _run_setup()
+        _results = _run_setup()
     finally:
-        _finish_transcript(_log_path, _log_handle)
+        _finish_transcript(_log_path, _log_handle, _results)
 
 
-def _run_setup() -> None:
+def _run_setup() -> dict:
     print("Vaulter AI — Setup Wizard")
     print(f"Project root: {PROJECT_ROOT}")
 
@@ -1699,6 +1727,7 @@ def _run_setup() -> None:
     results["Document library indexed"] = build_corpus_index()
 
     _print_summary(results)
+    return results
 
 
 def _print_summary(results: dict) -> None:
