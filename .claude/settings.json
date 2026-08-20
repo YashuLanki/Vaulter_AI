@@ -16,8 +16,7 @@
       "PowerShell(git log:*)"
     ],
     "ask": [
-      "Edit(./confidentials/**)",
-      "Write(./confidentials/**)"
+      "Edit(./confidentials/**)"
     ],
     "deny": [
       "Read(./confidentials/.env)",

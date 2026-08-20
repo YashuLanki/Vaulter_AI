@@ -936,8 +936,13 @@ def _install_problems(record: dict) -> list:
     days = record.get("index_days")
     if isinstance(days, int) and days > 10:
         problems.append(f"file list is {days} days old — the nightly refresh has stopped")
-    if record.get("update_waiting"):
-        problems.append(f"update {record['update_waiting']} downloaded but not installed yet")
+    waiting = record.get("update_waiting")
+    # Not if it is the version they are already ON. That happens after an update
+    # is applied but before the machine next checks in, and reporting it says two
+    # contradictory things at once -- "you are on this version" and "this version
+    # is waiting to be installed". A report that contradicts itself is not read.
+    if waiting and waiting != record.get("version"):
+        problems.append(f"update {waiting} downloaded but not installed yet")
     return problems
 
 

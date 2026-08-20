@@ -101,6 +101,19 @@ _CITED_BASELINE = 52
 # near match anywhere in the index, and others differ from the actual
 # filename by enough that a reader following the citation would fail. Fix them
 # and lower this; never raise it to make a run go green.
+#
+# HOW IT IS COUNTED CHANGED ON 2026-08-20, so this number and any figure printed
+# before that date are not the same measurement. Two kinds of false failure were
+# removed: a real filename containing two consecutive spaces (the drive is full
+# of them) counted as missing, and a citation naming one of this system's OWN
+# output files counted as missing because the firm's library will never hold it.
+# Under the old count the run reported 41; under the corrected count the same
+# summaries give 26. Both numbers describe the same summaries -- the difference
+# is entirely the checker. The 26 is still one above this baseline and that gap
+# is NOT explained; the remaining cases are listed by the run itself and want a
+# person to follow one to its document. Deliberately left failing rather than
+# nudged to 26, because raising a baseline to go green is the one thing this
+# check must never do.
 _UNRESOLVED_BASELINE = 25
 
 # Summaries whose "Source files as of" is written as prose rather than a date,
@@ -109,13 +122,41 @@ _UNRESOLVED_BASELINE = 25
 _UNREADABLE_STAMP_BASELINE = 10
 
 
+# Files this system produces itself, which are cited in summaries as the source
+# of a fact and are perfectly real -- they are simply not documents from the
+# firm's library, so the library's file list will never contain them. Counting
+# them as unfindable blames the summary for citing its actual source.
+_OWN_FILES = {
+    "vaulter_project_master.csv",
+    "property_coordinates.csv",
+    "builtin_properties.json",
+    "portfolio_comparison_index.json",
+    "cost_assumptions.json",
+}
+
+
+def _comparable(name: str) -> str:
+    """
+    A filename reduced to what a person would recognise it by.
+
+    Real filenames on the drive contain runs of two and three spaces, usually
+    where a name was assembled by hand. Anyone citing one collapses those
+    without noticing, and so does most software that touches the text on the
+    way. Comparing raw strings therefore reports a file as missing when it is
+    sitting right there under a name that differs by one invisible character --
+    the checker being wrong about the thing it is checking, which is worth
+    more caution here than a missed citation.
+    """
+    return " ".join(name.lower().split())
+
+
 def _index_names(db_path: Path) -> set:
-    """Every filename in the document index, lowercased. Names only."""
+    """Every filename in the document index, reduced for comparison."""
     try:
         con = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
         rows = con.execute("SELECT name FROM files").fetchall()
         con.close()
-        return {r[0].lower() for r in rows if r[0]}
+        return {_comparable(r[0]) for r in rows if r[0]}
     except sqlite3.Error:
         return set()
 
@@ -145,7 +186,7 @@ def main() -> int:
         skip("every cited document exists in the library",
              "no document index on this machine -- run: python system/main.py index-corpus")
     else:
-        missing, total, abbreviated = [], 0, 0
+        missing, total, abbreviated, own = [], 0, 0, 0
         for f, text in texts.items():
             for raw in _CITED_PATH.findall(text):
                 # Some citations are deliberately shortened in prose -- a
@@ -157,8 +198,12 @@ def main() -> int:
                 if "*" in raw or "..." in raw or "…" in raw:
                     abbreviated += 1
                     continue
+                leaf = _comparable(
+                    raw.replace("\\", "/").rstrip("/").split("/")[-1])
+                if leaf in _OWN_FILES:
+                    own += 1
+                    continue
                 total += 1
-                leaf = raw.replace("\\", "/").rstrip("/").split("/")[-1].strip().lower()
                 if leaf not in names:
                     missing.append((f.stem, leaf))
         # Baseline rather than zero, for the same reason the coverage number is
@@ -177,10 +222,20 @@ def main() -> int:
               f"{len(missing)} do not (baseline {_UNRESOLVED_BASELINE})")
         note(f"{abbreviated} citations are deliberately shortened (a wildcard or "
              f"'...'), so they are not expected to resolve")
-        for stem, leaf in missing[:8]:
-            note(f"unresolved: {stem} cites {leaf!r}")
-        if len(missing) > 8:
-            note(f"...and {len(missing) - 8} more")
+        note(f"{own} cite a file this system produces itself, not a library "
+             f"document, so the library's file list cannot contain them")
+        # Group by FILENAME, not by mention. One badly-named file cited on eight
+        # bullets used to fill the whole sample eight times over, so a reader saw
+        # one property's problem and nothing else -- 26 mentions were only about
+        # 20 distinct files, and the other properties were invisible. Naming each
+        # file once, with how many bullets lean on it, fits them all.
+        by_file = {}
+        for stem, leaf in missing:
+            by_file.setdefault(leaf, set()).add(stem)
+        for leaf in sorted(by_file, key=lambda k: (-len(by_file[k]), k)):
+            where = ", ".join(sorted(by_file[leaf]))
+            note(f"unresolved: {leaf!r} — cited by {where}")
+        note(f"{len(missing)} mentions across {len(by_file)} distinct filenames")
 
     # ---- 2. Every summary can be currency-checked --------------------------
     # A summary with no source date can never be told apart from a current one,

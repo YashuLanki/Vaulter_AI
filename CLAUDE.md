@@ -1174,6 +1174,52 @@ with a **newer** `format_version` is still shown, reading only known fields — 
 screening manifest's ignore-newer rule, and deliberately: hiding a teammate is the failure this
 feature exists to fix.
 
+### The morning round (`system/scripts/team_status.py`, `daily_round.cmd`) — 2026-08-20
+
+A Windows scheduled task at 8am that checks every teammate's install and writes a
+plain-English briefing to `SHARED_DIR/system/daily_status/` (`latest.md` plus a dated copy).
+Asked for directly: an assistant that reports each morning on who has it, what state they are
+in, whether answers are still right, and whether anything is completely dead — rather than
+those questions being asked only when something already went wrong.
+
+**Two layers, and the split is the design.** `team_status.py` gathers the countable facts —
+versions, dates, error counts, whether a check passed — deterministically, free, and it cannot
+get a number wrong. Claude then reads those facts and writes the briefing, which is the
+judgement a script cannot make ("she is quiet AND two versions behind AND reported an error, so
+she is worth a nudge"). If the model layer fails entirely the facts are still saved to
+`system/data/logs/daily_round_facts.txt`, so the morning is never a total blank. The collector
+is also fine to run by hand any time: `python system/scripts/team_status.py`.
+
+**A scheduled task, because this project runs no background threads** — the same rule the MCP
+server follows, and the same mechanism the nightly file-list refresh already used. It runs at
+8am specifically: an hour after that refresh, so the round reads a list rebuilt the same
+morning rather than yesterday's.
+
+Four things here are load-bearing:
+
+* **`ANTHROPIC_API_KEY` is cleared for the run.** When set it takes precedence over the
+  signed-in Claude account, and on this machine that key has no credit — so the round would
+  fail with "credit balance too low" while looking like a scheduling problem. Measured, not
+  guessed.
+* **The prompt forbids inventing a cause**, and the first real run honoured it: faced with a
+  check that had started failing, it wrote *"I could not establish why the number rose — that
+  needs a person"* rather than supplying a plausible reason. Same rule as
+  `_newer_readable_docs`' "couldn't check ≠ nothing new"; the difference is that here it is
+  enforced in a prompt rather than in code, so it is worded as a rule and not a preference.
+* **It is read-only and says so twice** — in the tool allowlist and in its own prompt. It never
+  applies an update, publishes anything, or edits a summary. Anything needing action goes in a
+  "what I would do next" list for a person. An agent that fixed things unattended on a machine
+  every teammate's install syncs to is a blast radius nobody asked for.
+* **It states the AGE of the file list every day, and checks it directly.** Registering this
+  found that the 7am refresh had been pointing at `%TEMP%ealinstall_.../Vaulter AI` — a
+  throwaway folder from an install test, deleted weeks earlier — so **it had been failing
+  silently every night**, while Windows recorded `LastTaskResult: 0` because the `pythonw.exe`
+  it was told to run did not exist to fail. Nothing in the system noticed, and a hand-run
+  rebuild was the only thing keeping the list current. That is the precise setup behind the
+  2026-08-11 wrong answer ("no documents newer than 2026-08-03" — there were 57), so
+  `_file_list_age()` reads the list's own timestamp and never infers freshness from whether the
+  refresh reported success. **The only trustworthy evidence about a file list is the file list.**
+
 ## There is a live user (2026-08-13)
 
 **A teammate other than the maintainer is connected to `vaulter_ai` on her own Claude Desktop and

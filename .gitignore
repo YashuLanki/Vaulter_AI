@@ -72,6 +72,14 @@ docs/agents/*/memory.md
 # minutes via `python main.py index-corpus`, so there is nothing to
 # gain by committing it and a real disclosure risk if we do.
 system/data/corpus_index.db
+
+# Where in this machine's own log the error-reporting step had read up to. A
+# byte offset that is true for one machine only -- committing it means a fresh
+# clone starts life told to skip the first N bytes of a log it has never
+# written, so its earliest errors would be passed over in silence. Release
+# packages already exclude all of system/data, so this was only ever a clone
+# problem, but it is still a per-machine fact and does not belong in git.
+system/data/last_error_report.txt
 system/data/corpus_index.db-journal
 system/data/corpus_index.db-wal
 
