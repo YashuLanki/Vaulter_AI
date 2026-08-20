@@ -96,25 +96,38 @@ _STAMP = re.compile(r"Source files as of:?\*{0,2}\s*(\d{4}-\d{2}-\d{2})")
 # deliberate pass that improves coverage, never to make a run go green.
 _CITED_BASELINE = 52
 
-# Citations that named a document nobody can find, on the day this check was
-# written. Confirmed real rather than a gap in the index: some names have no
-# near match anywhere in the index, and others differ from the actual
-# filename by enough that a reader following the citation would fail. Fix them
-# and lower this; never raise it to make a run go green.
+# Citations naming a document nobody can find. Lowered from 25 to 12 on
+# 2026-08-20 after a correction pass, which is the only direction this number
+# may ever move.
 #
-# HOW IT IS COUNTED CHANGED ON 2026-08-20, so this number and any figure printed
-# before that date are not the same measurement. Two kinds of false failure were
+# HOW IT IS COUNTED also changed that day, so this figure and anything printed
+# before it are not the same measurement. Two kinds of false failure were
 # removed: a real filename containing two consecutive spaces (the drive is full
 # of them) counted as missing, and a citation naming one of this system's OWN
 # output files counted as missing because the firm's library will never hold it.
-# Under the old count the run reported 41; under the corrected count the same
-# summaries give 26. Both numbers describe the same summaries -- the difference
-# is entirely the checker. The 26 is still one above this baseline and that gap
-# is NOT explained; the remaining cases are listed by the run itself and want a
-# person to follow one to its document. Deliberately left failing rather than
-# nudged to 26, because raising a baseline to go green is the one thing this
-# check must never do.
-_UNRESOLVED_BASELINE = 25
+# The same write-ups reported 41 under the old count and 26 under the corrected
+# one, with no change to the data at all.
+#
+# The correction pass then fixed 14 mentions across 7 write-ups. Worth knowing
+# what they turned out to be, because almost none was a fabricated source:
+# a one-letter typo in a consultant's name; two consecutive spaces; a property
+# name dropped off the front of a filename; a filename written in the house
+# YYMMDD style when the real file was named differently; a range written as
+# "Sht1.PDF through Sht5.PDF", where the tail is shorthand and not a filename at
+# all; and "Budget A/B.pdf", meaning two files, where the slash read as a folder
+# separator. Two of the corrected citations also carried a FOLDER that did not
+# hold the file -- checked against the drive and replaced with the real one,
+# since a wrong path sends a reader somewhere that does not exist.
+#
+# The 12 that remain are three distinct files, all deliberately left: an
+# executed June 2026 letter of intent for antelope-ellis that is not on the
+# drive under any similar name (the only "fully executed" files for that
+# property are leases from 2011 and 2021), and two WCR 34 settlement statements
+# whose folders hold dozens of closing documents but nothing matching. Several
+# generically-named settlement statements exist and choosing one would be a
+# guess. Fix them by finding the real document, never by picking the nearest
+# name.
+_UNRESOLVED_BASELINE = 12
 
 # Summaries whose "Source files as of" is written as prose rather than a date,
 # on the day this check was written. Each is a one-line fix; until then nothing
