@@ -486,6 +486,25 @@ def main() -> int:
         finally:
             _shutil.rmtree(r, ignore_errors=True)
 
+        # Finding the folder must never leave a complaint behind. Detection notes
+        # WHY it could not identify the library and the wizard reads that note --
+        # so a stale note after a SUCCESSFUL find made setup tell a real teammate
+        # her library was not on her computer while having just found it, and sent
+        # her off to re-sync OneDrive for no reason. Caught 2026-08-20.
+        r = _fake_root("Desktop", "Documents", "Acme Co - Documents")
+        (Path(r) / "Acme Co - Documents" / "riverbend" / _cf.SHARED_SUBFOLDER).mkdir(parents=True)
+        _saved_sub = _cf.CORPUS_SUBFOLDER
+        _cf.CORPUS_SUBFOLDER = "Acme Co - riverbend"      # a name that is NOT there
+        try:
+            got = _cf._find_corpus_subfolder(r)
+            check("finding the folder clears any earlier complaint",
+                  got is not None and not _cf.CORPUS_UNRESOLVED_REASON,
+                  f"found {got.name if got else None}, "
+                  f"complaint {_cf.CORPUS_UNRESOLVED_REASON!r}")
+        finally:
+            _cf.CORPUS_SUBFOLDER = _saved_sub
+            _shutil.rmtree(r, ignore_errors=True)
+
         _cf._library_from_onedrive_records = lambda: None
 
         # Found by its own distinctive word, for when our marker folder has not

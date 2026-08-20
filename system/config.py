@@ -435,6 +435,29 @@ def _search_below(roots: list, match=None) -> list:
 
 def _find_corpus_subfolder(onedrive_root: Path) -> Path | None:
     """
+    Find the library, and never leave a complaint behind when it was found.
+
+    The wrapper exists because of a real mislabel (2026-08-20). Detection notes
+    WHY it could not identify the library, and the setup wizard reads that note
+    to explain what to do. Every route was supposed to clear the note on
+    success, and one did not -- the library-address route, which is the most
+    likely one to succeed. So on a machine where the shipped folder name did not
+    match but the address did, setup found the folder correctly and still told
+    the person their library was not on the computer and to go and sync OneDrive.
+
+    Getting that right per-route is a thing to remember, and the one that was
+    forgotten was the important one. Clearing it HERE makes it structural: any
+    route that returns a folder clears the complaint, whether or not its author
+    thought about it.
+    """
+    result = _find_corpus_subfolder_inner(onedrive_root)
+    if result is not None:
+        globals()["CORPUS_UNRESOLVED_REASON"] = ""
+    return result
+
+
+def _find_corpus_subfolder_inner(onedrive_root: Path) -> Path | None:
+    """
     The firm's synced SharePoint document library, found by shape not by name.
 
     Detected rather than hardcoded for two reasons. The first is
