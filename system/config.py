@@ -386,16 +386,25 @@ _MAX_LIBRARY_SEARCH_DEPTH = 3
 _MAX_LIBRARY_SEARCH_LISTINGS = 200
 
 
-def _search_below(roots: list) -> list:
+def _search_below(roots: list, match=None) -> list:
     """
-    Folders under `roots` that contain this system's own folder, searched
-    breadth-first to _MAX_LIBRARY_SEARCH_DEPTH and stopping after
+    Folders under `roots` that `match`, searched breadth-first to
+    _MAX_LIBRARY_SEARCH_DEPTH and stopping after
     _MAX_LIBRARY_SEARCH_LISTINGS directory listings.
+
+    `match` defaults to "holds this system's own folder". Passing a different
+    test is how the same bounded walk also searches by NAME (2026-08-20) --
+    before that, name matching only looked at the top level and one folder
+    down, so a library named for the firm's site but sitting two or three
+    folders deep, whose marker had not synced yet, was missed. Measured across
+    seven real name variants at five depths; that was the only gap left.
 
     Breadth-first so the shallowest match wins, and a matching folder is never
     descended into -- without that, finding the library would immediately walk
     the library, which is the expensive thing this avoids.
     """
+    if match is None:
+        match = _has_shared_folder
     matches, listings, level = [], 0, list(roots)
     for _depth in range(_MAX_LIBRARY_SEARCH_DEPTH):
         nxt = []
@@ -409,7 +418,7 @@ def _search_below(roots: list) -> list:
             listings += 1
             for child in children:
                 try:
-                    if (child / SHARED_SUBFOLDER).is_dir():
+                    if match(child):
                         # Same refusal as the records route: a folder holding
                         # someone's Desktop and Pictures is not the library.
                         if not _looks_like_personal_root(child):
@@ -589,13 +598,11 @@ def _find_corpus_subfolder(onedrive_root: Path) -> Path | None:
     if not with_shared and hint_word:
         by_name = [d for d in possible if hint_word in d.name.lower()]
         if not by_name:
-            for parent in top_level:
-                try:
-                    by_name += [c for c in parent.iterdir()
-                                if c.is_dir() and hint_word in c.name.lower()
-                                and not _looks_like_personal_root(c)]
-                except OSError:
-                    continue
+            # The same bounded walk the marker search uses, so a library named
+            # for the firm's site is found however deep it sits -- not just one
+            # folder down, which was the limit until 2026-08-20.
+            by_name = _search_below(
+                top_level, match=lambda d: hint_word in d.name.lower())
         if len(by_name) == 1:
             return _found(by_name[0])
 
