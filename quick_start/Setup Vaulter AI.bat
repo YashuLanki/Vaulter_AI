@@ -414,7 +414,15 @@ if defined PYCMD goto :run
 
 echo.
 
-echo Python was not found on this computer. Vaulter AI needs it to run.
+if defined PY_TOO_OLD (
+
+    echo The Python on this computer is too old for Vaulter AI.
+
+) else (
+
+    echo Python was not found on this computer. Vaulter AI needs it to run.
+
+)
 
 echo.
 
@@ -722,6 +730,30 @@ if errorlevel 1 goto :eof
 %1 -c "import sys" >nul 2>nul
 
 if errorlevel 1 goto :eof
+
+REM AND it must be new enough. Without this, an old Python sitting on PATH
+
+REM was accepted here and handed to the wizard, which then stopped dead with
+
+REM "your Python is too old" -- while this very file knows how to install a
+
+REM current one, and would have done so had it found nothing at all. It was
+
+REM reporting a problem it could fix, purely because something unusable was
+
+REM present. Rejecting it here hands the job to the install step below.
+
+%1 -c "import sys; raise SystemExit(0 if sys.version_info >= (3, 10) else 1)" >nul 2>nul
+
+if errorlevel 1 (
+
+    echo   Found %1, but it is too old for Vaulter AI. Looking for a newer one...
+
+    set "PY_TOO_OLD=1"
+
+    goto :eof
+
+)
 
 set "PYCMD=%1"
 
