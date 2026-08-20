@@ -1490,11 +1490,26 @@ class _Transcript:
                 "could not", "Could not", "couldn't", "Couldn't",
                 "not found", "isn't", "cannot", "Cannot", "failed", "Failed")
 
+    # Lines that LOOK like trouble and never are. Without these the summary was
+    # 20 items on a successful install, 18 of them the component installer
+    # mentioning that it put a helper program somewhere not on the PATH -- which
+    # it always does, and which matters to nobody. Found by running the real
+    # installer end to end, 2026-08-20; the one genuine note was buried among
+    # them, which defeats the whole point of having a summary.
+    _NOISE = (
+        "is installed in", "are installed in",          # pip's PATH notices
+        "Consider adding this directory to PATH",
+        "--no-warn-script-location",
+        "A new release of pip",
+        "To update, run:",
+    )
+
     def __init__(self, stream, handle):
         self._stream = stream
         self._handle = handle
         self._buffer = ""
         self.problems = []
+        self._seen = set()
 
     def write(self, text):
         self._stream.write(text)
@@ -1508,8 +1523,14 @@ class _Transcript:
         while "\n" in self._buffer:
             line, self._buffer = self._buffer.split("\n", 1)
             stripped = line.strip()
-            if stripped and any(m in stripped for m in self._TROUBLE):
-                if stripped not in self.problems and len(self.problems) < 40:
+            if not stripped or any(n in stripped for n in self._NOISE):
+                continue
+            if any(m in stripped for m in self._TROUBLE):
+                # Collapsed on the first 60 characters, so a family of
+                # near-identical lines counts once rather than filling the page.
+                key = stripped[:60]
+                if key not in self._seen and len(self.problems) < 25:
+                    self._seen.add(key)
                     self.problems.append(stripped)
         return len(text)
 
