@@ -467,7 +467,57 @@ def main() -> int:
         finally:
             _shutil.rmtree(r, ignore_errors=True)
 
+        # A matching library ADDRESS says which library, never which folder
+        # level this machine mounted. OneDrive lets you sync a whole library or
+        # one folder inside it, and both record the same address -- so on a real
+        # teammate's machine the address matched a mount one level ABOVE the
+        # firm's folder, and everything she needed looked missing while sitting
+        # right there. _narrow_to_library is what stops that.
+        r = _fake_root("Desktop", "Documents", "Acme Co - Documents")
+        (Path(r) / "Acme Co - Documents" / "riverbend" / _cf.SHARED_SUBFOLDER).mkdir(parents=True)
+        try:
+            got = _cf._narrow_to_library(Path(r) / "Acme Co - Documents")
+            check("a mount one level above the library narrows down to it",
+                  got is not None and got.name == "riverbend",
+                  f"got {got.name if got else None}")
+            inner = Path(r) / "Acme Co - Documents" / "riverbend"
+            check("  ...and a mount that already IS the library is left alone",
+                  _cf._narrow_to_library(inner) == inner)
+        finally:
+            _shutil.rmtree(r, ignore_errors=True)
+
         _cf._library_from_onedrive_records = lambda: None
+
+        # Found by its own distinctive word, for when our marker folder has not
+        # synced into the library yet. Second to the marker, never ahead of it.
+        _saved_hint = os.environ.get("VAULTER_CORPUS_HINT")
+        os.environ["VAULTER_CORPUS_HINT"] = "riverbend"
+        try:
+            r = _fake_root("Desktop", "Acme Co - Documents")
+            (Path(r) / "Acme Co - Documents" / "riverbend" / "!PROPERTIES").mkdir(parents=True)
+            try:
+                got = _cf._find_corpus_subfolder(r)
+                check("the library is found by its distinctive word, marker or not",
+                      got is not None and got.name == "riverbend",
+                      f"got {got.name if got else None}")
+            finally:
+                _shutil.rmtree(r, ignore_errors=True)
+
+            # Two folders carrying the word is ambiguous, and ambiguous means stop.
+            r = _fake_root("Desktop", "Acme Co - Documents", "Other Org - Docs")
+            (Path(r) / "Acme Co - Documents" / "riverbend" / "!P").mkdir(parents=True)
+            (Path(r) / "Other Org - Docs" / "riverbend archive" / "!P").mkdir(parents=True)
+            try:
+                check("  ...but two folders with that word refuses rather than guessing",
+                      _cf._find_corpus_subfolder(r) is None)
+            finally:
+                _shutil.rmtree(r, ignore_errors=True)
+        finally:
+            if _saved_hint is None:
+                os.environ.pop("VAULTER_CORPUS_HINT", None)
+            else:
+                os.environ["VAULTER_CORPUS_HINT"] = _saved_hint
+
 
         r = _fake_root(*personal, "Acme Co - somelibrary")
         try:

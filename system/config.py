@@ -199,6 +199,62 @@ CORPUS_UNRESOLVED_REASON = ""
 LIBRARY_URL = os.getenv("VAULTER_LIBRARY_URL", "").strip()
 
 
+def _narrow_to_library(folder: Path) -> Path:
+    """
+    Given a folder that IS the firm's library or CONTAINS it, return the one
+    that actually is it.
+
+    Two signals, strongest first, and the second one is the point:
+
+      1. It holds this system's own shared folder. That is a marker we put
+         there ourselves, so it is proof rather than inference.
+      2. Its name carries the distinctive word from VAULTER_CORPUS_HINT. This
+         is what makes a machine work when the marker has not synced into the
+         library yet, or when the library is named differently here than on the
+         machine that built the package -- which is the normal case, not the
+         exception. Confirmed 2026-07-29 that colleagues see different names
+         for the same library.
+
+    Only ever descends ONE level, and only accepts a single unambiguous answer.
+    Two candidates means this cannot tell them apart, and picking one would be
+    guessing at which folder holds the firm's documents.
+
+    Returns the folder it was given when nothing better is found, because the
+    caller has already established the library is at or below it.
+    """
+    try:
+        if (folder / SHARED_SUBFOLDER).is_dir():
+            return folder
+        children = [c for c in folder.iterdir() if c.is_dir()]
+    except OSError:
+        return folder
+
+    marked = [c for c in children if _has_shared_folder(c)]
+    if len(marked) == 1:
+        return marked[0]
+
+    hint = os.getenv("VAULTER_CORPUS_HINT", "").strip().lower()
+    if hint:
+        # The hint may equally describe the folder we are already standing in
+        # (the maintainer's own mount is named for it), in which case there is
+        # nothing to descend into.
+        if hint in folder.name.lower() and not marked:
+            return folder
+        named = [c for c in children if hint in c.name.lower()]
+        if len(named) == 1:
+            return named[0]
+
+    return folder
+
+
+def _has_shared_folder(d: Path) -> bool:
+    """Whether d contains this system's own shared folder. Never raises."""
+    try:
+        return (d / SHARED_SUBFOLDER).is_dir()
+    except OSError:
+        return False
+
+
 def _library_from_onedrive_records() -> Path | None:
     r"""
     Ask OneDrive itself where it put the firm's document library.
@@ -247,12 +303,24 @@ def _library_from_onedrive_records() -> Path | None:
     except Exception:
         return None
 
-    # The address matches exactly -- the strongest signal there is, since the
-    # address is identical on every machine in the firm.
+    # The address matches exactly -- the strongest signal for WHICH library,
+    # but it says nothing about WHERE IN IT this machine is mounted, and that
+    # distinction cost a real teammate a working install (2026-08-20).
+    #
+    # OneDrive lets you sync a whole library or just a folder inside it, and
+    # both record the SAME library address. The maintainer synced the firm's
+    # folder itself; she synced the library above it. So the address matched
+    # her mount perfectly and we handed back a folder one level too high --
+    # which put our own shared folder out of view, made the team's data look
+    # missing, and set the file index walking the wrong tree. Everything she
+    # needed was on disk the whole time.
+    #
+    # So: trust the address to identify the library, then look at what is
+    # actually there before deciding which folder it is.
     if want:
         for url, mount in mounts:
             if url == want:
-                return mount
+                return _narrow_to_library(mount)
 
     # No address configured, or none matched. Fall back to asking the same
     # question of OneDrive's list that the folder search asks of the disk:
@@ -500,6 +568,36 @@ def _find_corpus_subfolder(onedrive_root: Path) -> Path | None:
         if len(deeper) == 1:
             return _found(deeper[0])
         with_shared = deeper
+
+    # LOOK FOR THE LIBRARY BY ITS OWN DISTINCTIVE WORD, at the top level and one
+    # folder down (2026-08-20). Until now the hint was only a tie-break between
+    # two same-shaped names at the top level, which meant it could not help in
+    # the case it matters most: the firm's folder sitting inside a synced parent
+    # library, under a name that does not match the one the package was built
+    # with. That is the normal shape, not the exception -- OneDrive names a
+    # folder after whatever was synced, and colleagues sync different levels.
+    #
+    # Deliberately AFTER the marker searches above, so a folder proven to hold
+    # this system's own shared folder always wins over one that merely has the
+    # right word in its name. And deliberately requiring exactly one match:
+    # two folders carrying the word means this cannot tell them apart, and
+    # guessing which holds the firm's documents is the whole thing to avoid.
+    #
+    # Personal folders are still excluded as candidates -- descending through
+    # one to reach a library is fine, returning one never is.
+    hint_word = os.getenv("VAULTER_CORPUS_HINT", "").strip().lower()
+    if not with_shared and hint_word:
+        by_name = [d for d in possible if hint_word in d.name.lower()]
+        if not by_name:
+            for parent in top_level:
+                try:
+                    by_name += [c for c in parent.iterdir()
+                                if c.is_dir() and hint_word in c.name.lower()
+                                and not _looks_like_personal_root(c)]
+                except OSError:
+                    continue
+        if len(by_name) == 1:
+            return _found(by_name[0])
 
     candidates = [d for d in possible if " - " in d.name]
 
