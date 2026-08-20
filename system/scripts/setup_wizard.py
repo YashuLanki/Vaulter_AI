@@ -189,15 +189,25 @@ def check_python_version() -> bool:
               f"least Python {MIN_PYTHON[0]}.{MIN_PYTHON[1]}. Install a newer Python first "
               f"(see README.md's Setup section) and re-run this wizard with it.")
         return False
-    if version not in RECOMMENDED_PYTHON:
-        recommended = " or ".join(f"{v[0]}.{v[1]}" for v in RECOMMENDED_PYTHON)
-        print(f"  ⚠ Python {version[0]}.{version[1]} isn't one of the versions this project's "
-              f"dependencies are best-tested against ({recommended}). It will likely still "
-              f"work, but if `pip install` below fails or is unusually slow for any package, "
-              f"that's the most likely reason — installing Python {recommended} instead "
-              f"usually fixes it.")
-        return True
-    print(f"  ✓ Python {version[0]}.{version[1]} — good.")
+    # NO WARNING FOR AN UNTESTED VERSION (changed 2026-08-20). This used to say
+    # the version "isn't one of the ones the dependencies are best-tested
+    # against" whenever it was outside a hand-kept list -- in a ⚠ line, near the
+    # top of the screen, on a run that then worked perfectly.
+    #
+    # Two problems with that. It needs somebody to keep adding versions to a
+    # list forever, and it was already out of date: it warned about the version
+    # the maintainer's own working install runs. And it stated a problem nobody
+    # had observed -- the same habit this file has removed from every other
+    # message in it.
+    #
+    # The warning's only real job was "if installing the dependencies fails,
+    # this is probably why". That belongs at the point of failure, and step 2
+    # says it there. So this step now just states the version.
+    label = f"{version[0]}.{version[1]}"
+    if version in RECOMMENDED_PYTHON:
+        print(f"  ✓ Python {label} — good.")
+    else:
+        print(f"  ✓ Python {label} — this will be used.")
     return True
 
 
@@ -213,9 +223,18 @@ def install_dependencies() -> bool:
         [sys.executable, "-m", "pip", "install", "-r", str(requirements)],
     )
     if result.returncode != 0:
-        print("  ✗ pip install failed — see the output above for which package failed and "
-              "why. A common fix is installing one of the recommended Python versions above "
-              "and re-running this wizard with it.")
+        print("  ✗ Installing the Python components failed — the output above says which one "
+              "and why.")
+        # The version note lives HERE, at the point of failure, rather than as a
+        # warning before anything has gone wrong. Only mentioned when the version
+        # in use is actually one nobody has run this on.
+        version = sys.version_info[:2]
+        if version not in RECOMMENDED_PYTHON:
+            known = " or ".join(f"{v[0]}.{v[1]}" for v in RECOMMENDED_PYTHON)
+            print(f"     This machine is on Python {version[0]}.{version[1]}, which nobody has "
+                  f"run this on. If a package refused to install, that is the likeliest "
+                  f"reason -- installing Python {known} and running setup again usually "
+                  f"fixes it.")
         return False
     print("  ✓ All Python dependencies installed.")
     return True
