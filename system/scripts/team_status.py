@@ -294,9 +294,17 @@ def as_text(data: dict) -> str:
         # one machine and the list is useless if they look identical.
         where = f" (in {p['install_folder']})" if p.get("install_folder") else ""
         lines.append(f"{p['person']} on {p['machine']}{where} - {p['state'].upper()}")
-        lines.append(f"    version {p['version']}"
+        # "reported" rather than "is", because that is all this can honestly say.
+        # A machine writes its note when a conversation starts, so between an
+        # update and the next conversation the note names the OLD version. That
+        # actually happened on 2026-08-20: this list said a machine was two
+        # versions back when it had been updated an hour earlier. For a list
+        # whose whole job is spotting out-of-date machines, stating a stale
+        # reading as current is the wrong way round -- so the reading now comes
+        # with when it was taken.
+        lines.append(f"    reported version {p['version']}"
                      + (" (up to date)" if p["up_to_date"] else " (behind)")
-                     + f", last used {used}")
+                     + f", as of {used}")
         for flag in p["problems"]:
             lines.append(f"    NEEDS ATTENTION: {flag}")
 

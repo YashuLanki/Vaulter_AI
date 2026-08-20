@@ -55,6 +55,7 @@ Connect in Claude Desktop:
 
 import logging
 import os
+import re as _re
 import sys
 from pathlib import Path
 
@@ -624,8 +625,8 @@ def _where() -> str:
 def _checkin_stamp_path() -> "Path":
     """Local record of when this install last checked in. Local on purpose --
     reading it must not cost another shared-folder round trip."""
-    from config import DATA_DIR
-    return Path(DATA_DIR) / "last_checkin.txt"
+    from config import CHECKIN_STAMP_FILE
+    return Path(CHECKIN_STAMP_FILE)
 
 
 def _checkin_due() -> bool:
@@ -667,6 +668,11 @@ _ERROR_MARKERS = ("[ERROR]", "[CRITICAL]", "Traceback (most recent call last)")
 
 # How much of a crash to carry across, and how big the shared file may get.
 _TRACEBACK_LINES = 14
+
+# What the start of an ordinary log entry looks like: its own date. Used to know
+# where a crash block ENDS, so a short traceback does not drag in whatever the
+# server happened to log next.
+_LOG_ENTRY_START = _re.compile(r"^\d{4}-\d{2}-\d{2}[ T]")
 _MAX_REPORT_BYTES = 200_000
 
 
@@ -734,8 +740,24 @@ def _report_errors_to_team() -> None:
                 picked.append(line.rstrip())
                 # A crash is a block of lines, not one; carry enough of it to be
                 # worth reading, and stop at the next ordinary log line.
+                #
+                # That second half is what this used to only CLAIM. It took the
+                # next 14 lines whatever they were, so a short traceback pulled
+                # in whatever came after it -- on the first real report that was
+                # the server's own startup banner, eight INFO lines, in a file
+                # whose header says "Errors only". A comment describing
+                # behaviour the code does not have is the same fault as a
+                # message naming a cause nothing tested.
+                #
+                # A new log entry begins with its own date. A traceback's own
+                # continuation lines ("  File ...", "NameError: ...") do not, so
+                # a dated line that is not itself an error ends the block.
                 if "Traceback" in line:
                     for follow in lines[i + 1:i + 1 + _TRACEBACK_LINES]:
+                        starts_new_entry = bool(_LOG_ENTRY_START.match(follow))
+                        if starts_new_entry and not any(m in follow
+                                                        for m in _ERROR_MARKERS):
+                            break
                         picked.append(follow.rstrip())
                         i += 1
             i += 1
@@ -2023,16 +2045,6 @@ no score -- it's a diary, not a dial.""".replace(
             result = apply_update.apply_pending_update()
             if not result["applied"]:
                 return f"Nothing to apply: {result['reason']}"
-
-            # Clear the daily check-in stamp so the next conversation reports
-            # the NEW version to the team straight away, instead of leaving the
-            # roster claiming the old one until tomorrow. "Did that fix reach
-            # everyone?" is the one question this list exists to answer, and
-            # the moment right after an update is when it gets asked.
-            try:
-                _checkin_stamp_path().unlink(missing_ok=True)
-            except OSError:
-                pass
 
             lines = [
                 f"Applied version {result['version']}: {result['files_updated']} file(s) "

@@ -299,6 +299,21 @@ def apply_pending_update(project_root: Path = None) -> dict:
     zip_path.unlink(missing_ok=True)
     (PENDING_UPDATE_DIR / "ready.json").unlink(missing_ok=True)
 
+    # Forget when this machine last reported to the team, so the next
+    # conversation reports the NEW version straight away instead of leaving
+    # the team list claiming the old one until tomorrow. This belongs HERE,
+    # not in the MCP tool that usually calls it: it used to live there, so
+    # applying an update any other way -- including this file's own
+    # command-line fallback -- left the list stating a version the machine
+    # was no longer running. Measured 2026-08-20 on the maintainer's own
+    # install, which reported a version it had not been on for an hour.
+    # "Did that fix reach everyone?" is the one question that list answers.
+    try:
+        from config import CHECKIN_STAMP_FILE
+        Path(CHECKIN_STAMP_FILE).unlink(missing_ok=True)
+    except Exception:
+        pass                  # never let bookkeeping fail a real update
+
     return {
         "applied": True,
         "version": version,

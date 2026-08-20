@@ -839,6 +839,13 @@ CORPUS_INDEX_FILE = (BASE_DIR / "data" / "corpus_index.db").resolve()
 # ─── Data Folders ─────────────────────────────────────────────────
 
 DATA_DIR       = (BASE_DIR / "data").resolve()
+
+# When this install last left its note in the team folder. Local on purpose:
+# checking it must not cost a shared-folder round trip. Named HERE rather than
+# inside either module that touches it, because applying an update has to clear
+# it -- otherwise the team list keeps reporting the version the machine was on
+# BEFORE the update, until the next day.
+CHECKIN_STAMP_FILE = DATA_DIR / "last_checkin.txt"
 LOG_DIR        = DATA_DIR / "logs"
 
 # Where a CoStar export or broker spreadsheet gets dropped so screen_listings
