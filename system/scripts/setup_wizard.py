@@ -852,7 +852,98 @@ def _claude_desktop_config_paths() -> list:
                                  / "claude_desktop_config.json")
         except OSError:
             pass
-    return paths
+
+    # ASK THE MACHINE, rather than only listing places we thought of
+    # (2026-08-20). The two rules above are still guesses about where an app
+    # keeps things; these two are evidence.
+    #
+    # 1. A settings file that ALREADY EXISTS is proof, because Claude Desktop
+    #    wrote it. Whatever we believe about install types, that is a folder it
+    #    genuinely reads.
+    # 2. If it is running, its own executable path tells us how it was
+    #    installed. A Store app runs from ...\WindowsApps\Claude_<id>..., and
+    #    <id> names the private settings folder that install uses -- derived
+    #    from what Windows reports, not assumed.
+    #
+    # Both are cheap, and both mean the next unfamiliar install shape is found
+    # rather than needing a person to read an error and report back. This
+    # message has been wrong four times; each fix added another place to look,
+    # and the pattern only breaks by asking instead of guessing.
+    for existing in _existing_claude_config_files():
+        paths.append(existing)
+    running = _claude_package_from_running_process()
+    if running:
+        paths.append(running)
+
+    # Same file can be reached more than one way; keep the first of each.
+    unique, seen = [], set()
+    for path in paths:
+        key = str(path).lower()
+        if key not in seen:
+            seen.add(key)
+            unique.append(path)
+    return unique
+
+
+def _existing_claude_config_files() -> list:
+    """Settings files Claude Desktop has already written. Proof, not inference."""
+    found = []
+    for base, pattern in (
+        (os.environ.get("APPDATA"), "Claude/claude_desktop_config.json"),
+        (os.environ.get("LOCALAPPDATA"),
+         "Packages/*/LocalCache/Roaming/Claude/claude_desktop_config.json"),
+        (os.environ.get("LOCALAPPDATA"),
+         "*/Claude/claude_desktop_config.json"),
+    ):
+        if not base:
+            continue
+        try:
+            found += [p for p in Path(base).glob(pattern) if p.is_file()]
+        except OSError:
+            continue
+    return found
+
+
+def _claude_package_from_running_process():
+    r"""
+    Where the RUNNING Claude Desktop keeps its settings, worked out from its own
+    executable path.
+
+    A Store install runs from
+    C:\Program Files\WindowsApps\Claude_1.2.3_x64__<publisher>pp\Claude.exe
+    and that folder name maps to its private settings area at
+    %LOCALAPPDATA%\Packages\Claude_<publisher>\LocalCache\Roaming\Claude.
+
+    Returns None for an ordinary install, or when nothing is running -- both
+    normal, both handled by the plain locations above.
+    """
+    if sys.platform != "win32":
+        return None
+    local = os.environ.get("LOCALAPPDATA")
+    if not local:
+        return None
+    try:
+        import subprocess
+        out = subprocess.run(
+            ["powershell", "-NoProfile", "-Command",
+             "(Get-Process Claude -ErrorAction SilentlyContinue | "
+             "Select-Object -First 1).Path"],
+            capture_output=True, text=True, timeout=20)
+        exe = (out.stdout or "").strip()
+    except Exception:
+        return None
+    if not exe or "windowsapps" not in exe.lower():
+        return None
+
+    # The package folder is the WindowsApps child: Claude_<version>_<arch>__<pub>
+    for part in Path(exe).parts:
+        if part.lower().startswith("claude_") and "__" in part:
+            family = part.split("_")[0] + "_" + part.rsplit("__", 1)[1]
+            candidate = (Path(local) / "Packages" / family / "LocalCache"
+                         / "Roaming" / "Claude" / "claude_desktop_config.json")
+            if candidate.parent.parent.parent.parent.is_dir():
+                return candidate
+    return None
 
 
 def _claude_desktop_config_path() -> Path | None:
