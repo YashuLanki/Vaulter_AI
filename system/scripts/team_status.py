@@ -40,6 +40,17 @@ QUIET_DAYS = 3
 # the update path rather than with their timing.
 STALE_VERSION_DAYS = 2
 
+# How many days of dated briefings to keep in the team folder. `latest.md` is
+# always the current one, so the dated copies exist only for looking back -- and
+# a folder that gains a file a day, for ever, stops being something anyone opens.
+# A month covers "what did it say last week" without becoming an archive nobody
+# asked for.
+KEEP_BRIEFING_DAYS = 30
+
+# How large the local run log may get. It gains a few lines every morning and
+# nothing ever removed them.
+MAX_RUN_LOG_BYTES = 100_000
+
 # A file list older than this is reported. Every answer about what documents
 # exist is only as current as this list, and the worst wrong answer this system
 # has ever given -- "no documents newer than <date>", when there were 57 -- came
@@ -335,7 +346,62 @@ def as_text(data: dict) -> str:
     return "\n".join(lines)
 
 
+def tidy_up() -> list:
+    """
+    Keep the things this routine writes from growing for ever.
+
+    Two of them would have. The team folder gains one dated briefing a day, and
+    the local run log gains a few lines a day with nothing ever taking any away.
+    Neither is large quickly, and that is exactly why neither would have been
+    noticed until the folder was unusable.
+
+    Deliberately only touches files this routine itself produces, and never
+    `latest.md`. Reports what it removed rather than doing it silently -- a
+    cleanup nobody can see is indistinguishable from files going missing.
+    """
+    from config import SHARED_DIR
+    said = []
+
+    briefings = Path(SHARED_DIR) / "system" / "daily_status"
+    try:
+        dated = sorted(f for f in briefings.glob("*.md") if f.name != "latest.md")
+        surplus = dated[:-KEEP_BRIEFING_DAYS] if len(dated) > KEEP_BRIEFING_DAYS else []
+        removed = 0
+        for f in surplus:
+            try:
+                f.unlink()
+                removed += 1
+            except OSError:
+                pass
+        if removed:
+            said.append(f"removed {removed} briefing(s) older than "
+                        f"{KEEP_BRIEFING_DAYS} days; kept {len(dated) - removed}")
+    except OSError:
+        pass
+
+    runlog = Path(__file__).parent.parent / "data" / "logs" / "daily_round.log"
+    try:
+        if runlog.exists() and runlog.stat().st_size > MAX_RUN_LOG_BYTES:
+            text = runlog.read_text(encoding="utf-8", errors="replace")
+            # Cut at a line boundary, so the oldest surviving entry is a whole
+            # line rather than half of one.
+            kept = text[-MAX_RUN_LOG_BYTES:]
+            cut = kept.find("\n")
+            if cut != -1:
+                kept = kept[cut + 1:]
+            runlog.write_text(
+                "(older entries removed to keep this file small)\n" + kept,
+                encoding="utf-8")
+            said.append("trimmed the run log")
+    except OSError:
+        pass
+
+    return said
+
+
 def main() -> int:
+    for line in tidy_up():
+        print(f"(housekeeping: {line})")
     data = collect()
     if "--json" in sys.argv:
         print(json.dumps(data, indent=2, default=str))

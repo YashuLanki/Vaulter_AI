@@ -1232,6 +1232,20 @@ Four things here are load-bearing:
   `_file_list_age()` reads the list's own timestamp and never infers freshness from whether the
   refresh reported success. **The only trustworthy evidence about a file list is the file list.**
 
+**Nothing this routine writes grows for ever (`tidy_up`, 2026-08-20).** Three files would have.
+The team folder gains one dated briefing a day (`latest.md` is always current, so the dated ones
+are only for looking back — 30 days kept); the local run log gained a few lines every morning
+with nothing ever removing them; and the per-machine error report is capped, but the cap
+**trimmed the front of the whole file**, which took the header with it. That header is the only
+thing saying whose computer the file describes, which is the entire point of it — and the cut
+landed mid-entry, leaving the oldest one half-written. It now holds the header, drops whole
+entries from the oldest end, and says out loud that something was removed. Two edges found by
+testing rather than reasoning: **the cap silently did nothing at all** whenever the file already
+existed (the separator it split on was only defined while writing a first-time header, so every
+later run threw `NameError` into the catch-all and reported nothing), and when a single crash was
+larger than the whole ceiling it kept **nothing** — now it keeps that entry's date line and its
+*end*, because a crash names what failed on its last line, not its first.
+
 ## There is a live user (2026-08-13)
 
 **A teammate other than the maintainer is connected to `vaulter_ai` on her own Claude Desktop and

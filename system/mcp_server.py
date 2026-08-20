@@ -747,9 +747,9 @@ def _report_errors_to_team() -> None:
         name = _install_record_name().replace(".json", ".log")
         report = report_dir / name
 
+        rule = "=" * 64
         header = ""
         if not report.exists():
-            rule = "=" * 64
             header = "\n".join([
                 rule,
                 "Vaulter AI -- problems reported by this machine",
@@ -773,9 +773,47 @@ def _report_errors_to_team() -> None:
                 existing = ""
         combined = header + existing + block
         if len(combined) > _MAX_REPORT_BYTES:
-            # Keep the newest. Bounded so one machine having a bad week cannot
-            # fill the team's folder.
-            combined = combined[-_MAX_REPORT_BYTES:]
+            # Keep the newest, so one machine having a bad week cannot fill the
+            # team's folder. Trimming the FRONT of the whole file would take the
+            # header with it -- and the header is the only thing saying whose
+            # computer this is, which is the entire point of the file. It would
+            # also cut through the middle of an entry, leaving the oldest one
+            # half-written. So: hold the header, drop whole entries from the
+            # oldest end, and say out loud that something was removed.
+            # Every entry begins "\n--- <date> ---", so the text before the first
+            # one is the header and everything after it divides cleanly into
+            # whole entries. Splitting there means the identity block is never
+            # what gets dropped, and no entry is ever left half-written.
+            first = combined.find("\n--- ")
+            head = combined[:first] if first != -1 else combined
+            body = combined[first:] if first != -1 else ""
+            notice = "\n\n(older entries removed to keep this file small)\n"
+            room = _MAX_REPORT_BYTES - len(head) - len(notice)
+            kept, size = [], 0
+            for entry in reversed(body.split("\n--- ")[1:]):
+                piece = "\n--- " + entry
+                if size + len(piece) > room:
+                    if kept:
+                        break
+                    # The newest entry on its own is bigger than the whole
+                    # ceiling -- one very long crash. Keep as much of it as
+                    # fits rather than nothing: an empty file would throw away
+                    # the single most useful thing here, which is what just
+                    # went wrong. Keep the DATE LINE and the END of the entry,
+                    # because a crash names what actually failed on its last
+                    # line, not its first.
+                    when, _, rest = piece.lstrip("\n").partition("\n")
+                    lead = "\n" + when + "\n(beginning of this entry cut out)\n"
+                    tail_room = room - len(lead)
+                    # Guard the zero case explicitly: rest[-0:] is rest[0:] in
+                    # Python, which keeps the WHOLE entry and quietly ignores
+                    # the ceiling. Only reachable if the ceiling is set smaller
+                    # than the header, which the real one is not -- but a
+                    # future maintainer lowering it should not get a surprise.
+                    piece = lead + (rest[-tail_room:] if tail_room > 0 else "")
+                kept.insert(0, piece)
+                size += len(piece)
+            combined = head + notice + "".join(kept)
         report.write_text(combined, encoding="utf-8")
         log.info(f"[ERRORS] Reported {len(picked)} line(s) to {report.name}")
     except Exception as e:
