@@ -238,10 +238,17 @@ def build_index(progress_every: int = 25000) -> dict:
     one that would silently return incomplete results.
     """
     _UNREACHABLE.update(folders=0, files=0)
-    # Walked through the long-path-safe form so deeply nested folders are read
-    # rather than skipped. The paths STORED stay relative and ordinary, so
-    # nothing downstream ever sees the prefix.
-    root = _long_path_safe(_corpus_root())
+    # TWO forms of the same folder, and keeping them apart matters.
+    #
+    # `walk_root` carries the long-path prefix so deeply nested folders are read
+    # rather than skipped. `root` is the ordinary path, and it is what gets
+    # RECORDED -- because the reader checks the recorded root against the plain
+    # library path and refuses an index that does not match. Storing the
+    # prefixed form built a perfectly good index that search then rejected as
+    # "built for a different root", which is worse than not building it at all.
+    # Caught minutes after shipping, by trying to use it.
+    root = _corpus_root()
+    walk_root = _long_path_safe(root)
     started = time.monotonic()
 
     CORPUS_INDEX_FILE.parent.mkdir(parents=True, exist_ok=True)
@@ -260,7 +267,7 @@ def build_index(progress_every: int = 25000) -> dict:
         )
         con.executemany(
             "INSERT INTO files (path, name, size, mtime) VALUES (?, ?, ?, ?)",
-            _walk(root, progress_every),
+            _walk(walk_root, progress_every),
         )
         count = con.execute("SELECT COUNT(*) FROM files").fetchone()[0]
         elapsed = time.monotonic() - started
