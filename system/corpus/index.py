@@ -163,6 +163,40 @@ def _should_skip(name: str) -> bool:
 _UNREACHABLE = {"folders": 0, "files": 0}
 
 
+def _long_path_safe(root: Path) -> Path:
+    r"""
+    The same folder, in a form Windows will read no matter how long the paths
+    inside it are.
+
+    Windows refuses any path over 260 characters unless a system-wide setting
+    is switched on -- and that setting is off by default. Prefixing the root
+    with \\?\ opts this walk out of the limit without needing the setting, and
+    without administrator rights.
+
+    Found on a real teammate's machine 2026-08-20: her indexing run scrolled
+    thousands of "cannot find the path specified" skips, while the maintainer's
+    machine indexed the same library with nothing skipped at all. The
+    difference was that one Windows setting, switched on here and off there --
+    so the bug was invisible from this side, which is the fifth time in two days
+    that a working machine has hidden a real fault.
+
+    Left alone on Mac and Linux, which have no such limit, and left alone for a
+    path already carrying the prefix.
+    """
+    if os.name != "nt":
+        return root
+    prefix = "\\\\?\\"
+    text = str(root)
+    if text.startswith(prefix):
+        return root
+    # Must be absolute with real backslashes; the prefix disables all path
+    # parsing, so a relative path or a forward slash would simply not resolve.
+    text = os.path.abspath(text)
+    if text.startswith("\\\\"):                 # a network share
+        return Path(prefix + "UNC" + text[1:])
+    return Path(prefix + text)
+
+
 def _walk(root: Path, progress_every: int):
     """Yield (relative_path, name, size, mtime) for every indexable file."""
     seen = 0
@@ -204,7 +238,10 @@ def build_index(progress_every: int = 25000) -> dict:
     one that would silently return incomplete results.
     """
     _UNREACHABLE.update(folders=0, files=0)
-    root = _corpus_root()
+    # Walked through the long-path-safe form so deeply nested folders are read
+    # rather than skipped. The paths STORED stay relative and ordinary, so
+    # nothing downstream ever sees the prefix.
+    root = _long_path_safe(_corpus_root())
     started = time.monotonic()
 
     CORPUS_INDEX_FILE.parent.mkdir(parents=True, exist_ok=True)
