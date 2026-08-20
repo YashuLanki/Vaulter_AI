@@ -1424,7 +1424,125 @@ def _schedule_daily_refresh() -> None:
         print("   Not a problem today -- re-run this setup occasionally instead.")
 
 
+class _Transcript:
+    """
+    Writes everything setup says to a file as well as the screen.
+
+    Added 2026-08-20, and the reason is worth stating: for a week the only way
+    to find out what happened on somebody else's setup run was to ask them to
+    photograph the window and send it. That is slow, it loses the top of the
+    output when the window has scrolled, and it puts a person in the middle of
+    something a file can do. Every one of the four faults fixed this week was
+    diagnosed from a screenshot of this output.
+
+    The copy is written LOCALLY first, always -- setup must still record what
+    happened on a machine that cannot reach the shared folder, which is one of
+    the failures being investigated. It is copied to the shared folder at the
+    end, if that folder is reachable, so whoever supports this can read it
+    without asking anyone for anything.
+    """
+
+    def __init__(self, stream, handle):
+        self._stream = stream
+        self._handle = handle
+
+    def write(self, text):
+        self._stream.write(text)
+        try:
+            self._handle.write(text)
+        except Exception:
+            pass
+        return len(text)
+
+    def flush(self):
+        self._stream.flush()
+        try:
+            self._handle.flush()
+        except Exception:
+            pass
+
+    def isatty(self):
+        return getattr(self._stream, "isatty", lambda: False)()
+
+
+def _start_transcript():
+    """Begin recording. Returns (path, handle) or (None, None) -- never raises,
+    because failing to open a log file must not stop somebody installing."""
+    import datetime
+    try:
+        log_dir = PROJECT_ROOT / "data" / "logs"
+        log_dir.mkdir(parents=True, exist_ok=True)
+        stamp = datetime.datetime.now().strftime("%Y-%m-%d_%H%M%S")
+        path = log_dir / f"setup_{stamp}.log"
+        handle = open(path, "w", encoding="utf-8", errors="replace")
+    except Exception:
+        return None, None
+    sys.stdout = _Transcript(sys.stdout, handle)
+    sys.stderr = _Transcript(sys.stderr, handle)
+    return path, handle
+
+
+def _finish_transcript(path, handle):
+    """Close the recording and put a copy where support can read it."""
+    import re as _re
+    import shutil as _shutil
+    if handle is None:
+        return
+    shared_copy = None
+    try:
+        import config
+        if not config.SHARED_DIR_IS_FALLBACK:
+            dest_dir = config.SHARED_DIR / "system" / "setup_logs"
+            dest_dir.mkdir(parents=True, exist_ok=True)
+            who = os.environ.get("USERNAME") or "unknown"
+            machine = os.environ.get("COMPUTERNAME") or "unknown"
+            safe = _re.sub(r"[^A-Za-z0-9._-]", "_", f"{who}--{machine}--{path.name}")
+            shared_copy = dest_dir / safe
+    except Exception:
+        shared_copy = None
+
+    print()
+    print("=" * 64)
+    print("  A record of this setup run was saved:")
+    print(f"    {path}")
+    if shared_copy:
+        print("  A copy has been put in the team folder, so nobody needs to be")
+        print("  sent a screenshot:")
+        print(f"    {shared_copy}")
+    else:
+        print("  It could NOT be copied to the team folder (that folder isn't")
+        print("  reachable from here yet), so send the file above if asked.")
+    print("=" * 64)
+
+    try:
+        handle.flush()
+    finally:
+        try:
+            sys.stdout = sys.stdout._stream
+            sys.stderr = sys.stderr._stream
+        except Exception:
+            pass
+        try:
+            handle.close()
+        except Exception:
+            pass
+
+    if shared_copy:
+        try:
+            _shutil.copy2(path, shared_copy)
+        except Exception:
+            pass
+
+
 def main() -> None:
+    _log_path, _log_handle = _start_transcript()
+    try:
+        _run_setup()
+    finally:
+        _finish_transcript(_log_path, _log_handle)
+
+
+def _run_setup() -> None:
     print("Vaulter AI — Setup Wizard")
     print(f"Project root: {PROJECT_ROOT}")
 
