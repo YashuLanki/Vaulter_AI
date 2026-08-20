@@ -347,6 +347,12 @@ def _check_and_stage_update() -> None:
     if ready_path.exists():
         staged = _json_object(ready_path) or {}
         if staged.get("version") == remote_version:
+            # Tidy up on the way out. This is the path a machine takes every day
+            # once it has been offered an update it has not applied, so a
+            # cleanup that only ran after a fresh download would never run again
+            # -- which is exactly how 75 packages and 17 MB accumulated on the
+            # maintainer's own copy by 2026-08-20, none of them reachable.
+            _prune_staged_packages()
             return  # already downloaded, just waiting for a human to apply it
 
     zip_filename = remote.get("zip_filename")
@@ -431,6 +437,49 @@ def _check_and_stage_update() -> None:
     log.info(f"[UPDATE] Staged version {remote_version} (currently running {current_version}), "
              f"signature verified -- apply it with the apply_pending_update tool, or as a "
              f"fallback `python system/scripts/apply_update.py`.")
+
+    _prune_staged_packages()
+
+
+def _prune_staged_packages() -> None:
+    """
+    Delete every downloaded package the staging marker does not name.
+
+    Applying an update clears this folder, so nothing accumulates on a machine
+    that keeps current. A machine that is offered updates and does not apply
+    them is the case that was missed: it keeps every package it was ever
+    offered, and only one of them is reachable, because ready.json names
+    exactly one.
+
+    Reads what to keep from the marker rather than being told, so it can run on
+    any path without a caller having to get the list right. Silent about
+    individual failures -- a file held open by a virus scanner is not a reason
+    to fail the run that called this -- and it never touches the marker itself,
+    so the worst case is that the folder stays larger than it needs to be.
+    """
+    from config import PENDING_UPDATE_DIR
+
+    marker = Path(PENDING_UPDATE_DIR) / "ready.json"
+    staged = _json_object(marker) or {}
+    keep = {staged.get("zip_filename"), staged.get("extras_zip_filename")}
+    keep.discard(None)
+    keep.discard("")
+    if not keep:
+        return  # nothing is staged, so nothing here is known to be wanted
+
+    freed = 0
+    for stale in Path(PENDING_UPDATE_DIR).glob("*.zip"):
+        if stale.name in keep:
+            continue
+        try:
+            size = stale.stat().st_size
+            stale.unlink()
+            freed += size
+        except OSError:
+            pass
+    if freed:
+        log.info(f"[UPDATE] Removed superseded packages from the staging folder, "
+                 f"freeing {freed / 1_000_000:.0f} MB.")
 
 
 def _check_and_stage_org_settings() -> None:

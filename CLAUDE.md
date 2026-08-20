@@ -573,6 +573,18 @@ published there, downloads it into the local `config.PENDING_UPDATE_DIR` — it 
 apply it. `check_system_health` surfaces a staged update if one is waiting, and tells Claude
 to ask the user whether to apply it now.
 
+**The staging folder keeps only the package it is actually offering
+(`_prune_staged_packages`, 2026-08-20).** Applying an update clears the folder, so nothing
+accumulates on a machine that stays current — but a machine that is *offered* updates and never
+applies them keeps every package it was ever offered, and only one of them is reachable, because
+`ready.json` names exactly one. Measured on the maintainer's own development copy: **75 packages,
+17 MB**, down to two files and 0.4 MB. The placement is the part worth knowing: a cleanup at the
+end of a successful download would have run **never again** on exactly the machine that has the
+problem, since such a machine returns early every day at "already downloaded, waiting for a
+human". So it is its own step, called on that early-return path as well, and it reads what to
+keep from the marker rather than being handed a list — so any future caller gets it right by
+construction. It never touches the marker, so the worst case is a folder that stays too big.
+
 **Applying stays entirely inside the Claude Desktop conversation — no terminal, ever.**
 Once the user says yes, Claude calls the `apply_pending_update` MCP tool, which calls
 straight into `system/scripts/apply_update.py::apply_pending_update()`: syncs the new version's files into
