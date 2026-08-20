@@ -690,6 +690,23 @@ def _detect_shared_dir() -> Path:
     # library: doing so would mean every install silently writing a new folder
     # into the firm's document store. Whoever sets Vaulter AI up creates it
     # once, deliberately.
+    # A HAND-PINNED library wins here too (2026-08-20). The team's folder lives
+    # inside the library, and this was working the library out for itself rather
+    # than honouring a path somebody had explicitly given. So on a machine where
+    # detection fails and the person pastes the folder in -- exactly the machine
+    # the paste option exists for -- documents would start working while the
+    # team's folder went on being looked for somewhere else, or not found at all.
+    # Half a fix is worse here than none, because the half that works hides the
+    # half that does not.
+    pinned = os.getenv("VAULTER_CORPUS_DIR", "").strip()
+    if pinned:
+        in_pinned = Path(pinned) / SHARED_SUBFOLDER
+        try:
+            if in_pinned.is_dir():
+                return in_pinned
+        except OSError:
+            pass
+
     if ONEDRIVE_ROOT:
         corpus = _find_corpus_subfolder(ONEDRIVE_ROOT)
         if corpus:

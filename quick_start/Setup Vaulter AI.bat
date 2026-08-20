@@ -347,9 +347,17 @@ if exist "%TARGET%" (
 
 set "VAULTER_ROOT=%TARGET%"
 
-:after_move
-    set "VAULTER_ROOT=%TARGET%"
-    goto :after_move
+    REM Jump forward to the next step. This used to jump to a label that had
+
+    REM been left INSIDE this block one line above -- so it jumped to itself and
+
+    REM the installer hung with no message, never reaching the wizard. It only
+
+    REM ran on the upgrade-an-existing-install path, which is why nobody had hit
+
+    REM it. Found by audit 2026-08-20, before anyone was sent down that path.
+
+    goto :python_check
 )
 
 echo   This takes a few seconds. Please wait...

@@ -219,9 +219,31 @@ def install_dependencies() -> bool:
               f"project's root folder?")
         return False
     print("  Installing from requirements.txt (this can take a few minutes)...")
-    result = subprocess.run(
+    # Streamed line by line through print(), rather than letting the installer
+    # write straight to the window. Two reasons, and the second is why this
+    # changed (2026-08-20):
+    #
+    #   * the person still sees progress as it happens, so a few quiet minutes
+    #     do not look like a hang; and
+    #   * every line lands in the record of the run, which it did not before.
+    #     Anything setup RUNS wrote to the window and bypassed the file -- so the
+    #     single most useful thing to diagnose, a component refusing to install,
+    #     was the one thing missing from the file we ask people to send.
+    proc = subprocess.Popen(
         [sys.executable, "-m", "pip", "install", "-r", str(requirements)],
+        stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+        text=True, errors="replace", bufsize=1,
     )
+    for line in proc.stdout:
+        line = line.rstrip()
+        if line:
+            print("    " + line)
+    result_code = proc.wait()
+
+    class _Result:
+        returncode = result_code
+    result = _Result()
+
     if result.returncode != 0:
         print("  ✗ Installing the Python components failed — the output above says which one "
               "and why.")
