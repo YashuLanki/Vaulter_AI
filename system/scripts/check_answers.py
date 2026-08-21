@@ -129,10 +129,21 @@ _CITED_BASELINE = 52
 # name.
 _UNRESOLVED_BASELINE = 12
 
-# Summaries whose "Source files as of" is written as prose rather than a date,
-# on the day this check was written. Each is a one-line fix; until then nothing
-# can tell whether those summaries are current. Lower as they are fixed.
-_UNREADABLE_STAMP_BASELINE = 10
+# Summaries whose "Source files as of" is written as prose rather than a date.
+# Lowered from 10 to 5 on 2026-08-21 after fixing the five that are ACTIVE-stage,
+# which are the ones check_system_health warns about.
+#
+# Worth knowing what the fix actually was, because it was not a dating exercise:
+# every one of those summaries ALREADY stated its newest source date. It was
+# written as prose -- "newest file read/checked was <a named monthly report>
+# (prepared 12/15/2025)", "1/13/2026 (file save date on newest document
+# reviewed)" -- so a person could read it and this code could not. The dates were moved to the front in ISO form
+# and the prose kept. Nothing was newly dated, and nothing was stamped with
+# today: stamping a weeks-old summary with today's date would make a stale
+# summary look current, which is the exact opposite of what the stamp is for.
+# The five that remain are non-active properties and state their dates the same
+# prose way; same one-line fix whenever someone wants them.
+_UNREADABLE_STAMP_BASELINE = 5
 
 
 # Files this system produces itself, which are cited in summaries as the source
