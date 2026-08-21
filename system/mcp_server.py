@@ -86,11 +86,20 @@ def _open_in_file_manager(path: "Path", select: bool = False) -> None:
     """
     import subprocess
 
-    # stdout/stderr are pinned to DEVNULL rather than inherited. Under MCP the
-    # parent's stdout IS the transport, and a launcher that writes so much as a
-    # deprecation notice onto it corrupts the connection to Claude Desktop.
+    # All THREE streams are pinned to DEVNULL rather than inherited. Under MCP
+    # the parent's stdout IS the transport, and a launcher that writes so much
+    # as a deprecation notice onto it corrupts the connection to Claude Desktop.
     # xdg-open in particular is a shell script that talks on both streams.
-    quiet = {"stdout": subprocess.DEVNULL, "stderr": subprocess.DEVNULL}
+    #
+    # stdin matters for the same reason and was missed here until 2026-08-21:
+    # this process's stdin is the pipe Claude Desktop talks to US on, so a child
+    # that reads it can consume bytes meant for the protocol. The version check
+    # in _get_code_version had the identical hole and it cost 10 seconds on the
+    # first tool call of every conversation -- git blocking on a pipe that never
+    # answers, until a 5s timeout fired, twice. These are fire-and-forget so
+    # they never blocked, which is exactly why nothing noticed.
+    quiet = {"stdout": subprocess.DEVNULL, "stderr": subprocess.DEVNULL,
+             "stdin": subprocess.DEVNULL}
 
     if sys.platform == "win32":
         if select:
@@ -187,6 +196,16 @@ def _get_code_version() -> str:
                 ["git", "rev-parse", "--short", "HEAD"],
                 cwd=str(Path(__file__).parent),
                 capture_output=True, text=True, timeout=5,
+                # stdin MUST be closed off. capture_output only redirects the
+                # two OUTPUT streams; stdin stays inherited, and in production
+                # this process's stdin is the pipe Claude Desktop talks to us
+                # on. A git that reads it blocks for ever on a pipe that will
+                # never answer it, the 5s timeout fires, and the caller pays
+                # that 5s -- twice per health check, which is where 10.3s of
+                # the 10.5s first-tool-call came from. Measured 2026-08-21
+                # through the real stdio transport: the same call costs 0.4s in
+                # a plain process, which is why no in-process test ever saw it.
+                stdin=subprocess.DEVNULL,
             )
             if result.returncode == 0 and result.stdout.strip():
                 result_q.put(result.stdout.strip())

@@ -1431,6 +1431,24 @@ same morning passed end to end. What was broken was its ability to explain itsel
 - **Never widen the corpus scope.** Every corpus path goes through
   `corpus.resolve_in_corpus()`. The folder above `CORPUS_DIR` contains the user's personal
   files, so a path built by string-joining instead is a privacy bug, not a style question.
+- **Any subprocess this server starts must have stdin CLOSED, not inherited (2026-08-21).**
+  Under MCP, this process's stdin is the pipe Claude Desktop talks to us on. `capture_output=True`
+  redirects only the two *output* streams — stdin stays inherited — so a child that reads it
+  blocks on a pipe that will never answer, or worse, consumes bytes meant for the protocol.
+  Measured: `_get_code_version`'s `git rev-parse` did exactly that, hit its 5s guard **twice**,
+  and put **10.3 seconds on the first tool call of every conversation**; with
+  `stdin=subprocess.DEVNULL` the same call is **0.4s**. Two things about how it hid are the real
+  lesson. It **only reproduces through the real stdio transport** — the identical call costs 0.4s
+  in a plain process and 1.7s in-process, so no in-process test could ever have seen it, the same
+  reason `check_mcp_health.py` drives a genuine subprocess instead of importing the module. And it
+  only bites an install with **no `VERSION` file**, which means a git clone — so every teammate
+  was fine and only development machines paid it, the exact inverse of the usual
+  "works-on-my-machine". The file-opener launchers had the same hole; they never blocked because
+  they are fire-and-forget, which is precisely why nobody noticed. The `_get_code_version` guard
+  did its job throughout: it bounded a hang to 5s instead of the 60–240s measured in 2026-07-30.
+  **A guard that turns a hang into a delay hides the cause as effectively as it contains it** —
+  so when something is merely slow, suspect a guard that is firing, not code that is heavy.
+
 - **Never read corpus file contents in bulk.** Names are free; bytes download. Anything
   that opens files in a loop over search results will silently pull gigabytes through
   OneDrive. Read one deliberately-chosen file at a time.

@@ -226,6 +226,20 @@ def collect() -> dict:
     from mcp_server import _install_problems
 
     published = _published()
+
+    # The connector check FIRST, before the install records are read.
+    #
+    # It starts a real server, and a real server writes this machine's own
+    # record on the way up. Reading the records first therefore reported a
+    # version the machine had already moved off -- by two minutes, in the same
+    # run. The briefing on 2026-08-21 caught this in its own output: it showed
+    # both copies fine on an old version while the records written moments later
+    # said otherwise, and it named the shape correctly as "a reading presented
+    # as current when it was taken earlier" -- the same fault that morning's
+    # release had just fixed elsewhere. Doing the check first means the records
+    # are read AFTER the newest one has been written.
+    connector = _connector_check()
+
     installs = _load_installs()
     setups = _setup_records()
 
@@ -272,7 +286,7 @@ def collect() -> dict:
         "error_reports": _error_reports(),
         "file_lists": _file_list_age(),
         "answers_check": _answers_check(),
-        "connector_check": _connector_check(),
+        "connector_check": connector,
     }
 
 
