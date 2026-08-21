@@ -244,6 +244,42 @@ def refresh_dependencies(project_root: Path) -> tuple[bool, str]:
     requirements = project_root / "requirements.txt"
     if not requirements.exists():
         return True, ""
+
+    # pip writes to a FILE, not to pipes.
+    #
+    # This is the whole bug. capture_output=True hands pip two pipes, and the
+    # parent then has to drain them -- subprocess.run does that inside
+    # communicate(), using reader threads. Inside this server's event loop
+    # those threads crawl. Traced through the real transport on 2026-08-21:
+    # the same pip call took 3 MINUTES 21 SECONDS here against ~2 seconds
+    # from a terminal, which is what made an update look like it had failed
+    # while it was quietly still working.
+    #
+    # This codebase already knew this shape: _get_code_version runs git on a
+    # background thread with its own queue timeout for exactly the same
+    # reason, measured 2026-07-30. A file needs no reader thread at all, so
+    # there is nothing to starve, and pip's output is still kept for the
+    # failure message.
+    import tempfile as _tf
+    out_path = Path(_tf.gettempdir()) / "vaulter_pip_output.txt"
+    try:
+        with open(out_path, "w+", encoding="utf-8", errors="replace") as fh:
+            result = subprocess.run(
+                [sys.executable, "-m", "pip", "install", "-q", "-r", str(requirements)],
+                stdout=fh, stderr=subprocess.STDOUT,
+                stdin=subprocess.DEVNULL, text=True, timeout=600,
+            )
+        output = out_path.read_text(encoding="utf-8", errors="replace")
+    except Exception as e:
+        return False, str(e)
+    finally:
+        try:
+            out_path.unlink(missing_ok=True)
+        except OSError:
+            pass
+    if result.returncode != 0:
+        return False, output.strip()[-2000:]
+    return True, ""
     try:
         result = subprocess.run(
             [sys.executable, "-m", "pip", "install", "-q", "-r", str(requirements)],

@@ -499,24 +499,33 @@ someone to fix a machine that is already fine. Two causes, both now fixed:
   versus 1.8s not**, and both cases are asserted — a release that genuinely changes dependencies
   still installs them, which is the entire reason the step exists. If the old contents cannot be
   read that counts as "cannot tell" and pip runs; never skip on a maybe.
-* **The 8 minutes are still UNEXPLAINED, and two confident diagnoses were both wrong.** First
-  claim: pip blocked on the inherited MCP pipe, like `git` did in `_get_code_version` the same
-  day. Measured afterwards against a pipe nobody ever writes to: **1.4s, identical to
-  `DEVNULL`.** Second claim: a first-time import of the signing library inside the running
-  asyncio loop, the documented pandas-style hang. Measured: **0.08s.** Both were plausible, both
-  fitted the symptom, both were false. `stdin=subprocess.DEVNULL` was added to pip anyway as
-  hygiene — every subprocess here should have it — but **it is not known to be the cause and must
-  not be recorded as one.**
+* **CAUSE FOUND by reproduction, after two wrong guesses (2026-08-21).** `refresh_dependencies`
+  passed `capture_output=True`, which hands pip two pipes the parent must then drain —
+  `subprocess.run` does that inside `communicate()`, using reader threads. **Inside this server's
+  event loop those threads crawl.** Traced through the real stdio transport, stage by stage:
 
-  What the log actually shows: the call logged nothing for **8m17s** and never returned, while
-  the work itself finished in roughly 90 seconds (version file written, staging cleared). So
-  something hung AFTER the work completed, which no theory so far explains.
+  ```
+  sync starting → sync FINISHED     under 1 second
+  deps starting → deps FINISHED     3 MINUTES 21 SECONDS
+  ```
 
-  The reason it could only be guessed at is that `apply_pending_update` wrote **no log lines at
-  all** between start and finish. It now times every stage and logs a final "all stages complete
-  -- returning success", which separates "hung during the work" from "hung after it" — the exact
-  ambiguity that made this incident unreadable. **When something cannot be observed, the answer
-  is instrumentation, not another theory.** Next occurrence will name its own cause.
+  The same pip call is ~2s from a terminal. Fixed by giving pip a **file** to write to instead of
+  pipes: no reader thread exists, so nothing can starve it, and pip's output is still kept for the
+  failure message. Re-measured through the real transport with pip forced to run: **1.8s.**
+
+  **This codebase already knew this shape and had already paid for it once.**
+  `_get_code_version` runs git on a background thread with its own queue timeout for precisely
+  this reason, measured 2026-07-30 — "a stuck git subprocess can make `communicate()`'s internal
+  reader-thread `.join()` hang for 60-240+s even with `timeout=5` set". The lesson did not
+  generalise from the one call site that had been burned to every other call site with the same
+  shape. **Any `subprocess` inside the MCP server that captures output through pipes is suspect;
+  prefer a file, or a thread with its own timeout.**
+
+  Two diagnoses were confidently offered and published before this: pip blocking on the inherited
+  MCP pipe (measured afterwards against a dead pipe: 1.4s, no difference) and a slow first-time
+  import of the signing library (0.08s). Both fitted the symptom. Both were false. The thing that
+  actually found it was **stage-by-stage tracing through the real transport** — not reasoning.
+  `stdin=subprocess.DEVNULL` stays as hygiene but explains nothing.
 
 **A hang is invisible to error reporting, and that needed its own fix
 (`_report_unfinished_apply`, 2026-08-21).** `_report_errors_to_team` finds trouble by scanning the
