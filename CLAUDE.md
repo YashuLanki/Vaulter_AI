@@ -1103,9 +1103,29 @@ she is worth a nudge"). If the model layer fails entirely the facts are still sa
 is also fine to run by hand any time: `python system/scripts/team_status.py`.
 
 **A scheduled task, because this project runs no background threads** — the same rule the MCP
-server follows, and the same mechanism the nightly file-list refresh already used. It runs at
-8am specifically: an hour after that refresh, so the round reads a list rebuilt the same
-morning rather than yesterday's.
+server follows, and the same mechanism the nightly file-list refresh already used.
+
+**It runs at 9am, not 8am, and the reason is the machine's sleep schedule (2026-08-21).** The
+intent was an hour after the 7am file-list refresh, so the round reads a list rebuilt that
+morning. On the first real morning neither task ran on time: this machine sleeps overnight and
+woke at **08:31**, `WakeToRun` is off, so both slots passed while it was asleep. Windows' catch-up
+then fired **both at 08:34, in the same minute** — which quietly destroyed the ordering the two
+times existed to create. 9am is after the observed wake, so the round runs on time and the refresh
+has finished. Two things make this a mild bug rather than a serious one, and both are worth
+knowing before anyone "simplifies" them away:
+
+* **`build_index` builds into a temporary database and swaps it in at the end**, so a reader can
+  never see a half-built list — it gets yesterday's complete one or today's, never a partial
+  count. That is what stops a race here from producing a wrong number.
+* **The round states the list's age every day**, so reading yesterday's list is visible rather
+  than silent. The scheduling fix makes the common case right; that report is what makes the
+  uncommon case honest.
+
+**Task Scheduler history is disabled on this machine and could not be enabled without admin**, so
+a skipped run leaves no trace in the event log. This is the same blind spot as the refresh that
+reported success for weeks while its program did not exist: **the only trustworthy evidence about
+a scheduled job is the artifact it produces** — the briefing's own timestamp, and the file list's
+own timestamp. Check those, never `LastTaskResult`.
 
 Four things here are load-bearing:
 
