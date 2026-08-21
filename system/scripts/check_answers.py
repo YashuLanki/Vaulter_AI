@@ -130,20 +130,28 @@ _CITED_BASELINE = 52
 _UNRESOLVED_BASELINE = 12
 
 # Summaries whose "Source files as of" is written as prose rather than a date.
-# Lowered from 10 to 5 on 2026-08-21 after fixing the five that are ACTIVE-stage,
-# which are the ones check_system_health warns about.
+# Was 10 when this check was written; 5 after the active-stage ones were fixed on
+# 2026-08-21; now ZERO -- all 49 carry a machine-readable date, so every summary
+# in the library can be currency-checked and any new prose stamp fails at once.
 #
 # Worth knowing what the fix actually was, because it was not a dating exercise:
 # every one of those summaries ALREADY stated its newest source date. It was
 # written as prose -- "newest file read/checked was <a named monthly report>
 # (prepared 12/15/2025)", "1/13/2026 (file save date on newest document
-# reviewed)" -- so a person could read it and this code could not. The dates were moved to the front in ISO form
-# and the prose kept. Nothing was newly dated, and nothing was stamped with
-# today: stamping a weeks-old summary with today's date would make a stale
-# summary look current, which is the exact opposite of what the stamp is for.
-# The five that remain are non-active properties and state their dates the same
-# prose way; same one-line fix whenever someone wants them.
-_UNREADABLE_STAMP_BASELINE = 5
+# reviewed)" -- so a person could read it and this code could not. The date each
+# one already named was moved to the front in YYYY-MM-DD and the prose kept.
+#
+# Nothing was newly dated, and nothing was stamped with today. Stamping a
+# weeks-old summary with today's date would make a stale summary look current,
+# which is the exact opposite of what the stamp is for -- it would silence the
+# warning rather than answer it.
+#
+# One judgement worth recording: where a summary named BOTH a filesystem
+# timestamp and an older date from the document's own filename, the stamp is the
+# TIMESTAMP. That is what a currency check compares against, so the older date
+# would flag every re-synced file as newer than the summary and cry wolf. The
+# prose still explains the discrepancy, which is where that belongs.
+_UNREADABLE_STAMP_BASELINE = 0
 
 
 # Files this system produces itself, which are cited in summaries as the source
