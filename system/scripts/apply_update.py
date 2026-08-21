@@ -190,9 +190,15 @@ def refresh_dependencies(project_root: Path) -> tuple[bool, str]:
     Re-installs from requirements.txt using the SAME Python interpreter
     already running this project, so a fix that adds or changes a
     dependency doesn't leave the app broken after its code is updated
-    but the new package it needs isn't installed. pip skips
-    already-satisfied packages quickly, so this is safe and fast to run
-    on every apply, not just when requirements.txt actually changed.
+    but the new package it needs isn't installed.
+
+    This used to claim pip was "safe and fast to run on every apply". That
+    was wrong in production: on 2026-08-21 a real apply inside Claude
+    Desktop ran long enough that the tool call timed out and the user was
+    told the update had FAILED -- while it had in fact succeeded. So the
+    caller now skips this entirely when requirements.txt has not changed,
+    which is almost every update, and this function is only reached when
+    there is genuinely something to install.
 
     Returns (ok, message) -- message is empty on success, or pip's own
     error output (truncated) on failure. Never raises.
@@ -204,6 +210,12 @@ def refresh_dependencies(project_root: Path) -> tuple[bool, str]:
         result = subprocess.run(
             [sys.executable, "-m", "pip", "install", "-q", "-r", str(requirements)],
             capture_output=True, text=True, timeout=600,
+            # stdin closed, not inherited. Under MCP this process's stdin is
+            # the pipe Claude Desktop talks to us on, and capture_output only
+            # redirects the two OUTPUT streams. A pip that reads stdin blocks
+            # on a pipe that never answers. Identical hole to the one that
+            # cost 10s on every conversation via git, fixed the same day.
+            stdin=subprocess.DEVNULL,
         )
     except Exception as e:
         return False, str(e)
@@ -263,6 +275,14 @@ def apply_pending_update(project_root: Path = None) -> dict:
                       f"{zip_path} and the pending update record, then let it re-download.",
         }
 
+    # What the dependency list looks like BEFORE the sync overwrites it, so we
+    # can tell afterwards whether this release actually changed it.
+    _req = project_root / "requirements.txt"
+    try:
+        deps_before = _req.read_bytes() if _req.exists() else b""
+    except OSError:
+        deps_before = None          # cannot tell -- so do not skip
+
     updated, deleted = apply_update(project_root, zip_path)
 
     # The launcher and agent files, if this release staged them. Verified again
@@ -294,7 +314,32 @@ def apply_pending_update(project_root: Path = None) -> dict:
             extras_note = f"the launcher and agent files could not be applied ({e})"
         extras_path.unlink(missing_ok=True)
 
-    deps_ok, deps_message = refresh_dependencies(project_root)
+    # Only touch pip when this release actually changed the dependency list.
+    #
+    # It used to run on every apply, on the reasoning that pip skips
+    # already-satisfied packages quickly. In production it did not: on
+    # 2026-08-21 a real apply inside Claude Desktop ran long enough that the
+    # tool call timed out, and the user was told the update had FAILED while
+    # it had actually SUCCEEDED -- the worst of both, because it invites
+    # someone to go fixing a machine that is already fine.
+    #
+    # Almost no release changes requirements.txt, so almost every apply now
+    # does no pip work at all and finishes in about a second. When a release
+    # DOES change it, pip runs exactly as before -- which is the case the
+    # step exists for.
+    #
+    # If the old contents could not be read, that is 'cannot tell', and it
+    # runs pip. Never skip on a maybe.
+    try:
+        deps_after = _req.read_bytes() if _req.exists() else b""
+    except OSError:
+        deps_after = None
+    if deps_before is not None and deps_after is not None and deps_before == deps_after:
+        deps_ok, deps_message = True, ""
+        deps_skipped = True
+    else:
+        deps_ok, deps_message = refresh_dependencies(project_root)
+        deps_skipped = False
 
     zip_path.unlink(missing_ok=True)
     (PENDING_UPDATE_DIR / "ready.json").unlink(missing_ok=True)
@@ -322,6 +367,7 @@ def apply_pending_update(project_root: Path = None) -> dict:
         "extras_written": extras_written,
         "extras_note": extras_note,
         "dependencies_ok": deps_ok,
+        "dependencies_skipped": deps_skipped,
         "dependencies_message": deps_message,
     }
 

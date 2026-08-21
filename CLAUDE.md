@@ -485,6 +485,26 @@ human". So it is its own step, called on that early-return path as well, and it 
 keep from the marker rather than being handed a list — so any future caller gets it right by
 construction. It never touches the marker, so the worst case is a folder that stays too big.
 
+**The apply must finish inside a tool call, and once it did not (2026-08-21).** A real apply in
+Claude Desktop ran long enough that the tool call timed out. Claude reported the update had
+**FAILED** and advised not retrying — while it had in fact **SUCCEEDED**: the version file and the
+cleared staging folder both confirmed it. That is the worst of both outcomes, because it sends
+someone to fix a machine that is already fine. Two causes, both now fixed:
+
+* **`refresh_dependencies` ran pip on every apply**, on the stated reasoning that "pip skips
+  already-satisfied packages quickly, so this is safe and fast to run on every apply". That claim
+  was in the docstring and was simply not true in production. It now runs **only when the release
+  actually changed `requirements.txt`**, compared before and after the file sync. Almost no
+  release changes it, so almost every apply now does no pip work at all: measured **0.4s skipped
+  versus 1.8s not**, and both cases are asserted — a release that genuinely changes dependencies
+  still installs them, which is the entire reason the step exists. If the old contents cannot be
+  read that counts as "cannot tell" and pip runs; never skip on a maybe.
+* **pip inherited stdin**, exactly like `git` did in `_get_code_version` earlier the same day.
+  Under MCP that is the pipe Claude Desktop talks to us on, so a pip that reads it blocks on a
+  pipe that never answers. `capture_output=True` covers only the two output streams. **Any
+  subprocess started anywhere in this system needs `stdin=subprocess.DEVNULL`** — that is now
+  three separate places where the same hole cost real time.
+
 **Applying stays entirely inside the Claude Desktop conversation — no terminal, ever.**
 Once the user says yes, Claude calls the `apply_pending_update` MCP tool, which calls
 straight into `system/scripts/apply_update.py::apply_pending_update()`: syncs the new version's files into
