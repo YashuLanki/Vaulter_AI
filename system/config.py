@@ -846,6 +846,13 @@ DATA_DIR       = (BASE_DIR / "data").resolve()
 # it -- otherwise the team list keeps reporting the version the machine was on
 # BEFORE the update, until the next day.
 CHECKIN_STAMP_FILE = DATA_DIR / "last_checkin.txt"
+
+# Written when an update starts applying and deleted when it finishes. If it
+# is still there on the next start, the last apply did not complete -- which
+# is the ONLY evidence a hang leaves. A hang writes no error line, so an
+# error reporter that scans the log for error text cannot see one. This turns
+# silence into something reportable.
+APPLY_IN_PROGRESS_FILE = DATA_DIR / "apply_in_progress.json"
 LOG_DIR        = DATA_DIR / "logs"
 
 # Where a CoStar export or broker spreadsheet gets dropped so screen_listings

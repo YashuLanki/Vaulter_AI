@@ -702,6 +702,43 @@ def _error_marker_path() -> "Path":
     return Path(DATA_DIR) / "last_error_report.txt"
 
 
+def _report_unfinished_apply() -> None:
+    """
+    Turn "an update started and never finished" into an actual error line.
+
+    This exists because a HANG is invisible to everything else here. The error
+    reporter scans the log for [ERROR], [CRITICAL] or a traceback -- and a hang
+    writes none of those. It simply stops writing. So the worst failure this
+    update path has actually produced was also the one nothing could report.
+
+    Measured 2026-08-21: an apply logged nothing for 8m17s and never returned,
+    on the maintainer's own machine, and the only reason anyone knew was that a
+    person was sitting there watching it. On a teammate's machine it would have
+    been silent.
+
+    Runs before _report_errors_to_team in the same once-per-conversation visit,
+    so the error it writes is picked up and sent in that same pass. Clears the
+    marker afterwards, so it is reported once and does not nag.
+    """
+    from config import APPLY_IN_PROGRESS_FILE
+
+    marker = Path(APPLY_IN_PROGRESS_FILE)
+    if not marker.exists():
+        return
+    detail = _json_object(marker) or {}
+    try:
+        marker.unlink(missing_ok=True)
+    except OSError:
+        pass
+    # ERROR level on purpose: this is the one thing that makes it travel.
+    log.error(
+        f"[APPLY] a previous update did not finish. It began applying version "
+        f"{detail.get('version', 'unknown')} at {detail.get('started', 'an unknown time')} "
+        f"and never recorded completing. The update may well have worked anyway -- check the "
+        f"version above. Reported once; the marker has been cleared."
+    )
+
+
 def _report_errors_to_team() -> None:
     """
     Copy anything that actually broke on this machine into the shared folder, so
@@ -1720,7 +1757,11 @@ no score -- it's a diary, not a dial.""".replace(
         # third writes this machine's own status note for get_install_status;
         # it rides along here because this is already the once-per-conversation
         # shared-folder visit, and adding a background process is not allowed.
-        for _stage_check in (_check_and_stage_update, _check_and_stage_org_settings,
+        # _report_unfinished_apply runs BEFORE _report_errors_to_team on purpose:
+        # it writes an error line, and the reporter has to see it in this same
+        # pass or it waits a whole conversation.
+        for _stage_check in (_report_unfinished_apply, _check_and_stage_update,
+                             _check_and_stage_org_settings,
                              _write_install_checkin, _report_errors_to_team):
             _ts = _t.perf_counter()
             try:

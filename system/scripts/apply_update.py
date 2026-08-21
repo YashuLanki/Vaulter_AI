@@ -313,6 +313,18 @@ def apply_pending_update(project_root: Path = None) -> dict:
                       f"{zip_path} and the pending update record, then let it re-download.",
         }
 
+    # Leave a note saying an apply has begun. Deleted on success, so if it is
+    # still here next time something started and never finished -- the only
+    # trace a hang leaves, since a hang logs nothing at all.
+    try:
+        from config import APPLY_IN_PROGRESS_FILE
+        Path(APPLY_IN_PROGRESS_FILE).write_text(json.dumps({
+            "version": version,
+            "started": __import__("datetime").datetime.now().isoformat(timespec="seconds"),
+        }), encoding="utf-8")
+    except Exception:
+        pass                  # never let bookkeeping stop a real update
+
     # What the dependency list looks like BEFORE the sync overwrites it, so we
     # can tell afterwards whether this release actually changed it.
     _req = project_root / "requirements.txt"
@@ -400,6 +412,11 @@ def apply_pending_update(project_root: Path = None) -> dict:
         pass                  # never let bookkeeping fail a real update
 
     log.info("[APPLY] all stages complete -- returning success")
+    try:
+        from config import APPLY_IN_PROGRESS_FILE
+        Path(APPLY_IN_PROGRESS_FILE).unlink(missing_ok=True)
+    except Exception:
+        pass
     return {
         "applied": True,
         "version": version,

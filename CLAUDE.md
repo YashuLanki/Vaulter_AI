@@ -518,6 +518,19 @@ someone to fix a machine that is already fine. Two causes, both now fixed:
   ambiguity that made this incident unreadable. **When something cannot be observed, the answer
   is instrumentation, not another theory.** Next occurrence will name its own cause.
 
+**A hang is invisible to error reporting, and that needed its own fix
+(`_report_unfinished_apply`, 2026-08-21).** `_report_errors_to_team` finds trouble by scanning the
+log for `[ERROR]`, `[CRITICAL]` or a traceback. **A hang writes none of those — it stops writing.**
+So the worst failure this update path has actually produced was also the only one nothing could
+report, and it was noticed purely because a person sat watching it. On a teammate's machine it
+would have been silent. Now `apply_pending_update` writes `APPLY_IN_PROGRESS_FILE` when it starts
+and deletes it on success; if it is still there on the next conversation, `check_system_health`
+logs a real `[ERROR]` saying an update began and never recorded finishing, then clears the marker
+so it reports once and does not nag. It runs **before** `_report_errors_to_team` in that same loop,
+or its error would wait a whole conversation to travel. Asserted end to end: simulated hang → error
+line → shared folder. The general rule: **when a failure mode produces silence, something has to
+turn the silence into a signal — a detector that only recognises error text cannot see it.**
+
 **Applying stays entirely inside the Claude Desktop conversation — no terminal, ever.**
 Once the user says yes, Claude calls the `apply_pending_update` MCP tool, which calls
 straight into `system/scripts/apply_update.py::apply_pending_update()`: syncs the new version's files into
