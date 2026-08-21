@@ -1086,6 +1086,38 @@ with a **newer** `format_version` is still shown, reading only known fields — 
 screening manifest's ignore-newer rule, and deliberately: hiding a teammate is the failure this
 feature exists to fix.
 
+### "Is it actually working on my computer?" (`check_my_connection.py`) — 2026-08-21
+
+A double-click check (`quick_start/Check my connection.bat`) that starts the program the way
+Claude Desktop starts it, says in plain English whether it worked, and **writes the answer to
+`SHARED_DIR/system/connection_checks/`** so whoever supports this can read it without asking for
+a screenshot.
+
+**Built because a specific question could not be answered.** Two teammates had both installed
+successfully and neither had ever appeared in the install list. From the shared folder those two
+states are indistinguishable: *she has not opened a conversation yet* and *the connector will not
+start on her machine*. They need completely different help. `check_mcp_health.py` could have said
+which, but it prints to a terminal a non-technical person will never open and reports nowhere, so
+the answer lived on her computer and nowhere else.
+
+Three things are deliberate:
+
+* **It states what a PASS does NOT prove**, on screen and in the shared file: that the program
+  works, *not* that Claude Desktop has been restarted since setup — nothing on this side can see
+  that. Which makes a PASS genuinely useful rather than confusing: it rules the program out, so
+  the remaining answer is the restart.
+* **On failure it prints what the check reported, never a cause it inferred.** Same rule as the
+  setup messages: a confidently wrong cause sends someone to solve a problem they do not have.
+* **It reuses `check_mcp_health.py` rather than testing anything itself.** That script drives a
+  genuine `python main.py mcp` subprocess over real stdio, which is the only thing that
+  reproduces transport-only faults — the 2026-07-30 hang and the 2026-08-21 stdin-inheritance
+  delay were both invisible in-process.
+
+Note the ordering problem this cannot solve for an existing install: it ships in the extras
+package, so a machine has to take an update to receive it, and taking an update requires opening
+a conversation — which is the very thing being diagnosed. For someone already stuck, the test is
+still "fully quit Claude Desktop, reopen, send one message, and see if they appear in the list."
+
 ### The morning round (`system/scripts/team_status.py`, `daily_round.cmd`) — 2026-08-20
 
 A Windows scheduled task at 8am that checks every teammate's install and writes a
