@@ -39,6 +39,8 @@ own MCP server process.
 """
 
 import base64
+import logging
+import time as _time
 import hashlib
 import json
 import shutil
@@ -185,6 +187,42 @@ def apply_extras(install_root: Path, zip_path: Path) -> tuple[int, int]:
     return written, refused
 
 
+log = logging.getLogger("vaulter.update")
+
+
+class _Step:
+    """
+    Time each stage of an apply and write it to the log.
+
+    Added 2026-08-21 because this function was a black box. A real apply
+    inside Claude Desktop ran 8 minutes 17 seconds without writing a single
+    line, then never returned -- while the work itself had finished. With no
+    record of which stage was slow, the cause could only be guessed at, and
+    two confident guesses (pip blocking on an inherited pipe, and a slow
+    first-time import of the signing library) were both WRONG when finally
+    measured: 1.4s and 0.08s.
+
+    The lesson is the same one this project keeps relearning: when something
+    cannot be observed, the answer is instrumentation, not another theory.
+    """
+
+    def __init__(self, name):
+        self.name = name
+
+    def __enter__(self):
+        self.t = _time.perf_counter()
+        log.info(f"[APPLY] {self.name}: starting")
+        return self
+
+    def __exit__(self, *exc):
+        took = _time.perf_counter() - self.t
+        if exc[0] is not None:
+            log.warning(f"[APPLY] {self.name}: FAILED after {took:.1f}s "
+                        f"({exc[0].__name__}: {exc[1]})")
+        else:
+            log.info(f"[APPLY] {self.name}: done in {took:.1f}s")
+        return False
+
 def refresh_dependencies(project_root: Path) -> tuple[bool, str]:
     """
     Re-installs from requirements.txt using the SAME Python interpreter
@@ -283,7 +321,8 @@ def apply_pending_update(project_root: Path = None) -> dict:
     except OSError:
         deps_before = None          # cannot tell -- so do not skip
 
-    updated, deleted = apply_update(project_root, zip_path)
+    with _Step(f"syncing {zip_path.name} into place"):
+        updated, deleted = apply_update(project_root, zip_path)
 
     # The launcher and agent files, if this release staged them. Verified again
     # here, right before writing, exactly as the program package is -- and any
@@ -338,7 +377,8 @@ def apply_pending_update(project_root: Path = None) -> dict:
         deps_ok, deps_message = True, ""
         deps_skipped = True
     else:
-        deps_ok, deps_message = refresh_dependencies(project_root)
+        with _Step("refreshing dependencies (requirements.txt changed)"):
+            deps_ok, deps_message = refresh_dependencies(project_root)
         deps_skipped = False
 
     zip_path.unlink(missing_ok=True)
@@ -359,6 +399,7 @@ def apply_pending_update(project_root: Path = None) -> dict:
     except Exception:
         pass                  # never let bookkeeping fail a real update
 
+    log.info("[APPLY] all stages complete -- returning success")
     return {
         "applied": True,
         "version": version,

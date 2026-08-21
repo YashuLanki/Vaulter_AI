@@ -499,11 +499,24 @@ someone to fix a machine that is already fine. Two causes, both now fixed:
   versus 1.8s not**, and both cases are asserted — a release that genuinely changes dependencies
   still installs them, which is the entire reason the step exists. If the old contents cannot be
   read that counts as "cannot tell" and pip runs; never skip on a maybe.
-* **pip inherited stdin**, exactly like `git` did in `_get_code_version` earlier the same day.
-  Under MCP that is the pipe Claude Desktop talks to us on, so a pip that reads it blocks on a
-  pipe that never answers. `capture_output=True` covers only the two output streams. **Any
-  subprocess started anywhere in this system needs `stdin=subprocess.DEVNULL`** — that is now
-  three separate places where the same hole cost real time.
+* **The 8 minutes are still UNEXPLAINED, and two confident diagnoses were both wrong.** First
+  claim: pip blocked on the inherited MCP pipe, like `git` did in `_get_code_version` the same
+  day. Measured afterwards against a pipe nobody ever writes to: **1.4s, identical to
+  `DEVNULL`.** Second claim: a first-time import of the signing library inside the running
+  asyncio loop, the documented pandas-style hang. Measured: **0.08s.** Both were plausible, both
+  fitted the symptom, both were false. `stdin=subprocess.DEVNULL` was added to pip anyway as
+  hygiene — every subprocess here should have it — but **it is not known to be the cause and must
+  not be recorded as one.**
+
+  What the log actually shows: the call logged nothing for **8m17s** and never returned, while
+  the work itself finished in roughly 90 seconds (version file written, staging cleared). So
+  something hung AFTER the work completed, which no theory so far explains.
+
+  The reason it could only be guessed at is that `apply_pending_update` wrote **no log lines at
+  all** between start and finish. It now times every stage and logs a final "all stages complete
+  -- returning success", which separates "hung during the work" from "hung after it" — the exact
+  ambiguity that made this incident unreadable. **When something cannot be observed, the answer
+  is instrumentation, not another theory.** Next occurrence will name its own cause.
 
 **Applying stays entirely inside the Claude Desktop conversation — no terminal, ever.**
 Once the user says yes, Claude calls the `apply_pending_update` MCP tool, which calls
