@@ -710,33 +710,42 @@ def _checkin_stamp_path() -> "Path":
 
 def _checkin_due() -> bool:
     """
-    Whether to write a check-in now. Once a day: the stamp holds a date and
-    nothing else, so answering this costs one small local file read.
+    Whether to write a check-in now. Once a day, OR whenever the running
+    version has changed since the last one -- both answered from one small
+    local file, which now holds the date and the version it reported.
 
     The gate is measured, not tidiness. Checking in on every conversation
     added **5 seconds to the first tool call of every conversation**, and the
-    5 seconds is not the shared-folder write (0.05s warm) -- it is
-    `_get_code_version()` falling through to a `git` call that times out,
+    5 seconds was not the shared-folder write (0.05s warm) -- it was
+    `_get_code_version()` falling through to a `git` call that timed out,
     which happens whenever no VERSION file is present. check_system_health
-    runs before whatever the user actually asked for, so that is five seconds
+    runs before whatever the user actually asked for, so that was five seconds
     of every conversation.
 
-    Hence the deliberate ordering: this gate must NOT need the version, or it
-    pays the same cost it exists to avoid. An earlier draft compared versions
-    here and saved nothing at all -- measured, not assumed. Reporting
-    immediately after an update instead comes from apply_pending_update
-    clearing this stamp, so the next conversation re-reports rather than
-    waiting for tomorrow.
+    **The version is cheap to know again**, since the git call was fixed on
+    2026-08-21 (it was inheriting the MCP pipe as its stdin; 10.3s to 0.4s).
+    That is what makes this gate affordable, and it fixes a real false alarm:
+    on 2026-08-24 both of the maintainer's own installs were reported as
+    NEEDING ATTENTION with a phantom update waiting, because each had changed
+    version *after* its once-daily check-in and nothing rewrote the record
+    until tomorrow. An apply clears this stamp, so that path was covered --
+    but a `git pull`, or any other route to new code, was not.
 
-    Daily costs nothing in usefulness: the roster reports "last used" in whole
-    days anyway.
+    Daily remains the floor because the roster reports "last used" in whole
+    days anyway; the version check just stops a stale record outliving the
+    truth.
     """
     import datetime as _dt
     try:
         stamped = _checkin_stamp_path().read_text(encoding="utf-8").strip()
     except OSError:
         return True
-    return stamped != _dt.date.today().isoformat()
+    parts = stamped.split()
+    if parts and parts[0] != _dt.date.today().isoformat():
+        return True
+    # An older stamp holds only a date. Treat the missing version as "changed"
+    # so the record refreshes once, then carries the version from then on.
+    return len(parts) < 2 or parts[1] != (_get_code_version() or "unknown")
 
 
 # Lines in this machine's own log worth telling the team about. Warnings are
@@ -1060,7 +1069,10 @@ def _write_install_checkin() -> None:
         # Stamped only after the write actually succeeded, so a failed or
         # half-synced write is retried next conversation rather than being
         # recorded as done.
-        _checkin_stamp_path().write_text(_dt.date.today().isoformat(), encoding="utf-8")
+        # Date AND version, so the gate above can notice a version change
+        # without a second lookup or a shared-folder read.
+        _checkin_stamp_path().write_text(
+            f"{_dt.date.today().isoformat()} {version}", encoding="utf-8")
     except Exception as e:
         log.warning(f"[INSTALLS] Could not record this install's status (continuing): {e}")
 

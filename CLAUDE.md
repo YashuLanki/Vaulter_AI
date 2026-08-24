@@ -1131,14 +1131,21 @@ Five things here are load-bearing:
 
 * **Written from `check_system_health`, never a background process** — that is already the
   once-per-conversation shared-folder visit, and this project does not run threads.
-* **Gated to once a day, and the gate must not need the version.** Checking in every
+* **Gated to once a day, or on a version change (revised 2026-08-24).** Checking in every
   conversation added **5 seconds to the first tool call of every conversation**. The 5 seconds
   was not the shared write (0.05s warm) — it was `_get_code_version()` falling through to a
-  `git` call that times out whenever no `VERSION` file is present. An earlier draft compared
-  versions inside the gate and therefore saved **nothing**; measured, not assumed. Daily costs
-  no usefulness, since the page reports "last used" in whole days. `apply_pending_update`
-  deletes the stamp so a freshly-updated install reports its new version immediately rather
-  than tomorrow.
+  `git` call that timed out whenever no `VERSION` file is present, so the gate originally had to
+  work *without* knowing the version; an early draft that compared versions inside it saved
+  **nothing**. **That constraint is gone**: the git call was inheriting the MCP pipe as its stdin
+  and is now 0.4s instead of 10.3s (2026-08-21), so the stamp now holds the date **and** the
+  version it reported, and one local file read answers both. Measured after: `_checkin_due()`
+  0.17s, version lookup 0.04s.
+  The reason it was worth revisiting: on 2026-08-24 **both** of the maintainer's installs were
+  reported as NEEDING ATTENTION with a phantom update waiting, because each had changed version
+  *after* its once-daily check-in and nothing rewrote the record until tomorrow.
+  `apply_pending_update` clears the stamp, so that route was covered — but a `git pull`, or any
+  other way to new code, was not. Daily remains the floor since the roster reports "last used" in
+  whole days.
 * **The filename needs all three parts.** Account plus computer alone silently merges two
   installs on one machine into one entry — not hypothetical, that is exactly the maintainer's
   working install plus development copy, and whichever ran last would erase the other.
