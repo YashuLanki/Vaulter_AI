@@ -473,6 +473,28 @@ published there, downloads it into the local `config.PENDING_UPDATE_DIR` — it 
 apply it. `check_system_health` surfaces a staged update if one is waiting, and tells Claude
 to ask the user whether to apply it now.
 
+**A staged update the machine has already passed is discarded (`_clear_superseded_stage`,
+2026-08-24).** An apply clears the marker, so a stale one only appears when a machine gets current
+some *other* way — a `git pull` on a development copy, or a fresh package. Nothing then cleared it,
+and every conversation afterwards reported an update waiting that would be a **downgrade** if
+applied: measured as three days of "update d6dae43 downloaded but not installed" on a copy running
+**ten commits newer**. A false alarm on a fully current machine is exactly what teaches someone to
+stop reading these warnings.
+
+The rule is the simplest one that always works: **the published marker is the authority, so
+anything staged that is not the published version does not belong there.** Two earlier attempts
+needed information the machine did not have — a build date (absent on a git clone) and the version
+recorded at download time (literally `"unknown"`, written while the version lookup was still
+timing out). This needs neither. And discarding is nearly free, because the same function
+re-downloads a genuinely newer release a few lines below — so there is deliberately **no "cannot
+tell" branch** here, unlike `_newer_readable_docs`: the cost of being wrong is one re-copy of a
+355 KB file, not a wrong answer. Asserted three ways: a genuine update is staged, **survives
+repeated checks**, and a stale marker is replaced rather than merely deleted.
+
+Note the earlier half-fix this replaces. `_install_problems` had already been taught not to report
+a waiting update *equal* to the running version — but not one **older** than it, which is the same
+lie in a shape that check could not see.
+
 **The staging folder keeps only the package it is actually offering
 (`_prune_staged_packages`, 2026-08-20).** Applying an update clears the folder, so nothing
 accumulates on a machine that stays current — but a machine that is *offered* updates and never

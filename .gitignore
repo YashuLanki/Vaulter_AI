@@ -80,6 +80,11 @@ system/data/corpus_index.db
 # packages already exclude all of system/data, so this was only ever a clone
 # problem, but it is still a per-machine fact and does not belong in git.
 system/data/last_error_report.txt
+
+# The date this machine last reported itself to the team. Per-machine, same
+# category as the file above -- it was committed by accident, and a fresh
+# clone would then start life believing it had already checked in today.
+system/data/last_checkin.txt
 system/data/corpus_index.db-journal
 system/data/corpus_index.db-wal
 

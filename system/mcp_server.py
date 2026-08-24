@@ -358,6 +358,21 @@ def _check_and_stage_update() -> None:
         return
     remote_version = remote.get("version")
     current_version = _get_code_version()
+
+    # Before anything else: throw away a staged update this machine has already
+    # moved PAST. Measured 2026-08-24 on the maintainer's development copy, which
+    # had reported "update d6dae43 downloaded but not installed" for three days
+    # while running code TEN COMMITS NEWER -- it had got current another way (a
+    # git pull), so nothing ever cleared the marker. Every path below returns
+    # without touching it, which is how it survived.
+    #
+    # The earlier fix for this only caught the marker naming the version already
+    # running. It did not catch the marker naming something OLDER, which is the
+    # same lie in a shape the check could not see. Reporting a phantom update on
+    # a machine that is fully current is exactly the kind of false alarm that
+    # teaches someone to stop reading these warnings.
+    _clear_superseded_stage(remote_version)
+
     if not remote_version or remote_version == current_version:
         return  # already on the latest version for this channel
     if not _published_is_newer(remote):
@@ -459,6 +474,51 @@ def _check_and_stage_update() -> None:
              f"fallback `python system/scripts/apply_update.py`.")
 
     _prune_staged_packages()
+
+
+def _clear_superseded_stage(published_version: str) -> None:
+    """
+    Throw away a staged update that is not the one currently published.
+
+    An apply clears the marker, so a stale one only appears when a machine gets
+    current some OTHER way -- a git pull on a development copy, or a fresh
+    package. Nothing then clears it, and every conversation afterwards reports an
+    update waiting that would be a DOWNGRADE if applied. Measured 2026-08-24:
+    three days of "update d6dae43 downloaded but not installed" on a copy running
+    ten commits newer.
+
+    The rule is deliberately the simplest one that always works: the published
+    marker is the authority on what should be offered, so anything staged that
+    is not it does not belong here. No dates, no version ordering, no
+    subprocess. Two earlier attempts needed information this machine did not
+    have -- a build date (absent on a git clone) and the version recorded at
+    download time (literally "unknown", written while the version lookup was
+    still timing out).
+
+    Discarding is close to free: if the published version really is newer, the
+    rest of this same function downloads it again a few lines below. So there is
+    no "cannot tell" branch to be careful about -- the cost of being wrong is
+    one re-copy of a 355 KB file.
+    """
+    from config import PENDING_UPDATE_DIR
+
+    marker = Path(PENDING_UPDATE_DIR) / "ready.json"
+    staged = _json_object(marker)
+    if not staged:
+        return
+    name = staged.get("version")
+    if not name or name == published_version:
+        return                      # this is the one we want staged
+
+    try:
+        for f in Path(PENDING_UPDATE_DIR).glob("*.zip"):
+            f.unlink(missing_ok=True)
+        marker.unlink(missing_ok=True)
+        log.info(f"[UPDATE] Discarded staged version {name}: the published version is "
+                 f"{published_version}, so this one is superseded and would not be "
+                 f"offered again.")
+    except OSError:
+        pass
 
 
 def _prune_staged_packages() -> None:
