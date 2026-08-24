@@ -849,6 +849,47 @@ def check_shared_folder() -> bool:
     return False
 
 
+def _claude_store_families() -> list:
+    r"""
+    Package family names for any Microsoft Store Claude install Windows knows
+    about, whether or not it has ever been opened.
+
+    Reads the same registration _find_claude_desktop() checks. A full name looks
+    like Claude_1.34493.1.0_x64__pzs8sxrjxfjjc; the per-user folder is named
+    Claude_pzs8sxrjxfjjc -- the first segment plus the publisher id, which is the
+    last. Verified against a real machine's existing folder before being used to
+    create one.
+    """
+    if sys.platform != "win32":
+        return []
+    found = []
+    try:
+        import winreg
+    except Exception:
+        return []
+    for hive, path in (
+        (winreg.HKEY_CURRENT_USER, r"Software\Classes\ActivatableClasses\Package"),
+        (winreg.HKEY_CURRENT_USER,
+         r"Software\Microsoft\Windows\CurrentVersion\AppModel\Repository\Packages"),
+        (winreg.HKEY_LOCAL_MACHINE,
+         r"SOFTWARE\Microsoft\Windows\CurrentVersion\AppModel\Repository\Packages"),
+    ):
+        try:
+            with winreg.OpenKey(hive, path) as root:
+                for i in range(winreg.QueryInfoKey(root)[0]):
+                    name = winreg.EnumKey(root, i)
+                    if not name.lower().startswith("claude"):
+                        continue
+                    parts = [p for p in name.split("_") if p]
+                    if len(parts) < 2:
+                        continue
+                    family = f"{parts[0]}_{parts[-1]}"
+                    if family not in found:
+                        found.append(family)
+        except OSError:
+            continue
+    return found
+
 def _claude_desktop_config_paths() -> list:
     r"""
     EVERY place Claude Desktop might keep its settings on this machine.
@@ -893,6 +934,32 @@ def _claude_desktop_config_paths() -> list:
                                  / "claude_desktop_config.json")
         except OSError:
             pass
+
+    # A STORE APP THAT HAS NEVER BEEN OPENED has no folder above to find, and
+    # that is a real teammate's situation rather than a hypothetical (found
+    # 2026-08-24). The loop above only includes package folders that already
+    # exist -- and Windows creates them when the app first RUNS. So someone who
+    # installs Claude Desktop from the Store, runs our setup, and only then
+    # opens Claude gets the connection written to the ordinary folder that his
+    # Store app never reads. Setup reports success; nothing appears; no update is
+    # ever offered, because the connector was never loaded.
+    #
+    # Windows records an INSTALLED package in the registry regardless of whether
+    # it has ever run -- the same fact _find_claude_desktop() already uses to
+    # prove the app exists. Those two were fixed separately on 2026-08-19 and
+    # this half was missed: knowing the app is there is useless if the config
+    # still goes somewhere it does not read.
+    #
+    # The package full name is Claude_<version>_<arch>__<publisher>; the folder
+    # is named Claude_<publisher>. Derived from what Windows reports, never
+    # assumed -- and the writer creates missing folders, so this works before
+    # the app has ever been opened.
+    if local:
+        for family in _claude_store_families():
+            candidate = (Path(local) / "Packages" / family / "LocalCache"
+                         / "Roaming" / "Claude" / "claude_desktop_config.json")
+            if candidate not in paths:
+                paths.append(candidate)
 
     # ASK THE MACHINE, rather than only listing places we thought of
     # (2026-08-20). The two rules above are still guesses about where an app
