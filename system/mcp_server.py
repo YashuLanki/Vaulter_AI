@@ -1281,7 +1281,7 @@ def _summary_stamp(summary_text: str):
         return None
 
 
-def _newer_readable_docs(property_name: str, stamped):
+def _newer_readable_docs(property_name: str, stamped, summary_text: str = ""):
     """
     (count, [(name, mtime), ...]) of documents for this property filed since
     `stamped`, or None when the question can't be answered (no index).
@@ -1290,6 +1290,21 @@ def _newer_readable_docs(property_name: str, stamped):
     "checked, nothing new"; None means "couldn't check". Reporting None as
     "nothing new" is exactly the false-reassurance failure this whole check
     exists to prevent.
+
+    A DOCUMENT THE SUMMARY ITSELF NAMES IS NOT NEW (2026-08-24). The stamp is a
+    date with no time, so it compares against midnight -- and a summary written
+    from a file that arrived earlier the same day therefore flagged that very
+    file as newer than itself. Real case: one property's summary states its
+    newest source outright, and the check reported that same filename as a
+    document filed since. Nothing was wrong except the arithmetic.
+    
+    Handled by excluding same-day files the summary MENTIONS, rather than by
+    ignoring the whole day. Ignoring the day would have been simpler and is
+    what this project's own precedent leans toward -- prefer a missed detection
+    over a false alarm -- but it would permanently hide a document that really
+    did arrive later that day, and the summary text is right here, so the exact
+    answer costs nothing. A same-day file the summary does NOT mention is still
+    reported.
     """
     import sqlite3
 
@@ -1320,6 +1335,22 @@ def _newer_readable_docs(property_name: str, stamped):
             total = con.execute(f"SELECT COUNT(*) FROM files WHERE {where}", args).fetchone()[0]
         finally:
             con.close()
+
+        # Drop same-day files the summary already names -- see this function's
+        # own note. Only same-day: a file from a later date is genuinely new
+        # even if the summary happens to mention its name.
+        if summary_text and rows:
+            same_day = stamped.date()
+            keep = []
+            for name, mtime in rows:
+                import datetime as _d
+                on_stamp_day = _d.datetime.fromtimestamp(mtime).date() == same_day
+                if on_stamp_day and name and name in summary_text:
+                    total -= 1
+                    continue
+                keep.append((name, mtime))
+            rows = keep
+            total = max(total, len(rows))
         return total, rows
     except sqlite3.Error as e:
         log.warning(f"[MCP] Staleness check failed for {property_name}: {e}")
@@ -1409,7 +1440,7 @@ def _summary_staleness(property_name: str, summary_text: str) -> str:
     stamped = _summary_stamp(summary_text)
     if stamped is None:
         return ""
-    counted = _newer_readable_docs(property_name, stamped)
+    counted = _newer_readable_docs(property_name, stamped, summary_text)
     if counted is None:
         return ""
     total, rows = counted
