@@ -336,6 +336,15 @@ instructions) — `get_property_summary`, `update_property_summary`, `get_passed
 **Proximity** — `run_proximity_for_property`, `run_proximity_for_listing`,
 `compare_proximity_to_portfolio`, `open_proximity_files`.
 
+**Every tool call names itself in the log (`_log_every_tool_call`, 2026-08-24).** The log used to
+record only `Processing request of type CallToolRequest`, which is true of all thirty tools
+equally. So when a call hung on 2026-08-24 — a request starting at 12:26:02 with nothing after
+it — there was no way to tell **which** tool was stuck, and the read that was suspected turned out
+to take 0.0s when measured. The wrapper is applied to the registered functions rather than
+decorating thirty definitions by hand, so a tool added later is covered without anyone remembering
+to; it times, logs, and never changes what a tool returns or raises. Same lesson as the update
+apply, in a different place: **a hang is only diagnosable if something names what was running.**
+
 `check_system_health` is called automatically once at the start of every conversation (its
 own tool description instructs Claude to do so), stays silent when healthy, and only speaks
 up on a real problem — never blocking whatever the user actually asked for. It also runs

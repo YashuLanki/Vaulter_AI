@@ -2341,7 +2341,18 @@ no score -- it's a diary, not a dial.""".replace(
         for hit in hits:
             when = _dt.datetime.fromtimestamp(hit["mtime"]).strftime("%Y-%m-%d")
             size = hit["size"]
-            size_str = f"{size / 1_048_576:.1f}MB" if size >= 1_048_576 else f"{size // 1024}KB"
+            # Anything under a kilobyte is shown in BYTES, not rounded down to
+            # "0KB". A real 700-byte note read as "0KB" on 2026-08-24 and was
+            # reported to the user as "empty on disk", which invites dismissing
+            # the one file that actually explained the property. Small files here
+            # are usually hand-written notes -- the most information-dense things
+            # in the library, not the least.
+            if size >= 1_048_576:
+                size_str = f"{size / 1_048_576:.1f}MB"
+            elif size >= 1024:
+                size_str = f"{size // 1024}KB"
+            else:
+                size_str = f"{size} bytes"
             lines.append(f"{hit['path']}")
             lines.append(f"    {when} · {size_str}")
         lines.append("")
@@ -3988,7 +3999,65 @@ no score -- it's a diary, not a dial.""".replace(
             log.error(f"[MCP] compare_proximity_to_portfolio failed: {e}", exc_info=True)
             return f"compare_proximity_to_portfolio failed: {e}"
 
+    _log_every_tool_call(mcp)
     return mcp
+
+
+def _log_every_tool_call(mcp) -> None:
+    """
+    Make every tool call say its own name and how long it took.
+
+    Without this the log records only "Processing request of type
+    CallToolRequest" -- true of all thirty tools equally. So when a call hung on
+    2026-08-24 the log showed a request starting at 12:26:02 and nothing after
+    it, and there was no way to tell WHICH tool was stuck. The same gap that
+    made the update hang unreadable until it was instrumented, in a different
+    place: a hang is only diagnosable if something names what was running.
+
+    Deliberately wraps the registered functions rather than decorating thirty
+    definitions by hand, so a tool added later is covered without anyone
+    remembering to. Never changes what a tool returns or raises -- it times,
+    logs, and gets out of the way. If the wrapping itself fails, the server is
+    left exactly as it was: better an unlabelled log than no server.
+    """
+    import functools
+    import inspect
+    import time as _t
+
+    try:
+        tools = mcp._tool_manager._tools
+    except Exception:
+        return
+
+    for name, tool in list(tools.items()):
+        fn = getattr(tool, "fn", None)
+        if fn is None or getattr(fn, "_vaulter_logged", False):
+            continue
+
+        if inspect.iscoroutinefunction(fn):
+            @functools.wraps(fn)
+            async def wrapper(*a, _fn=fn, _name=name, **k):
+                log.info(f"[TOOL] {_name}: called")
+                t0 = _t.perf_counter()
+                try:
+                    return await _fn(*a, **k)
+                finally:
+                    log.info(f"[TOOL] {_name}: finished in {_t.perf_counter()-t0:.1f}s")
+        else:
+            @functools.wraps(fn)
+            def wrapper(*a, _fn=fn, _name=name, **k):
+                log.info(f"[TOOL] {_name}: called")
+                t0 = _t.perf_counter()
+                try:
+                    return _fn(*a, **k)
+                finally:
+                    log.info(f"[TOOL] {_name}: finished in {_t.perf_counter()-t0:.1f}s")
+
+        wrapper._vaulter_logged = True
+        try:
+            object.__setattr__(tool, "fn", wrapper)
+        except Exception:
+            continue
 
 
 # ══════════════════════════════════════════════════════════════════
