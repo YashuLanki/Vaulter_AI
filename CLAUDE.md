@@ -1307,6 +1307,16 @@ existed for a property. There were 57. Every test passed, the code was flawless,
 was false. Nothing in this repo could catch a wrong **answer** as opposed to broken code, and that
 was the entire gap.
 
+**It states the AGE of the file list it read, and prefers the freshest one (2026-08-24).** This
+check asks "does every cited document exist", so its answer is only as good as the list it asks.
+The maintainer's development copy had a list **4 days old** while a current one sat in the live
+install, and the check reported citations as unfindable that were **sitting right there** — 16
+against a baseline of 12, a failure with nothing wrong in the data at all. Reading today's list
+instead: 12, and 7/7. The morning round caught this by verifying two of the named files against
+the current list rather than accepting the failure, which is the behaviour that check exists to
+have. This is the project's oldest lesson landing in its own house: **a freshness claim inherits
+the freshness of its source.**
+
 `python system/scripts/check_answers.py` reads file **names** only, out of the local index — it
 opens no documents, downloads nothing, and makes no network or model calls, so it is free and safe
 to run as often as you like. It measures four things against every property summary and the local

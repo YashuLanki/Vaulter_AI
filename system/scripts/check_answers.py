@@ -206,6 +206,40 @@ def main() -> int:
         return 2
 
     index_db = Path(config.BASE_DIR) / "data" / "corpus_index.db"
+
+    # SAY HOW OLD THE FILE LIST IS, and prefer the freshest one available.
+    #
+    # This check asks "does every cited document exist", and the answer is only
+    # as good as the list it asks. On 2026-08-24 this machine's development copy
+    # had a list 4 days old while a current one sat in the live install, and the
+    # check reported citations as unfindable that were sitting right there --
+    # the failure went from 7/7 to 6/7 with nothing wrong in the data at all.
+    # Two of the five named files were verified present in the current list.
+    #
+    # That is this project's oldest lesson, in its own house: a freshness claim
+    # inherits the freshness of its source. So the age is printed on every run,
+    # and where a newer list exists it is used instead of silently trusting the
+    # nearer one.
+    def _age_days(p):
+        if not p.exists():
+            return None
+        return (_dt.datetime.now()
+                - _dt.datetime.fromtimestamp(p.stat().st_mtime)).days
+
+    import datetime as _dt
+    alt = Path.home() / "Vaulter AI" / "system" / "data" / "corpus_index.db"
+    mine, theirs = _age_days(index_db), _age_days(alt)
+    if theirs is not None and (mine is None or theirs < mine):
+        here = "absent" if mine is None else f"{mine} day(s)"
+        print(f"Using the newer file list found at {alt}")
+        print(f"  (that one is {theirs} day(s) old; this folder's is {here} old)")
+        index_db = alt
+        mine = theirs
+    if mine is not None:
+        stale = ("  <-- TOO OLD; citation failures below may be its fault, "
+                 "not the data's") if mine >= 2 else ""
+        print(f"File list is {mine} day(s) old.{stale}")
+
     names = _index_names(index_db)
     print(f"Checking {len(files)} property summaries against "
           f"{len(names):,} known document names\n")
