@@ -219,6 +219,33 @@ resolves and re-checks every path and raises `OutsideCorpus` on anything that es
 **Every new code path that touches a corpus path must go through it** — do not build a
 path by string-joining onto `CORPUS_DIR` yourself.
 
+**Scanned documents and drawings: what actually works (measured 2026-09-01).** `extract.py` falls
+back to Tesseract per PAGE, which is right — a mostly-digital PDF with one scanned page does not
+rasterize the whole file. Three real faults were found by running it on genuine library documents
+rather than reasoning about it:
+
+* **A recorded tract map read fine once it could be opened** — 7,279 characters including the
+  title block and legal description off a pure drawing with no text layer. OCR on drawings is
+  genuinely useful here, not a nicety.
+* **Poppler cannot open a path over Windows' 260-character limit, and 86,228 documents — 17.4% of
+  the library — are over it.** A synced SharePoint library nests deeply. Python opens them fine,
+  so pdfplumber worked and only the scan step failed, with an I/O error naming no cause: any
+  scanned document in a deep folder was simply unreadable. The extended-length `\?\` prefix does
+  **not** help (measured — poppler still refuses), so the file is copied to a short temporary path
+  only when it is actually too long.
+* **There was no page cap and no time budget**, against this file's own hard rule ("never scan a
+  PDF without a timeout"). A page costs ~11s at 300 dpi, so a 42-page scanned plan set ran **141
+  seconds** and would be abandoned by Claude Desktop long before finishing. Now 10 pages / 40s,
+  measured at **49.6s** on that same document with 26,000 characters recovered. **The budget can
+  only be checked BETWEEN pages** — a page in progress cannot be interrupted — so the true ceiling
+  is the budget plus one page, and a single pathological sheet can still exceed it. Stated rather
+  than pretended away.
+
+Both limits **say so in the returned text** ("Scanning stopped at page 4 of 42… pages from here on
+were NOT read"), and a drawing whose page yields no lettering says *that* too rather than coming
+back silently empty. A truncated read that admits it is useful; one that stays quiet is the
+confident partial answer this project distrusts everywhere else.
+
 **Search matches names, not contents — and this is load-bearing, not a shortcut.** The
 library is hundreds of thousands of files synced as OneDrive Files On-Demand *placeholders*: filenames
 are local, file bytes are not, and opening one downloads it. Grepping the corpus would

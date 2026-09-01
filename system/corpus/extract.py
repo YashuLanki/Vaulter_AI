@@ -31,6 +31,11 @@ from datetime import datetime
 from pathlib import Path
 
 import pdfplumber
+import os
+import shutil
+import tempfile
+import time as _t
+from contextlib import contextmanager
 import pytesseract
 from pdf2image import convert_from_path
 
@@ -116,6 +121,68 @@ def read_document(rel_path: str, max_chars: int = 200_000) -> tuple[str, dict]:
 
 # ─── PDF ──────────────────────────────────────────────────────────────────────
 
+# How much scanning ONE document may cost. This file previously had neither
+# limit, against this project's own hard rule ("never scan a PDF without a
+# timeout", earned when an OCR fallback reached 6.5 GB before being killed).
+#
+# Measured 2026-09-01: one scanned page costs about 11s at 300 dpi. So a
+# 200-page scanned drawing set -- this library holds several, up to 37 MB --
+# would spend over half an hour inside a single tool call, which Claude Desktop
+# abandons long before. The read then looks like a crash and says nothing useful.
+#
+# When either limit is reached the returned text SAYS SO. A truncated read that
+# admits it is useful; one that stays quiet is the confident partial answer this
+# project distrusts everywhere else.
+# The budget can only be checked BETWEEN pages -- a page already being scanned
+# cannot be interrupted -- so the real ceiling is the budget plus one page.
+# Measured 2026-09-01 on a 37 MB, 42-page scanned plan set: a 90s budget
+# produced a 141s read, because a single architectural sheet at 300 dpi is a
+# very large image. 40s keeps the common overshoot inside what a tool call will
+# wait for; a pathological single page can still exceed it, and that is stated
+# here rather than pretended away.
+#
+# Ten pages is not a guess either: on a scanned plan set the informative pages
+# are the cover sheet, the index and the first few sheets. Reading further in
+# costs minutes and usually adds line-work with no lettering.
+_OCR_MAX_PAGES = 10
+_OCR_TIME_BUDGET_SECONDS = 40
+
+
+@contextmanager
+def _poppler_readable(path: Path):
+    r"""
+    A path poppler can actually open.
+
+    Poppler is a native program and cannot open a path over Windows' classic
+    260-character limit -- and 86,228 documents here, 17.4% of the library, are
+    over it, because a synced SharePoint library nests deeply. Python opens them
+    fine, so pdfplumber works and only the OCR step failed: a scanned document
+    in a deep folder was simply unreadable, with an I/O error naming no cause.
+
+    The extended-length "\?" prefix does NOT help (measured -- poppler still
+    refuses), so the file is copied to a short temporary path and removed
+    afterwards. Only when the path really is too long; copying every file would
+    add real cost for the 82% that do not need it.
+    """
+    if len(str(path)) < 250:
+        yield path
+        return
+    tmp = None
+    try:
+        fd, tmp_name = tempfile.mkstemp(suffix=path.suffix or ".pdf")
+        os.close(fd)
+        tmp = Path(tmp_name)
+        shutil.copy2(path, tmp)
+        log.info("  Path is %d chars -- copied to a short path for OCR" % len(str(path)))
+        yield tmp
+    finally:
+        if tmp is not None:
+            try:
+                tmp.unlink(missing_ok=True)
+            except OSError:
+                pass
+
+
 def _extract_pdf(path: Path, metadata: dict) -> tuple[str, dict]:
     """
     Extract each page with pdfplumber. Any individual page that yields no
@@ -134,27 +201,54 @@ def _extract_pdf(path: Path, metadata: dict) -> tuple[str, dict]:
             metadata["pdf_title"]  = pdf.metadata.get("Title", "") or ""
             metadata["pdf_author"] = pdf.metadata.get("Author", "") or ""
 
+        _ocr_pages = 0
+        _ocr_started = _t.perf_counter()
         for page_num, page in enumerate(pdf.pages, start=1):
             text = page.extract_text()
 
             if text and text.strip():
                 full_text.append(f"[Page {page_num}]\n{text.strip()}")
             else:
+                over_pages = _ocr_pages >= _OCR_MAX_PAGES
+                over_time = (_t.perf_counter() - _ocr_started) > _OCR_TIME_BUDGET_SECONDS
+                if over_pages or over_time:
+                    # Stop, and SAY so. Silence would hand back a document
+                    # that looks complete and is not.
+                    if not metadata.get("ocr_truncated"):
+                        metadata["ocr_truncated"] = True
+                        full_text.append(
+                            "[Scanning stopped at page %d of %s. This document has more"
+                            " scanned pages than one read will process (%d pages or %ds)."
+                            " Everything above is real; pages from here on were NOT read."
+                            " Ask for a specific page range if you need further in.]"
+                            % (page_num, metadata["page_count"], _OCR_MAX_PAGES,
+                               _OCR_TIME_BUDGET_SECONDS))
+                    continue
+
                 log.info(f"  Page {page_num} has no text layer — running OCR...")
                 # Render only this one page, not the whole document -- a
                 # mostly-digital PDF with one scanned/blank page would
                 # otherwise pay to rasterize every page at 300 DPI just to
                 # OCR the one that needs it.
-                page_images = convert_from_path(
-                    str(path), dpi=300, poppler_path=POPPLER_PATH,
-                    first_page=page_num, last_page=page_num,
-                )
+                with _poppler_readable(path) as _ocr_path:
+                    page_images = convert_from_path(
+                        str(_ocr_path), dpi=300, poppler_path=POPPLER_PATH,
+                        first_page=page_num, last_page=page_num,
+                    )
                 metadata["ocr_used"] = True
+                _ocr_pages += 1
 
                 if page_images:
                     ocr_text = pytesseract.image_to_string(page_images[0], lang="eng")
                     if ocr_text.strip():
                         full_text.append(f"[Page {page_num} - OCR]\n{ocr_text.strip()}")
+                    else:
+                        # A drawing with no lettering OCR can read. Say it,
+                        # rather than returning a silently empty page.
+                        full_text.append(
+                            "[Page %d is an image with no text OCR could read --"
+                            " typically a drawing, map or plan. It was scanned, not"
+                            " skipped.]" % page_num)
 
             tables = page.extract_tables()
             if tables:
