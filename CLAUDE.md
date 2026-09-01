@@ -416,6 +416,24 @@ summary — a false negative, not a false positive, and chosen on
 purpose: a wrong "you're missing this" claim damages trust in a tool built to stay silent unless
 something is actually wrong, more than an occasional missed detection in one narrow case costs.
 
+**The same-day rule has to be in BOTH staleness paths (2026-09-01).** `_newer_readable_docs`
+(one property, on demand) and `_newest_docs_for_many` (all of them, for the health check) do the
+same job, and only the first was taught that **a same-day file the summary itself names is not
+new**. So the on-demand warning went quiet while the health check kept flagging the same
+properties — the identical false alarm returning through a different door. Fixing the twin took
+active-stage properties flagged from **12 to 1**, and the suppression was checked property by
+property rather than trusted: **all 5 suppressed satisfy both conditions** (same date AND the
+summary names that file) and **22 remain flagged** as genuinely newer. Verifying that a fix does
+not over-suppress matters more than the fix — a quietened real warning is worse than the false
+one it replaced. **When two functions answer the same question, a rule added to one is a bug in
+the other.**
+
+**A second update on the same day gets its own heading.** `update_property_summary` titles its
+section by date, so two updates in one day produced two identically-titled sections and a reader
+could not tell them apart — which happened the day this was found, a freshness-stamp correction
+and a content update hours apart. The second now carries a time. The two that already existed were
+retitled from what their own bodies say.
+
 **It also flags summaries that have fallen *behind* their documents (added 2026-08-11)** — the
 opposite and more insidious case, since such a summary exists, reads as authoritative, and answers
 confidently while being months stale. Until now that was only ever noticed if someone happened to

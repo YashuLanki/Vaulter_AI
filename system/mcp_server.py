@@ -53,6 +53,7 @@ Connect in Claude Desktop:
   the exact config file location on your OS (it differs Mac vs Windows).
 """
 
+import datetime as _dt_mod
 import logging
 import os
 import re as _re
@@ -1390,7 +1391,7 @@ def _newer_readable_docs(property_name: str, stamped, summary_text: str = ""):
         return None
 
 
-def _newest_docs_for_many(wanted: dict):
+def _newest_docs_for_many(wanted: dict, texts: dict = None):
     """
     {property_name: newest_filename} for every property in `wanted` that has a
     readable document filed since its own stamp. Returns None if it can't tell.
@@ -1437,6 +1438,15 @@ def _newest_docs_for_many(wanted: dict):
         return None
 
     # Rows come newest-first, so the first match for a property is its newest.
+    #
+    # SAME-DAY FILES THE SUMMARY ITSELF NAMES ARE NOT NEW. The single-property
+    # path learned this on 2026-08-24; this bulk path is its twin and was left
+    # behind, so the health check kept flagging a property the on-demand warning
+    # had already stopped flagging. Two functions doing the same job, one fixed
+    # -- which is why the same false alarm came back through a different door.
+    #
+    # `texts` is {property_name: summary_text} where the caller has it. Without
+    # it this behaves exactly as before, so no existing caller changes.
     newest: dict = {}
     lowered = {n: n.strip().lower() for n in wanted}
     for path, name, mtime in rows:
@@ -1444,8 +1454,13 @@ def _newest_docs_for_many(wanted: dict):
         for prop, needle in lowered.items():
             if prop in newest or needle not in p:
                 continue
-            if mtime > wanted[prop].timestamp():
-                newest[prop] = name
+            if mtime <= wanted[prop].timestamp():
+                continue
+            same_day = (_dt_mod.datetime.fromtimestamp(mtime).date()
+                        == wanted[prop].date())
+            if same_day and name and name in (texts or {}).get(prop, ""):
+                continue
+            newest[prop] = name
         if len(newest) == len(wanted):
             break
     return newest
@@ -2099,7 +2114,7 @@ no score -- it's a diary, not a dial.""".replace(
 
             active, _src = load_properties()
             summary_files = list(Path(PROPERTY_SUMMARIES_DIR).glob("*.md"))
-            stamps, uncheckable = {}, []
+            stamps, uncheckable, texts = {}, [], {}
             for prop in active:
                 if prop.get("category") not in ACTIVE_DEAL_STAGES:
                     continue
@@ -2108,7 +2123,8 @@ no score -- it's a diary, not a dial.""".replace(
                               if _norm(f.stem) in pn or pn in _norm(f.stem)), None)
                 if match is None:
                     continue  # already reported by the missing-summary check
-                stamped = _summary_stamp(match.read_text(encoding="utf-8", errors="replace"))
+                _body = match.read_text(encoding="utf-8", errors="replace")
+                stamped = _summary_stamp(_body)
                 if stamped is None:
                     # No self-stamp means this one can never be currency-checked.
                     # Say so rather than skipping quietly -- a silent skip reads
@@ -2117,10 +2133,13 @@ no score -- it's a diary, not a dial.""".replace(
                     uncheckable.append(prop["name"])
                     continue
                 stamps[prop["name"]] = stamped
+                # Keep the text: a same-day file the summary NAMES is not new,
+                # and the bulk check cannot know that without it.
+                texts[prop["name"]] = _body
 
             # None (couldn't check) must not become an empty result, which
             # would read downstream as "checked, everything current".
-            found = _newest_docs_for_many(stamps)
+            found = _newest_docs_for_many(stamps, texts)
             behind = sorted(found.items()) if found else []
 
             if behind:
@@ -2740,8 +2759,15 @@ no score -- it's a diary, not a dial.""".replace(
 
             text = match.read_text(encoding="utf-8", errors="replace")
             today = _dt.date.today().isoformat()
-            section = (f"\n\n## Update {today} — from documents filed since the last read\n\n"
-                       f"{update_text.strip()}\n")
+            # A second update on the same day gets its own heading. Without this a
+            # file ends up with two identically-titled sections and a reader cannot
+            # tell them apart -- which happened on 2026-09-01, when a stamp
+            # correction and a content update landed hours apart.
+            heading = f"## Update {today} — from documents filed since the last read"
+            if heading in text:
+                heading = (f"## Update {today} ({_dt.datetime.now():%H:%M}) — from "
+                           f"documents filed since the last read")
+            section = ("\n\n" + heading + "\n\n" + update_text.strip() + "\n")
 
             # Append first, bump the freshness stamp second -- the stamp is
             # what silences the out-of-date warning, so it must only ever
