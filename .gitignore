@@ -115,6 +115,12 @@ system/data/cost_assumptions.json
 # time; never checked in.
 system/data/property_ids.json
 
+# Which folder each property's documents actually live in, remembered so the
+# lookup is not repeated on every conversation. Holds real folder names, and
+# is rebuilt from the file list whenever that changes -- so it is both
+# confidential and entirely disposable.
+system/data/property_folder_names.json
+
 # The answer-eval question set (scripts/check_answers.py builds it). Every
 # entry is a real firm fact quoted out of a property summary, plus the document
 # it came from -- exactly the content this public repo exists to keep out. It is

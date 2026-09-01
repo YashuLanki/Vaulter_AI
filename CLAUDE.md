@@ -416,6 +416,38 @@ summary — a false negative, not a false positive, and chosen on
 purpose: a wrong "you're missing this" claim damages trust in a tool built to stay silent unless
 something is actually wrong, more than an occasional missed detection in one narrow case costs.
 
+**A property's folder is often not called what the Project Master calls it
+(`_search_needles` / `_best_needle`, 2026-09-01).** Fixing the "cannot tell" reporting above only
+exposed the real problem: for several properties the name never matched the folder, so the check
+had nothing to look at. Measured — one Disposition-stage property's folder holds **3,132 files and
+its Project Master name matched none of them**, while another's holds **2,387 and its name matched
+five**, because the name carries a trailing full stop the folder does not. **The partial match is
+the more dangerous of the two: it looks checked.**
+
+The bridge needed no new maintained data — **the summary's own title line already carries both
+names** (`# <master name> (<alias>) — <site name>, <city>, <state>`), and the second half is what
+the folder is called. Candidates are tried in order — the name as given, without trailing
+punctuation, without the parenthetical, registry aliases, then segments of that title line — and
+the one matching the **most** files wins. Most, not longest: the trailing-full-stop case is longer
+*and* wrong.
+
+What this uncovered, on active deals that had reported as current: a **letter of intent** and a
+**fully executed third loan modification** on a property whose summary was stamped eight months
+earlier, and an **executed amendment to a purchase agreement** on another.
+
+**Two costs, both measured, because this runs in the first tool call of every conversation.**
+Counting every candidate for every property took the health check from **0.5s to 12.2s** — the same
+regression this codebase clawed back twice this week. Short-circuiting on a first candidate that
+already looks like a real folder brought it to 3.4s; caching the resolved names, keyed by the file
+list's own timestamp so a rebuilt list re-resolves everything, brings the steady state to **1.0s**
+with 3.5s once per rebuild. The remaining half-second over the original is simply the cost of
+actually reading two folders that were previously skipped.
+
+**And a fast number meant a broken path, for the second time this week.** The first cached run came
+back in 0.3s because the whole section was failing on a missing import and honestly reporting
+"could not check" — the honesty is why it was catchable, and the speed is why it had to be checked
+rather than believed.
+
 **A property name that matches NOTHING was reported as "current" (fixed 2026-09-01).** Asked which
 other properties were behind. Measured while answering: **19 of 49 Project Master names match no
 folder on the drive at all** — a name carries a parenthetical alias (with it, **4** files match;

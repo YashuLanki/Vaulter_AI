@@ -1315,6 +1315,193 @@ def _summary_stamp(summary_text: str):
         return None
 
 
+def _search_needles(property_name: str, summary_text: str = "") -> list:
+    """
+    Every name worth searching the drive for, best first.
+
+    A property's folder is often NOT called what the Project Master calls it, and
+    the gap is silent: measured 2026-09-01, one property's folder holds 3,132
+    files and its Project Master name matched **none** of them, while another's
+    holds 2,387 and its name matched **five** — because the name carries a
+    trailing full stop the folder does not. A partial match is the worse of the
+    two: it looks checked.
+
+    Tried in order, and the caller takes the first that actually matches
+    anything:
+      1. the name as given;
+      2. without trailing punctuation (fixes the 5-of-2,387 case);
+      3. without a parenthetical alias;
+      4. any alias recorded for it in the property registry.
+
+    Step 4 is where a genuinely different folder name lives. Those are real firm
+    names, so they are held in `property_ids.json` — gitignored — and never in
+    this file; the registry exists for exactly this and already notes that an
+    alias no rule can derive is recorded by hand.
+    """
+    import re as _re
+
+    out, seen = [], set()
+
+    def add(v):
+        v = (v or "").strip()
+        if v and v.lower() not in seen:
+            seen.add(v.lower())
+            out.append(v)
+
+    add(property_name)
+    add(_re.sub(r"[.,;:]+\s*$", "", str(property_name).strip()))
+    add(_re.sub(r"\s{2,}", " ", _re.sub(r"\([^)]*\)", "", str(property_name))).strip())
+
+    try:
+        from config import DATA_DIR
+        from pipeline import property_registry as _pr
+        reg = _pr.load_registry(Path(DATA_DIR))
+        pid = _pr.resolve(Path(DATA_DIR), property_name, reg)
+        if pid:
+            rec = reg.get(pid, {})
+            add(rec.get("canonical_name"))
+            for a in rec.get("aliases", []) or []:
+                add(a)
+    except Exception:
+        pass                    # a missing registry must never break the check
+
+    # THE SUMMARY'S OWN TITLE LINE IS THE BRIDGE, and it needs no maintained
+    # data. A summary is headed with the Project Master name AND the name the
+    # firm actually uses for the site, e.g. "# <master name> (<alias>) — <site
+    # name>, <city>, <state>". That second half is what the FOLDER is called,
+    # which is the link nothing else had: one property's folder holds 3,132
+    # files and its Project Master name matched none of them, while its own
+    # summary title named the folder outright.
+    #
+    # Segments only, shortest useful length up, and the caller keeps whichever
+    # finds most -- so a segment that happens to match nothing simply loses.
+    if summary_text:
+        first = (summary_text.lstrip("# ").splitlines() or [""])[0]
+        for chunk in _re.split(r"[—–|]", first):
+            for piece in chunk.split(","):
+                piece = piece.strip(" #*-")
+                if len(piece) > 6:
+                    add(piece)
+
+    return out
+
+
+_NEEDLE_CACHE = None
+
+
+def _needle_cache() -> dict:
+    """
+    Remembered "this property lives in this folder" answers.
+
+    Resolving them costs a table scan per candidate name, which took the health
+    check from 0.5s to 12.2s -- on the first tool call of every conversation, the
+    exact place this codebase has twice had to claw seconds back from. Short-
+    circuiting got it to 3.4s; this gets the steady state back to where it was.
+
+    Keyed by the file list's own timestamp, so a rebuilt list re-resolves
+    everything and a renamed folder can never be answered from a stale memory.
+    Held in memory AND on disk: in memory so repeated calls in one conversation
+    are free, on disk so the first call after a restart is too. A cache that
+    cannot be read or written is simply skipped -- it is a speed-up, never a
+    dependency.
+    """
+    global _NEEDLE_CACHE
+    from config import CORPUS_INDEX_FILE, DATA_DIR
+
+    try:
+        stamp = str(int(Path(CORPUS_INDEX_FILE).stat().st_mtime))
+    except OSError:
+        return {}
+
+    if _NEEDLE_CACHE is not None and _NEEDLE_CACHE.get("stamp") == stamp:
+        return _NEEDLE_CACHE
+
+    path = Path(DATA_DIR) / "property_folder_names.json"
+    loaded = _json_object(path) or {}
+    if loaded.get("stamp") != stamp:
+        loaded = {"stamp": stamp, "names": {}}
+    if not isinstance(loaded.get("names"), dict):
+        loaded["names"] = {}
+    _NEEDLE_CACHE = loaded
+    return _NEEDLE_CACHE
+
+
+def _needle_cache_save() -> None:
+    """Write the cache, silently. Never worth failing a real answer over."""
+    import json as _json_mod
+    from config import DATA_DIR
+    try:
+        if _NEEDLE_CACHE:
+            (Path(DATA_DIR) / "property_folder_names.json").write_text(
+                _json_mod.dumps(_NEEDLE_CACHE), encoding="utf-8")
+    except OSError:
+        pass
+
+
+def _best_needle(property_name: str, con, summary_text: str = "") -> str:
+    """
+    Which of `_search_needles` actually finds this property's files, preferring
+    the one that finds MOST. Returns "" when none of them find anything -- which
+    the caller must report as "cannot tell", never as "nothing newer".
+
+    Most, not first, because a longer name is not automatically better: one
+    property's Project Master name (with a trailing full stop the folder lacks)
+    matched five files while the folder holds 2,387.
+
+    IT SHORT-CIRCUITS, AND THAT IS NOT AN OPTIMISATION DETAIL -- it is what keeps
+    this out of the first tool call of every conversation. Counting every
+    candidate for every property took the health check from 0.5s to **12.2s**,
+    which is the same regression this codebase removed twice this week. So a
+    first candidate that already looks like a real folder is accepted
+    immediately, and the alternatives are only tried for the few properties
+    whose own name finds little or nothing.
+
+    Counts are capped: a bounded count answers "which of these finds more"
+    without scanning every matching row, and the answer is only ever used as a
+    comparison.
+    """
+    _CONFIDENT = 25          # matches enough to be a real folder, stop looking
+    _CAP = 400               # count no further than this; only ordering matters
+
+    def count(needle):
+        esc = needle.replace("!", "!!").replace("%", "!%").replace("_", "!_")
+        try:
+            return con.execute(
+                "SELECT COUNT(*) FROM (SELECT 1 FROM files "
+                "WHERE path LIKE ? ESCAPE '!' LIMIT ?)",
+                (f"%{esc}%", _CAP)).fetchone()[0]
+        except Exception:
+            return 0
+
+    cache = _needle_cache()
+    remembered = cache.get("names", {}).get(property_name)
+    if remembered is not None:
+        return remembered
+
+    candidates = _search_needles(property_name, summary_text)
+    if not candidates:
+        cache.setdefault("names", {})[property_name] = ""
+        return ""
+
+    first = candidates[0]
+    n_first = count(first)
+    if n_first >= _CONFIDENT:
+        cache.setdefault("names", {})[property_name] = first
+        _needle_cache_save()
+        return first                      # the common case, one query
+
+    best, best_n = (first, n_first) if n_first else ("", 0)
+    for needle in candidates[1:]:
+        n = count(needle)
+        if n > best_n:
+            best, best_n = needle, n
+            if n >= _CONFIDENT:
+                break                     # good enough; stop paying
+    cache.setdefault("names", {})[property_name] = best
+    _needle_cache_save()
+    return best
+
+
 def _newer_readable_docs(property_name: str, stamped, summary_text: str = ""):
     """
     (count, [(name, mtime), ...]) of documents for this property filed since
@@ -1350,7 +1537,16 @@ def _newer_readable_docs(property_name: str, stamped, summary_text: str = ""):
         try:
             # LIKE, so escape its wildcards -- '_' matches any single
             # character, which silently over-matches property names.
-            needle = property_name.strip().replace("!", "!!").replace("%", "!%").replace("_", "!_")
+            # Which name actually finds this property's folder -- see
+            # _best_needle. "" means nothing matched under any of its names,
+            # which is reported below as "cannot tell".
+            _resolved = _best_needle(property_name, con, summary_text)
+            if not _resolved:
+                log.info(f"[MCP] Staleness: nothing on the drive matches "
+                         f"{property_name!r} under any known name -- reporting "
+                         f"'cannot tell', not 'current'.")
+                return None
+            needle = _resolved.replace("!", "!!").replace("%", "!%").replace("_", "!_")
             # Count ONLY what read_document can actually open. This started as
             # a blocklist (.eml/.msg) and that was not enough: on one real
             # property the four "newest" files were drone .MP4s, so the
@@ -1368,26 +1564,6 @@ def _newer_readable_docs(property_name: str, stamped, summary_text: str = ""):
             ).fetchall()
             total = con.execute(f"SELECT COUNT(*) FROM files WHERE {where}", args).fetchone()[0]
 
-            # DOES THIS PROPERTY MATCH ANY FILE AT ALL? If not, "nothing newer"
-            # is not a finding -- nothing was looked at. Measured 2026-09-01:
-            # 19 of 49 property names from the Project Master match no folder,
-            # because a name carries a parenthetical alias, or trailing
-            # punctuation, or its folder sits deeper than the search expects
-            # (one state folder nests its pending deals under a further
-            # subfolder). Each was silently reported as current. Measured: with
-            # the parenthetical, 4 files match; without it, 90. Another name
-            # matched 5 files with its trailing punctuation and 4,796 without.
-            #
-            # This file already states the rule it was breaking: None (cannot
-            # tell) must never collapse into 0 (checked, nothing there). The
-            # collapse was here, in the one place the rule is about.
-            any_at_all = con.execute(
-                "SELECT 1 FROM files WHERE path LIKE ? ESCAPE '!' LIMIT 1",
-                (f"%{needle}%",)).fetchone()
-            if not any_at_all:
-                log.info(f"[MCP] Staleness: no file anywhere matches "
-                         f"{property_name!r} -- reporting 'cannot tell', not 'current'.")
-                return None
         finally:
             con.close()
 
@@ -1439,12 +1615,29 @@ def _newest_docs_for_many(wanted: dict, texts: dict = None):
         oldest = int(min(wanted.values()).timestamp())
         exts = ("pdf", "doc", "docx", "xls", "xlsx", "csv", "txt", "md")
         ext_clause = " OR ".join("lower(name) LIKE ?" for _ in exts)
-        name_clause = " OR ".join("path LIKE ? ESCAPE '!'" for _ in wanted)
-        needles = [
-            "%" + n.strip().replace("!", "!!").replace("%", "!%").replace("_", "!_") + "%"
-            for n in wanted
-        ]
         con = sqlite3.connect(f"file:{CORPUS_INDEX_FILE}?mode=ro", uri=True)
+
+        # RESOLVE EACH PROPERTY'S REAL FOLDER NAME FIRST, exactly as the
+        # single-property path does. Without this the health check kept missing
+        # properties the on-demand warning had already started catching -- the
+        # third time today that a rule added to one of these twins was a bug in
+        # the other. One measured case: a Disposition-stage deal whose summary
+        # was 8 months behind, holding a letter of intent and an executed loan
+        # modification, invisible because its folder is not called what the
+        # Project Master calls it.
+        resolved = {}
+        for prop in wanted:
+            best = _best_needle(prop, con, (texts or {}).get(prop, ""))
+            if best:
+                resolved[prop] = best
+        if not resolved:
+            con.close()
+            return {}
+        name_clause = " OR ".join("path LIKE ? ESCAPE '!'" for _ in resolved)
+        needles = [
+            "%" + v.strip().replace("!", "!!").replace("%", "!%").replace("_", "!_") + "%"
+            for v in resolved.values()
+        ]
         try:
             rows = con.execute(
                 f"SELECT path, name, mtime FROM files "
@@ -1469,7 +1662,7 @@ def _newest_docs_for_many(wanted: dict, texts: dict = None):
     # `texts` is {property_name: summary_text} where the caller has it. Without
     # it this behaves exactly as before, so no existing caller changes.
     newest: dict = {}
-    lowered = {n: n.strip().lower() for n in wanted}
+    lowered = {n: resolved[n].strip().lower() for n in resolved}
     for path, name, mtime in rows:
         p = path.lower()
         for prop, needle in lowered.items():
