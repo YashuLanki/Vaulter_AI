@@ -144,6 +144,39 @@ def _find_property_folders(property_name: str) -> list:
 # Code Version
 # ══════════════════════════════════════════════════════════════════
 
+# The version this PROCESS actually loaded, captured once. Everything else reads
+# the VERSION file, which an applied update rewrites -- so after an apply the file
+# says the new version while this process is still running the old code. Nothing
+# could tell a restart was pending; it reported itself up to date and was not.
+# Proven on 2026-09-01 by changing the file under a running process and watching
+# the reported version change without a restart.
+_VERSION_AT_STARTUP = None
+
+
+def _restart_pending() -> str:
+    """
+    The version waiting behind a restart, or "" if none.
+
+    Compares the version this process loaded against what is on disk now. They
+    differ only when an update was applied and Claude Desktop has not been
+    restarted since -- exactly the state where the code that answers is not the
+    code the user was told they had.
+
+    Returns "" rather than guessing whenever it cannot tell (no version at
+    startup, no version now), because a spurious "please restart" is worse than
+    silence: the restart is the one manual step in the whole update path, and
+    asking for it needlessly teaches people to ignore the request.
+    """
+    global _VERSION_AT_STARTUP
+    now = _get_code_version()
+    if _VERSION_AT_STARTUP is None:
+        _VERSION_AT_STARTUP = now          # first call in this process
+        return ""
+    if not now or not _VERSION_AT_STARTUP or now == _VERSION_AT_STARTUP:
+        return ""
+    return now
+
+
 def _get_code_version() -> str:
     """
     Best-effort version of the running code, for check_system_health,
@@ -2133,6 +2166,21 @@ no score -- it's a diary, not a dial.""".replace(
         # ── Version ──────────────────────────────────────────────
         _v = _get_code_version()
         lines.append(f"Code version: {_v}")
+
+        # An update applied but not yet restarted into. Said EVERY conversation
+        # until they actually restart, because until then the code answering is
+        # not the code they were told they had -- and the restart is the one
+        # step in this whole path that nothing can do for them.
+        _waiting = _restart_pending()
+        if _waiting:
+            lines.append(f"  Version {_waiting} is installed but NOT yet running: this "
+                         f"connection still has the older code loaded.")
+            issues.append(
+                f"Vaulter AI was updated to {_waiting} but Claude Desktop has not been "
+                f"restarted since, so the old code is still running. Tell the user to fully "
+                f"quit and reopen Claude Desktop -- not just close the window. Nothing else "
+                f"is needed and nothing is broken meanwhile."
+            )
         log.info(f"[MCP] check_system_health: done in {_t.perf_counter()-_t0:.1f}s")
 
         try:
@@ -4034,6 +4082,44 @@ no score -- it's a diary, not a dial.""".replace(
     return mcp
 
 
+def _with_restart_note(tool_name: str, result):
+    """
+    Add a one-line notice to a tool's answer when an update is installed but the
+    old code is still running.
+
+    The MCP server cannot interrupt a conversation -- it only speaks when a tool
+    is called. So this is the only way to say anything mid-conversation, and it
+    is worth saying: until Claude Desktop is restarted, the code answering is not
+    the code the user was told they had, which can include a bug that has already
+    been fixed.
+
+    Bounded deliberately, because a notice on every answer for ever is how people
+    learn to skip notices:
+      * only while a restart is genuinely pending -- it stops the moment they
+        restart, which is a real end condition, not a timer;
+      * never on check_system_health, which reports this properly itself and
+        would otherwise say it twice;
+      * only on plain text answers, so nothing structured is corrupted;
+      * and never at the cost of the answer -- any failure here returns the
+        original result untouched.
+    """
+    try:
+        if tool_name == "check_system_health" or not isinstance(result, str):
+            return result
+        waiting = _restart_pending()
+        if not waiting:
+            return result
+        note = (
+            f"Note: Vaulter AI was updated to {waiting}, but Claude Desktop has not "
+            f"been restarted since, so this answer came from the older code. Fully "
+            f"quit and reopen Claude Desktop when convenient. Nothing is broken "
+            f"meanwhile."
+        )
+        return result + "\n\n---\n" + note
+    except Exception:
+        return result
+
+
 def _log_every_tool_call(mcp) -> None:
     """
     Make every tool call say its own name and how long it took.
@@ -4071,7 +4157,7 @@ def _log_every_tool_call(mcp) -> None:
                 log.info(f"[TOOL] {_name}: called")
                 t0 = _t.perf_counter()
                 try:
-                    return await _fn(*a, **k)
+                    return _with_restart_note(_name, await _fn(*a, **k))
                 finally:
                     log.info(f"[TOOL] {_name}: finished in {_t.perf_counter()-t0:.1f}s")
         else:
@@ -4080,7 +4166,7 @@ def _log_every_tool_call(mcp) -> None:
                 log.info(f"[TOOL] {_name}: called")
                 t0 = _t.perf_counter()
                 try:
-                    return _fn(*a, **k)
+                    return _with_restart_note(_name, _fn(*a, **k))
                 finally:
                     log.info(f"[TOOL] {_name}: finished in {_t.perf_counter()-t0:.1f}s")
 

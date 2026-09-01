@@ -336,6 +336,28 @@ instructions) — `get_property_summary`, `update_property_summary`, `get_passed
 **Proximity** — `run_proximity_for_property`, `run_proximity_for_listing`,
 `compare_proximity_to_portfolio`, `open_proximity_files`.
 
+**A pending restart is detected and said out loud (`_restart_pending`, 2026-09-01).** Applying an
+update rewrites the `VERSION` file, and `_get_code_version()` reads that file — so between an
+apply and the restart, the server **reported the new version while running the old code**, and
+nothing could tell a restart was owed. Proven by changing the file under a running process and
+watching the reported version change with no restart. Now the version this process loaded is
+captured once at first use and compared against the file; a difference means an update landed and
+Claude Desktop has not been restarted.
+
+Two places say so, because the restart is the one step in the whole update path that nothing can
+do for the user:
+
+* **`check_system_health`** raises it as an issue at the start of every conversation until it is
+  done.
+* **Every other tool's answer** carries a one-line note, via the same wrapper that logs tool calls
+  — the MCP server cannot interrupt a conversation, so attaching to an answer is the only way to
+  say anything mid-conversation. Bounded so it does not become noise: never on
+  `check_system_health` (which reports it properly and would say it twice), only on plain-text
+  results so nothing structured is corrupted, only while a restart is genuinely pending — a real
+  end condition rather than a timer — and any failure in the wrapper returns the original answer
+  untouched. **Returns "" whenever it cannot tell**, since a spurious "please restart" is worse
+  than silence: it teaches people to ignore the request.
+
 **Every tool call names itself in the log (`_log_every_tool_call`, 2026-08-24).** The log used to
 record only `Processing request of type CallToolRequest`, which is true of all thirty tools
 equally. So when a call hung on 2026-08-24 — a request starting at 12:26:02 with nothing after
