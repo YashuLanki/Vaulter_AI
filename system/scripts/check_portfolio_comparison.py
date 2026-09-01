@@ -256,9 +256,44 @@ def main() -> int:
               _m._summary_stamp("Source files as of: 2026-13-45") is None)
 
         _st = _dt.datetime(2026, 1, 1, tzinfo=_dt.timezone.utc)
-        _nothing = _m._newer_readable_docs("Zzz No Such Property Zzz", _st)
-        check("a property with genuinely no newer documents reports 0, not None",
-              _nothing is not None and _nothing[0] == 0, f"got {_nothing!r}")
+
+        # A NAME THAT MATCHES NOTHING IS "CANNOT TELL", NOT "NOTHING NEWER".
+        # This check used to assert the opposite -- it passed a made-up property
+        # name and demanded 0 -- which encoded the bug rather than catching it.
+        # A property that does not exist on the drive does not have "genuinely no
+        # newer documents"; nothing was looked at. Measured 2026-09-01: 19 of 49
+        # real Project Master names match no folder, and every one of them was
+        # being reported as current.
+        _absent = _m._newer_readable_docs("Zzz No Such Property Zzz", _st)
+        check("a name matching NOTHING on the drive reports 'cannot tell', not 0",
+              _absent is None, f"got {_absent!r}")
+
+        # And the distinction the old check meant to make, tested properly: a
+        # property that really is on the drive, with a stamp far in the future so
+        # nothing can be newer, must report 0 -- checked, genuinely nothing.
+        _real_name = None
+        try:
+            _act, _ = __import__("portfolio").load_properties()
+            for _p in _act:
+                if _m._newer_readable_docs(_p["name"],
+                                           _dt.datetime(2099, 1, 1)) is not None:
+                    _real_name = _p["name"]
+                    break
+        except Exception:
+            pass
+        if _real_name:
+            _clean = _m._newer_readable_docs(_real_name, _dt.datetime(2099, 1, 1))
+            check("a REAL property with nothing newer reports 0, not None",
+                  _clean is not None and _clean[0] == 0,
+                  f"{_real_name}: got {_clean!r}")
+        else:
+            check("a REAL property with nothing newer reports 0, not None",
+                  False, "could not find a resolvable property to test with")
+
+        # The new helper answers only "was anything looked at".
+        check("the no-files helper spots a name that matches nothing",
+              "Zzz No Such Property Zzz" in
+              _m._properties_with_no_files(["Zzz No Such Property Zzz"]))
 
         # THE one that matters most: with no index to read, the answer is
         # "cannot tell" (None) and must never collapse into "nothing new" (0).

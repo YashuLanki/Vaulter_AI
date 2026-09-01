@@ -1367,6 +1367,27 @@ def _newer_readable_docs(property_name: str, stamped, summary_text: str = ""):
                 f"SELECT name, mtime FROM files WHERE {where} ORDER BY mtime DESC LIMIT 6", args
             ).fetchall()
             total = con.execute(f"SELECT COUNT(*) FROM files WHERE {where}", args).fetchone()[0]
+
+            # DOES THIS PROPERTY MATCH ANY FILE AT ALL? If not, "nothing newer"
+            # is not a finding -- nothing was looked at. Measured 2026-09-01:
+            # 19 of 49 property names from the Project Master match no folder,
+            # because a name carries a parenthetical alias, or trailing
+            # punctuation, or its folder sits deeper than the search expects
+            # (one state folder nests its pending deals under a further
+            # subfolder). Each was silently reported as current. Measured: with
+            # the parenthetical, 4 files match; without it, 90. Another name
+            # matched 5 files with its trailing punctuation and 4,796 without.
+            #
+            # This file already states the rule it was breaking: None (cannot
+            # tell) must never collapse into 0 (checked, nothing there). The
+            # collapse was here, in the one place the rule is about.
+            any_at_all = con.execute(
+                "SELECT 1 FROM files WHERE path LIKE ? ESCAPE '!' LIMIT 1",
+                (f"%{needle}%",)).fetchone()
+            if not any_at_all:
+                log.info(f"[MCP] Staleness: no file anywhere matches "
+                         f"{property_name!r} -- reporting 'cannot tell', not 'current'.")
+                return None
         finally:
             con.close()
 
@@ -1463,7 +1484,51 @@ def _newest_docs_for_many(wanted: dict, texts: dict = None):
             newest[prop] = name
         if len(newest) == len(wanted):
             break
+
     return newest
+
+
+def _properties_with_no_files(names) -> list:
+    """
+    Which of these property names match NOTHING on the drive.
+
+    Its own function, not a second return value from `_newest_docs_for_many`.
+    Widening that one's shape broke three of its callers immediately -- the
+    regression suite caught it in the same run -- and it is a different question
+    anyway: one asks "what is newer", this asks "was anything even looked at".
+
+    Why it is needed: measured 2026-09-01, **19 of 49 Project Master names match
+    no folder at all**, because a name carries a parenthetical alias
+    or trailing punctuation, or its folder sits deeper than the search expects
+    (one state folder nests its pending deals under a further subfolder). Each
+    of those was silently absent from the behind-list, which reads downstream as
+    "current". That is the exact collapse this file has a rule against.
+    """
+    import sqlite3
+
+    try:
+        from config import CORPUS_INDEX_FILE
+        if not Path(CORPUS_INDEX_FILE).exists():
+            return []
+        con = sqlite3.connect(f"file:{CORPUS_INDEX_FILE}?mode=ro", uri=True)
+        try:
+            out = []
+            for name in names:
+                needle = (str(name).strip().replace("!", "!!")
+                          .replace("%", "!%").replace("_", "!_"))
+                if not needle:
+                    continue
+                hit = con.execute(
+                    "SELECT 1 FROM files WHERE path LIKE ? ESCAPE '!' LIMIT 1",
+                    (f"%{needle}%",)).fetchone()
+                if not hit:
+                    out.append(name)
+            return out
+        finally:
+            con.close()
+    except sqlite3.Error as e:
+        log.warning(f"[MCP] Could not check which properties exist on the drive: {e}")
+        return []
 
 
 def _summary_staleness(property_name: str, summary_text: str) -> str:
@@ -2140,6 +2205,10 @@ no score -- it's a diary, not a dial.""".replace(
             # None (couldn't check) must not become an empty result, which
             # would read downstream as "checked, everything current".
             found = _newest_docs_for_many(stamps, texts)
+            # Asked as its own question, by its own function -- see below for why
+            # this is not folded into the call above.
+            unmatched = sorted(_properties_with_no_files(
+                [n for n in stamps if n not in (found or {})]))
             behind = sorted(found.items()) if found else []
 
             if behind:
@@ -2178,6 +2247,23 @@ no score -- it's a diary, not a dial.""".replace(
                     f"Nothing can tell whether {'it is' if len(uncheckable) == 1 else 'they are'} "
                     f"out of date. If the user asks about one, say the summary's currency is "
                     f"unknown, and offer to add the stamp when next updating it."
+                )
+
+            # A SEPARATE cause, with a separate message. These summaries DO
+            # carry a date -- the problem is that nothing matching the property's
+            # name could be found on the drive, so no comparison happened at all.
+            # Folding them into the message above would state a cause the code
+            # never tested, which is the fault this file has its own rule about.
+            if unmatched:
+                lines.append(f"Cannot be located on the drive: {len(unmatched)}")
+                issues.append(
+                    f"{len(unmatched)} active-stage propert"
+                    f"{'y' if len(unmatched) == 1 else 'ies'} could not be checked because "
+                    f"nothing on the firm's drive matches the name in the Project Master: "
+                    f"{', '.join(unmatched)}. This is NOT 'no new documents' -- no documents "
+                    f"were looked at. Usually the Project Master name differs from the folder "
+                    f"name (a parenthetical alias, or the folder sits deeper than expected). "
+                    f"If the user asks about one, say its currency could not be established."
                 )
         except Exception as e:
             lines.append(f"Summary currency: could not check ({e})")

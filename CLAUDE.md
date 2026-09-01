@@ -49,7 +49,7 @@ python system/main.py stats                     # what this instance has availab
 
 # Checks -- run the one that matches what you touched (see "Three regression suites" below)
 python system/scripts/check_screener.py             # 111 checks on the screener's arithmetic
-python system/scripts/check_portfolio_comparison.py # 73 checks on the comparison index
+python system/scripts/check_portfolio_comparison.py # 75 checks on the comparison index
 python system/scripts/check_answers.py              # 7 checks on the knowledge answers come from
 ```
 
@@ -415,6 +415,28 @@ sibling sharing the same stem) can mask each other here if only the shorter-name
 summary — a false negative, not a false positive, and chosen on
 purpose: a wrong "you're missing this" claim damages trust in a tool built to stay silent unless
 something is actually wrong, more than an occasional missed detection in one narrow case costs.
+
+**A property name that matches NOTHING was reported as "current" (fixed 2026-09-01).** Asked which
+other properties were behind. Measured while answering: **19 of 49 Project Master names match no
+folder on the drive at all** — a name carries a parenthetical alias (with it, **4** files match;
+without it, **90**), or trailing punctuation (**5** files against **4,796**), or its folder sits
+deeper than the search expects (one state folder nests its pending deals under a further subfolder).
+Each of those was silently absent from the behind-list, **which reads downstream as current** — the
+exact `None`-collapsing-into-`0` failure this file already has a rule against, sitting in the one
+function the rule is about. Both paths now separate it: the single path returns `None`, and
+`_properties_with_no_files()` gives the health check its own list, reported with **its own message**
+naming the cause the code actually tested (an unmatched name), never folded into the "no date stamp"
+bucket — those summaries *do* carry dates, and reusing that message would have stated a cause that
+is false for them.
+
+Two process notes worth as much as the fix. **The regression suite caught me widening
+`_newest_docs_for_many`'s return shape** — three callers broke in the same run, which is why the
+second question gets its own function instead. And **one existing check encoded the bug**: it passed
+a made-up property name and asserted the answer was `0`, so it would have failed had the fix been
+correct. Rewritten to assert `None` for an absent name, plus a new check that a *real* property with
+a future stamp still reports `0`, and one for the helper. **A check that asserts current behaviour
+protects a bug as effectively as it protects a feature** — when a fix makes a check fail, read the
+check before assuming the fix is wrong.
 
 **The same-day rule has to be in BOTH staleness paths (2026-09-01).** `_newer_readable_docs`
 (one property, on demand) and `_newest_docs_for_many` (all of them, for the health check) do the
@@ -828,7 +850,7 @@ ranks or weights selection factors. They need a senior partner's judgment, not a
 `system/scripts/check_screener.py` runs **111 checks** across deformed market shapes. Run it after
 any change to `fit_screen.py`. Note it covers the screener only — **`geo_providers.py` has no
 automated coverage at all**, and that is where the worst measured bug of 2026-07-29 lived (see
-the proximity note below). It is one of three suites: `check_portfolio_comparison.py` (73 checks)
+the proximity note below). It is one of three suites: `check_portfolio_comparison.py` (75 checks)
 covers the comparison index, and `check_answers.py` (7) covers the shared knowledge answers are
 built from — see "Three regression suites" below for what each one can and cannot catch.
 
@@ -1363,7 +1385,7 @@ one particular name, OCR installed and Python already working. Every teammate bu
 
 ## Three regression suites, and the third one checks answers (2026-08-14)
 
-`check_screener.py` (**111 checks**) and `check_portfolio_comparison.py` (**59**) both test
+`check_screener.py` (**111 checks**) and `check_portfolio_comparison.py` (**75**) both test
 deterministic Python, and both pass while the answer a person actually receives is still wrong —
 because the wrongness lives in the knowledge the answer was built from, not in the arithmetic.
 `system/scripts/check_answers.py` (**7 checks**) is the third suite, and that knowledge is what it
