@@ -4387,40 +4387,142 @@ no score -- it's a diary, not a dial.""".replace(
     return mcp
 
 
-def _with_restart_note(tool_name: str, result):
+def _update_check_due(hours: int = 6) -> bool:
     """
-    Add a one-line notice to a tool's answer when an update is installed but the
-    old code is still running.
+    Whether it is time to ask this install's release channel for a newer version.
 
-    The MCP server cannot interrupt a conversation -- it only speaks when a tool
-    is called. So this is the only way to say anything mid-conversation, and it
-    is worth saying: until Claude Desktop is restarted, the code answering is not
-    the code the user was told they had, which can include a bug that has already
-    been fixed.
+    Gated, because the question costs a shared-OneDrive round trip and it is now
+    asked from ordinary tool calls rather than only from check_system_health.
+    Six hours rather than a day: a working day holds more than one conversation,
+    and the whole reason for asking here is that the health check cannot be
+    relied on to ask even once.
+
+    Returns True whenever it CANNOT tell. An unreadable stamp must not silence
+    the check -- a machine that never asks is precisely the state this exists to
+    end, so the safe direction here is to ask again, which costs one folder read.
+    """
+    try:
+        import time as _time
+        from config import UPDATE_CHECK_STAMP_FILE
+        stamp = Path(UPDATE_CHECK_STAMP_FILE)
+        if not stamp.exists():
+            return True
+        age = _time.time() - stamp.stat().st_mtime
+        return age > hours * 3600
+    except Exception:
+        return True
+
+
+def _mark_update_checked() -> None:
+    """Record that the channel was just asked, so the next tool call does not."""
+    try:
+        from config import UPDATE_CHECK_STAMP_FILE
+        p = Path(UPDATE_CHECK_STAMP_FILE)
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(_dt_mod.datetime.now().isoformat(timespec="seconds"),
+                     encoding="utf-8")
+    except Exception:
+        pass
+
+
+def _update_ready() -> str:
+    """
+    The version already downloaded and waiting to be applied, or "" if none.
+
+    Reads only the LOCAL staging marker, so this is one small file read on this
+    machine's own disk -- cheap enough to sit on every tool call. It deliberately
+    never touches the shared folder: asking whether something newer exists out
+    there is the separate, rate-limited job of _check_and_stage_update.
+
+    Returns "" when the staged version is the one already running, which is the
+    same false alarm _clear_superseded_stage exists to remove -- a notice on a
+    fully current machine is how people learn to ignore notices.
+    """
+    try:
+        from config import PENDING_UPDATE_DIR
+        staged = _json_object(Path(PENDING_UPDATE_DIR) / "ready.json")
+        if not staged:
+            return ""
+        version = staged.get("version")
+        if not version or version == _get_code_version():
+            return ""
+        return str(version)
+    except Exception:
+        return ""
+
+
+def _with_pending_notice(tool_name: str, result):
+    """
+    Add a one-line notice to a tool's answer when the user needs to do something
+    about an update -- either apply one that is waiting, or restart after one
+    that has landed.
+
+    WHY THIS IS NOT LEFT TO check_system_health. That tool used to be the only
+    place either state was announced, and its automatic call is a REQUEST to
+    Claude in the server's instructions, not a guarantee. Measured 2026-09-02 on
+    this machine's own log: of 82 server sessions, 12 called any tool at all, and
+    only 2 of those 12 began with the health check. So a published fix could sit
+    unmentioned for days on a machine in daily use, and nothing anywhere would
+    say so. The MCP server cannot interrupt a conversation -- it only speaks when
+    a tool is called -- so riding along on the answer is the only way to say
+    anything at all, and that makes it the only reliable way.
+
+    It also ASKS the channel, on a six-hour gate, rather than only reporting what
+    is already staged. Downloading was wired to the same single caller, so on an
+    install whose health check never fires there was nothing to report either:
+    the notice would have been permanently silent for the exact machines it is
+    for. Gated so an ordinary tool call pays a shared-folder read at most a few
+    times a day, and never on the same call twice.
 
     Bounded deliberately, because a notice on every answer for ever is how people
     learn to skip notices:
-      * only while a restart is genuinely pending -- it stops the moment they
-        restart, which is a real end condition, not a timer;
-      * never on check_system_health, which reports this properly itself and
-        would otherwise say it twice;
+      * only while something is genuinely outstanding -- both states end when the
+        user acts, which is a real end condition, not a timer;
+      * one notice, never two: a restart already owed is the more urgent, and
+        saying both at once gives a reader two instructions and no order;
+      * never on check_system_health, which reports these properly itself and
+        would otherwise say them twice;
       * only on plain text answers, so nothing structured is corrupted;
-      * and never at the cost of the answer -- any failure here returns the
-        original result untouched.
+      * and never at the cost of the answer -- any failure in here, including in
+        the channel check, returns the original result untouched.
     """
     try:
         if tool_name == "check_system_health" or not isinstance(result, str):
             return result
+
+        # Ask the channel at most every few hours. Marked BEFORE the call, not
+        # after: if the shared folder is slow or unreachable this must not retry
+        # on every single tool call for the rest of the conversation.
+        if _update_check_due():
+            _mark_update_checked()
+            try:
+                _check_and_stage_update()
+            except Exception as e:
+                log.warning(f"[NOTICE] Update check failed (continuing): {e}")
+
         waiting = _restart_pending()
-        if not waiting:
-            return result
-        note = (
-            f"Note: Vaulter AI was updated to {waiting}, but Claude Desktop has not "
-            f"been restarted since, so this answer came from the older code. Fully "
-            f"quit and reopen Claude Desktop when convenient. Nothing is broken "
-            f"meanwhile."
-        )
-        return result + "\n\n---\n" + note
+        if waiting:
+            note = (
+                f"Note: Vaulter AI was updated to {waiting}, but Claude Desktop has "
+                f"not been restarted since, so this answer came from the older code. "
+                f"Fully quit and reopen Claude Desktop when convenient. Nothing is "
+                f"broken meanwhile."
+            )
+            return result + "\n\n---\n" + note
+
+        ready = _update_ready()
+        if ready:
+            note = (
+                f"Note for Claude, not an error: a new version of Vaulter AI "
+                f"({ready}) has been downloaded and is ready to install. Tell the "
+                f"user this once, in plain English, alongside whatever they asked "
+                f"for -- do not withhold or delay their answer -- and ask whether "
+                f"they would like it installed now. If they say yes, call "
+                f"apply_pending_update. Never apply it without asking."
+            )
+            return result + "\n\n---\n" + note
+
+        return result
     except Exception:
         return result
 
@@ -4462,7 +4564,7 @@ def _log_every_tool_call(mcp) -> None:
                 log.info(f"[TOOL] {_name}: called")
                 t0 = _t.perf_counter()
                 try:
-                    return _with_restart_note(_name, await _fn(*a, **k))
+                    return _with_pending_notice(_name, await _fn(*a, **k))
                 finally:
                     log.info(f"[TOOL] {_name}: finished in {_t.perf_counter()-t0:.1f}s")
         else:
@@ -4471,7 +4573,7 @@ def _log_every_tool_call(mcp) -> None:
                 log.info(f"[TOOL] {_name}: called")
                 t0 = _t.perf_counter()
                 try:
-                    return _with_restart_note(_name, _fn(*a, **k))
+                    return _with_pending_notice(_name, _fn(*a, **k))
                 finally:
                     log.info(f"[TOOL] {_name}: finished in {_t.perf_counter()-t0:.1f}s")
 

@@ -853,6 +853,18 @@ CHECKIN_STAMP_FILE = DATA_DIR / "last_checkin.txt"
 # error reporter that scans the log for error text cannot see one. This turns
 # silence into something reportable.
 APPLY_IN_PROGRESS_FILE = DATA_DIR / "apply_in_progress.json"
+
+# When this install last asked its release channel whether a newer version was
+# published. Local, for the same reason CHECKIN_STAMP_FILE is: the question it
+# gates costs a shared-folder round trip, and the gate must not.
+#
+# It exists because that question used to be asked from exactly one place --
+# check_system_health -- which is only a REQUEST to Claude to call a tool, not a
+# guarantee. Measured 2026-09-02 on this machine's own log: of 82 server
+# sessions, 12 called any tool at all and only 2 of those began with the health
+# check. So an install could go days never asking whether a fix was waiting,
+# and nothing anywhere would say so.
+UPDATE_CHECK_STAMP_FILE = DATA_DIR / "last_update_check.txt"
 LOG_DIR        = DATA_DIR / "logs"
 
 # Where a CoStar export or broker spreadsheet gets dropped so screen_listings

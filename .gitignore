@@ -85,6 +85,7 @@ system/data/last_error_report.txt
 # category as the file above -- it was committed by accident, and a fresh
 # clone would then start life believing it had already checked in today.
 system/data/last_checkin.txt
+system/data/last_update_check.txt
 system/data/corpus_index.db-journal
 system/data/corpus_index.db-wal
 

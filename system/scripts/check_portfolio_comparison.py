@@ -744,6 +744,111 @@ def main() -> int:
     except Exception as e:
         check("document-library detection checks ran", False, f"{type(e).__name__}: {e}")
 
+    # -- 6. Being TOLD an update is waiting ------------------------
+    # Announcing a waiting update used to live only in check_system_health,
+    # whose automatic call is a REQUEST to Claude, not a guarantee. Measured
+    # 2026-09-02 on this machine's own log: 82 server sessions, 12 called any
+    # tool at all, and 2 of those began with the health check. So the notice
+    # now rides along on ordinary tool answers, and these checks are what stop
+    # it becoming either silent or a nag.
+    print()
+    print("6. Being told an update is waiting")
+    try:
+        import json as _j
+        import time as _tm
+        sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+        import mcp_server as _ms
+        import config as _cfg
+
+        _ready = Path(_cfg.PENDING_UPDATE_DIR) / "ready.json"
+        _stamp = Path(_cfg.UPDATE_CHECK_STAMP_FILE)
+        _was_ready = _ready.read_bytes() if _ready.exists() else None
+        _was_stamp = _stamp.read_bytes() if _stamp.exists() else None
+        _body = "ANSWER" * 40
+
+        def _plant(v):
+            _ready.parent.mkdir(parents=True, exist_ok=True)
+            _ready.write_text(_j.dumps({"version": v, "zip_filename": "f.zip",
+                                        "signature": "x"}))
+
+        def _freeze():
+            # Stop the channel from being asked, so these test the NOTICE
+            # itself and never depend on what happens to be published today.
+            _stamp.parent.mkdir(parents=True, exist_ok=True)
+            _stamp.write_text("frozen")
+            os.utime(_stamp, (_tm.time(), _tm.time()))
+
+        try:
+            _freeze()
+            _plant("zzzzzz9")
+            out = _ms._with_pending_notice("get_screening_rules", _body)
+            check("an ordinary tool answer says an update is waiting",
+                  "ready to install" in out and "zzzzzz9" in out)
+            check("...and it tells Claude to ask the user before applying",
+                  "apply_pending_update" in out and "without asking" in out)
+            check("...and the tool's own answer survives intact",
+                  out.startswith(_body))
+
+            check("check_system_health is never double-noticed",
+                  _ms._with_pending_notice("check_system_health", _body) == _body)
+            check("a structured (non-text) answer is never touched",
+                  _ms._with_pending_notice("x", {"a": 1}) == {"a": 1})
+
+            # The phantom-update false alarm this project has already paid for
+            # once: a machine that is fully current must not be told to update.
+            _freeze()
+            _plant(_ms._get_code_version())
+            check("a machine already on the staged version is not nagged",
+                  "ready to install" not in _ms._with_pending_notice("x", _body))
+
+            _freeze()
+            _ready.unlink()
+            check("nothing staged means nothing said",
+                  "ready to install" not in _ms._with_pending_notice("x", _body))
+
+            # A wrong SHAPE is a third failure mode next to missing and
+            # unparseable, and it must never cost the answer.
+            _bad_ok = True
+            for _bad in ("[1,2,3]", "null", chr(34) + "text" + chr(34), "not json {"):
+                _freeze()
+                _ready.write_text(_bad)
+                if _ms._with_pending_notice("x", _body) != _body:
+                    _bad_ok = False
+                    break
+            check("a wrong-shaped or unparseable marker cannot alter the answer",
+                  _bad_ok, "tried a list, null, a string and broken JSON")
+
+            # "Cannot tell" here must mean ASK, which is the OPPOSITE direction
+            # from _newer_readable_docs, and deliberately so: asking again costs
+            # one folder read, while not asking is the silence this exists to
+            # end.
+            if _ready.exists():
+                _ready.unlink()
+            if _stamp.exists():
+                _stamp.unlink()
+            check("with no stamp at all, the channel is asked rather than skipped",
+                  _ms._update_check_due() is True)
+            _freeze()
+            check("a stamp written just now stops it asking again",
+                  _ms._update_check_due() is False)
+            _old = _tm.time() - 7 * 3600
+            os.utime(_stamp, (_old, _old))
+            check("a stamp older than the gate makes it ask again",
+                  _ms._update_check_due() is True, "7 hours old")
+        finally:
+            if _was_ready is None:
+                if _ready.exists():
+                    _ready.unlink()
+            else:
+                _ready.write_bytes(_was_ready)
+            if _was_stamp is None:
+                if _stamp.exists():
+                    _stamp.unlink()
+            else:
+                _stamp.write_bytes(_was_stamp)
+    except Exception as e:
+        check("update-notice checks ran", False, f"{type(e).__name__}: {e}")
+
     passed = sum(1 for _, ok, _ in RESULTS if ok)
     print(f"\n{passed}/{len(RESULTS)} checks passed")
     return 0 if passed == len(RESULTS) else 1

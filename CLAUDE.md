@@ -385,6 +385,45 @@ do for the user:
   untouched. **Returns "" whenever it cannot tell**, since a spurious "please restart" is worse
   than silence: it teaches people to ignore the request.
 
+**And a WAITING update is announced the same way (`_with_pending_notice`, 2026-09-02).** The note
+above only ever covered a restart already owed. Whether a new version was *available* was announced
+in exactly one place — `check_system_health` — and that tool's automatic call is a **request to
+Claude in the server's `instructions=` string, not a guarantee**. Measured on this machine's own
+log, which records every tool call by name since 2026-08-24: **of 82 server sessions, 12 called any
+tool at all, and only 2 of those 12 began with the health check.** Claude Desktop starts the server
+when the app launches, so most of those sessions are conversations that never touched it — but the
+ones that did and skipped the health check are the point. A published fix could sit unmentioned for
+days on a machine in daily use, and nothing anywhere would say so.
+
+Worse, the **download** was wired to the same single caller. `_check_and_stage_update` runs only
+from `check_system_health`, so on an install whose health check never fires there was nothing
+staged to report either — the notice would have been permanently silent for the exact machines it
+is for. Both halves had to move: the wrapper now asks the channel too, on a **six-hour gate**
+(`UPDATE_CHECK_STAMP_FILE`, local so the gate itself costs no shared-folder round trip). Measured
+through the real stdio transport: **0.64s for a tool call that asks the channel against 0.51s for
+one that does not.**
+
+Three details are load-bearing:
+
+* **One notice, never two.** A restart already owed outranks an update waiting — saying both at
+  once hands the reader two instructions and no order.
+* **"Cannot tell" means ASK here, the opposite of `_newer_readable_docs`.** An unreadable stamp
+  returns "due", because the cost of being wrong is one folder read, while the cost of staying
+  quiet is the silence this exists to end. Same reasoning `_clear_superseded_stage` gives for
+  having no "cannot tell" branch.
+* **The stamp is written BEFORE the channel is asked, not after**, so an unreachable shared folder
+  cannot make every tool call for the rest of the conversation retry it.
+
+Eleven checks in `check_portfolio_comparison.py` §6 hold the shape: the notice appears on an
+ordinary answer and names the version, tells Claude to ask before applying, leaves the answer
+intact, never doubles up on `check_system_health`, never touches a structured result, stays silent
+when nothing is staged **and when the staged version is the one already running** (the phantom
+update this codebase has already paid for once), survives a wrong-shaped marker, and gates as
+described. One of those started life asserting the wrong thing — it demanded that
+`check_system_health` report a *planted* staged version, and failed because the health check
+correctly **discarded** a version the channel never published. The check was wrong, not the code:
+**when a new check fails, read the check first.**
+
 **Every tool call names itself in the log (`_log_every_tool_call`, 2026-08-24).** The log used to
 record only `Processing request of type CallToolRequest`, which is true of all thirty tools
 equally. So when a call hung on 2026-08-24 — a request starting at 12:26:02 with nothing after
