@@ -849,6 +849,121 @@ def main() -> int:
     except Exception as e:
         check("update-notice checks ran", False, f"{type(e).__name__}: {e}")
 
+    # -- 7. Setup puts the person on the team's install list ---------
+    # The list used to be written from ONE place, check_system_health, inside a
+    # conversation. So somebody appeared on it when they first USED the system,
+    # never when they installed it. Measured: a teammate who installed on
+    # 2026-08-20 and never opened a conversation was still absent on
+    # 2026-09-02, indistinguishable from someone who never installed -- while
+    # his setup log sat in the team folder the whole time.
+    print()
+    print("7. Setup puts the person on the team's install list")
+    try:
+        import inspect as _insp
+        import io as _io
+        import json as _js
+        import shutil as _sh
+        import tempfile as _tf
+        sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+        sys.path.insert(0, str(Path(__file__).resolve().parent))
+        import config as _cfg
+        import mcp_server as _ms
+        import setup_wizard as _sww
+
+        # The wiring itself. A step that exists but is never run is the easy
+        # way for this to quietly stop happening again.
+        _src = _insp.getsource(_sww._run_setup)
+        check("setup actually RUNS the registration step",
+              "register_install()" in _src)
+        check("...and reports it in the summary like every other step",
+              "results[" in _src and "register_install()" in _src)
+
+        # It must not assemble a second copy of the record. Two functions
+        # answering the same question is how a rule added to one becomes a bug
+        # in the other -- already paid for once here, in the two staleness
+        # checks.
+        _reg = _insp.getsource(_sww.register_install)
+        check("it calls the server's own writer rather than duplicating it",
+              "_write_install_checkin" in _reg)
+        check("...and never builds its own record shape",
+              "format_version" not in _reg and "last_seen" not in _reg)
+
+        def _run(where, fallback):
+            _saved = (_cfg.INSTALLS_DIR, _cfg.SHARED_DIR_IS_FALLBACK,
+                      sys.stdout, sys.stderr)
+            _st = Path(_cfg.CHECKIN_STAMP_FILE)
+            _wasst = _st.read_bytes() if _st.exists() else None
+            if _st.exists():
+                _st.unlink()          # so the once-a-day gate does not skip it
+            _cfg.INSTALLS_DIR = where
+            _cfg.SHARED_DIR_IS_FALLBACK = fallback
+            _con = _io.StringIO()
+            sys.stdout = _con
+            sys.stderr = _con
+            try:
+                return _sww.register_install(), _con.getvalue()
+            finally:
+                (_cfg.INSTALLS_DIR, _cfg.SHARED_DIR_IS_FALLBACK,
+                 sys.stdout, sys.stderr) = _saved
+                if _wasst is None:
+                    if _st.exists():
+                        _st.unlink()
+                else:
+                    _st.write_bytes(_wasst)
+
+        # A throwaway folder, never the team's own -- these checks must not
+        # write into a folder the whole team reads.
+        _d = Path(_tf.mkdtemp())
+        try:
+            _ok, _out = _run(_d, False)
+            _files = list(_d.glob("*.json"))
+            check("registering writes a record when the team folder is reachable",
+                  _ok is True and len(_files) == 1,
+                  _files[0].name if _files else "nothing written")
+            if _files:
+                _rec = _js.loads(_files[0].read_text())
+                check("...naming the person, the machine and the version",
+                      bool(_rec.get("user")) and bool(_rec.get("machine"))
+                      and bool(_rec.get("version")))
+                _sv = _cfg.INSTALLS_DIR
+                _cfg.INSTALLS_DIR = _d
+                try:
+                    _back = _ms._read_installs()
+                finally:
+                    _cfg.INSTALLS_DIR = _sv
+                check("...and the list reader hands it straight back",
+                      len(_back) == 1, f"{len(_back)} record(s)")
+        finally:
+            _sh.rmtree(_d, ignore_errors=True)
+
+        # An unreachable team folder must SAY the person is invisible. Claiming
+        # success here would be the setup-log bug all over again: the
+        # reassurance is what stops anybody checking.
+        _d = Path(_tf.mkdtemp())
+        try:
+            _ok, _out = _run(_d, True)
+            _flat = " ".join(_out.split())
+            check("an unreachable team folder is reported, not glossed over",
+                  _ok is False and
+                  "nobody else can see that you have this installed" in _flat)
+            check("...and nothing is written when it cannot be", not list(_d.glob("*.json")))
+        finally:
+            _sh.rmtree(_d, ignore_errors=True)
+
+        # A write that fails outright must never claim success, and must never
+        # bring setup down -- being invisible to the team does not stop the
+        # install working.
+        _d = Path(_tf.mkdtemp())
+        try:
+            (_d / "blocked").write_text("a file where a folder must go")
+            _ok, _out = _run(_d / "blocked" / "deeper", False)
+            check("a failed write never claims the person is listed",
+                  _ok is False and "You are on the list" not in _out)
+        finally:
+            _sh.rmtree(_d, ignore_errors=True)
+    except Exception as e:
+        check("install-list registration checks ran", False, f"{type(e).__name__}: {e}")
+
     passed = sum(1 for _, ok, _ in RESULTS if ok)
     print(f"\n{passed}/{len(RESULTS)} checks passed")
     return 0 if passed == len(RESULTS) else 1

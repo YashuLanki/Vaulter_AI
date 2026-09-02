@@ -1612,6 +1612,63 @@ class _Transcript:
         return getattr(self._stream, "isatty", lambda: False)()
 
 
+def register_install() -> bool:
+    """
+    Put this machine on the team's install list, at SETUP time.
+
+    Until 2026-09-02 that list was written from one place only --
+    check_system_health, inside a conversation -- so a person appeared on it
+    when they first USED the system, never when they installed it. Two
+    consequences, both measured rather than supposed:
+
+      * A teammate who installed on 2026-08-20 and never opened a conversation
+        was still absent from the list on 2026-09-02, indistinguishable from
+        somebody who never installed at all. His setup log was sitting in the
+        team folder the whole time, which is what made the gap visible.
+      * That health check is something Claude is ASKED to run, not something
+        that always runs (of 82 server sessions on the maintainer's machine, 2
+        began with it), so even a person who does use the system may not
+        register for a while.
+
+    Deliberately CALLS the server's own writer rather than assembling a second
+    record here. Two functions answering the same question is how a rule added
+    to one becomes a bug in the other -- this project has already paid for that
+    once, in its two staleness checks.
+
+    Never fatal, and never claims more than it verified: it re-reads the folder
+    afterwards to confirm a file really landed, because the list lives in the
+    team folder and a machine that cannot reach that folder must be TOLD it is
+    invisible rather than reassured.
+    """
+    _print_header("Listing you on the team's install list")
+    try:
+        sys.path.insert(0, str(PROJECT_ROOT))
+        import config
+        from mcp_server import _write_install_checkin, _install_record_name
+
+        if config.SHARED_DIR_IS_FALLBACK:
+            print("  ⚠ The team folder isn't reachable from here, so nobody else can")
+            print("    see that you have this installed. Everything on your own")
+            print("    machine still works.")
+            return False
+
+        _write_install_checkin()
+
+        landed = Path(config.INSTALLS_DIR) / _install_record_name()
+        if landed.exists() and landed.stat().st_size > 0:
+            print(f"  ✓ You are on the list as {os.environ.get('USERNAME', 'this user')}"
+                  f" on {os.environ.get('COMPUTERNAME', 'this computer')}.")
+            return True
+
+        print("  ⚠ The list could not be updated, so nobody else can see that you")
+        print("    have this installed. Everything on your own machine still works.")
+        return False
+    except Exception as e:
+        print(f"  ⚠ Could not add you to the list ({type(e).__name__}: {e}).")
+        print("    Everything on your own machine still works.")
+        return False
+
+
 def _start_transcript():
     """Begin recording. Returns (path, handle) or (None, None) -- never raises,
     because failing to open a log file must not stop somebody installing."""
@@ -1826,6 +1883,11 @@ def _run_setup() -> dict:
     results["Claude Desktop connected"] = setup_claude_desktop()
 
     results["Document library indexed"] = build_corpus_index()
+
+    # Last, because it reports what every step above found. Not blocking:
+    # failing to appear on the list means the team cannot SEE this install,
+    # which never stops the install itself from working.
+    results["Listed on the team's install list"] = register_install()
 
     _print_summary(results)
     return results

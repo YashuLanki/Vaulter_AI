@@ -1298,8 +1298,28 @@ reports in the conversation.
 
 Five things here are load-bearing:
 
-* **Written from `check_system_health`, never a background process** — that is already the
-  once-per-conversation shared-folder visit, and this project does not run threads.
+* **Written from `check_system_health` AND from setup, never a background process** — the
+  health check is already the once-per-conversation shared-folder visit, and this project does not
+  run threads.
+
+  **Setup registering the person was added 2026-09-02, and its absence was a real hole.** With the
+  health check as the only writer, somebody appeared on this list when they first *used* the
+  system, never when they installed it. Measured: a teammate who installed on 2026-08-20 and never
+  opened a conversation was **still absent thirteen days later, indistinguishable from someone who
+  never installed at all** — while his setup log sat in the team folder the whole time, which is
+  what made the gap visible at all. Compounded by the health check being a *request* to Claude
+  rather than a guarantee (see `_with_pending_notice` above), so even a person who does use the
+  system may not register for a while.
+
+  `setup_wizard.register_install()` **calls `_write_install_checkin` rather than assembling a
+  second record** — two functions answering the same question is how a rule added to one becomes a
+  bug in the other, which this codebase has already paid for once in its two staleness checks. It
+  is the last step, is never fatal (being invisible to the team does not stop an install working),
+  and **re-reads the folder to confirm a file actually landed** before saying so: the list lives in
+  the team folder, so a machine that cannot reach it must be told it is invisible rather than
+  reassured. That is the same fault as the setup log's own message, fixed the same day — see below.
+  `check_portfolio_comparison.py` §7 covers the wiring, all three outcomes, and that no second
+  record shape is ever built.
 * **Gated to once a day, or on a version change (revised 2026-08-24).** Checking in every
   conversation added **5 seconds to the first tool call of every conversation**. The 5 seconds
   was not the shared write (0.05s warm) — it was `_get_code_version()` falling through to a
