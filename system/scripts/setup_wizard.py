@@ -1675,11 +1675,21 @@ def _finish_transcript(path, handle, results=None):
     if handle is None:
         return
     shared_copy = None
+    # Why the folder is unusable is kept SEPARATE from whether it was found.
+    # Failing to create the subfolder used to fall into the same `None` as
+    # "there is no team folder", so somebody whose folder was found but not
+    # writable was told it "isn't reachable from here yet" -- a cause nothing
+    # had tested. Found 2026-09-02 by a test that made the destination
+    # un-creatable, not by reading the code.
+    prepare_error = ""
     try:
         import config
         if not config.SHARED_DIR_IS_FALLBACK:
             dest_dir = config.SHARED_DIR / "system" / "setup_logs"
-            dest_dir.mkdir(parents=True, exist_ok=True)
+            try:
+                dest_dir.mkdir(parents=True, exist_ok=True)
+            except Exception as e:
+                prepare_error = f"{type(e).__name__}: {e}"
             who = os.environ.get("USERNAME") or "unknown"
             machine = os.environ.get("COMPUTERNAME") or "unknown"
             safe = _re.sub(r"[^A-Za-z0-9._-]", "_", f"{who}--{machine}--{path.name}")
@@ -1727,15 +1737,16 @@ def _finish_transcript(path, handle, results=None):
         print()
     print("  A record of this setup run was saved:")
     print(f"    {path}")
-    if shared_copy:
-        print("  A copy has been put in the team folder, so nobody needs to be")
-        print("  sent a screenshot:")
-        print(f"    {shared_copy}")
-    else:
-        print("  It could NOT be copied to the team folder (that folder isn't")
-        print("  reachable from here yet), so send the file above if asked.")
-    print("=" * 64)
 
+    # Nothing is said about the team folder yet, on purpose. The copy cannot
+    # happen until this file is closed -- it has to contain the summary above --
+    # so anything printed here would be a promise, not a fact. It used to be
+    # exactly that: "A copy has been put in the team folder" was printed first
+    # and the copy attempted afterwards with `except Exception: pass`. A new
+    # person could be told their record had reached support when it had not,
+    # and the reassurance is what stopped anyone checking. Found 2026-09-02,
+    # when a new install left no setup log in the team folder at all and this
+    # message could not be used as evidence either way.
     try:
         handle.flush()
     finally:
@@ -1749,11 +1760,34 @@ def _finish_transcript(path, handle, results=None):
         except Exception:
             pass
 
+    copied = False
+    why_not = prepare_error
     if shared_copy:
         try:
             _shutil.copy2(path, shared_copy)
-        except Exception:
-            pass
+            # Verified, not assumed: copy2 onto a OneDrive folder can return
+            # without the file being there.
+            copied = shared_copy.exists() and shared_copy.stat().st_size > 0
+            if not copied:
+                why_not = "the copy finished but the file is not there"
+        except Exception as e:
+            why_not = f"{type(e).__name__}: {e}"
+
+    if copied:
+        print("  A copy has been put in the team folder, so nobody needs to be")
+        print("  sent a screenshot:")
+        print(f"    {shared_copy}")
+    elif shared_copy:
+        # The folder was found, so the reason is NOT "unreachable" -- say what
+        # actually went wrong rather than asserting a cause nothing tested.
+        print("  It could NOT be copied to the team folder, so please send the")
+        print("  file above if asked.")
+        if why_not:
+            print(f"    reason: {why_not}")
+    else:
+        print("  It could NOT be copied to the team folder (that folder isn't")
+        print("  reachable from here yet), so send the file above if asked.")
+    print("=" * 64)
 
 
 def main() -> None:
