@@ -766,6 +766,18 @@ def main() -> int:
         _was_stamp = _stamp.read_bytes() if _stamp.exists() else None
         _body = "ANSWER" * 40
 
+        # Point the install list at a throwaway folder for this whole section.
+        # The wrapper writes this machine's check-in as well as the notice, so
+        # without this the suite wrote a FAKE "update waiting" into the team's
+        # real list every time it ran. Found 2026-09-04 by reading that list,
+        # not by the suite: a check that pollutes the folder the whole team
+        # reads is worse than no check.
+        import shutil as _sh6
+        import tempfile as _tf6
+        _throwaway = Path(_tf6.mkdtemp())
+        _real_installs = _cfg.INSTALLS_DIR
+        _cfg.INSTALLS_DIR = _throwaway
+
         def _plant(v):
             _ready.parent.mkdir(parents=True, exist_ok=True)
             _ready.write_text(_j.dumps({"version": v, "zip_filename": "f.zip",
@@ -836,6 +848,8 @@ def main() -> int:
             check("a stamp older than the gate makes it ask again",
                   _ms._update_check_due() is True, "7 hours old")
         finally:
+            _cfg.INSTALLS_DIR = _real_installs
+            _sh6.rmtree(_throwaway, ignore_errors=True)
             if _was_ready is None:
                 if _ready.exists():
                     _ready.unlink()
