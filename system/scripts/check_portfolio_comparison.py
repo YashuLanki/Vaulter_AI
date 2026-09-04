@@ -961,6 +961,104 @@ def main() -> int:
                   _ok is False and "You are on the list" not in _out)
         finally:
             _sh.rmtree(_d, ignore_errors=True)
+
+        # Registering must not depend on WHICH tool a conversation reaches for.
+        # Measured 2026-09-04: a teammate who installed on 2026-09-01 and has
+        # the system running was still absent from the list three days later,
+        # because check_system_health was the only writer and Claude is merely
+        # asked to call it. Setup registering people (above) cannot help a
+        # machine that is already installed; this can, on its next question.
+        _wrap = _insp.getsource(_ms._with_pending_notice)
+        check("the tool wrapper registers this machine too",
+              "_write_install_checkin" in _wrap)
+
+        # A stage the machine has already moved past must never be offered.
+        # Found by these checks: the development copy had dfe1a2a staged while
+        # running 9712632 and the notice offered it -- a DOWNGRADE, the same
+        # shape CLAUDE.md records being fixed once in _install_problems.
+        _rdy = Path(_cfg.PENDING_UPDATE_DIR) / "ready.json"
+        _wasrdy = _rdy.read_bytes() if _rdy.exists() else None
+        try:
+            _rdy.parent.mkdir(parents=True, exist_ok=True)
+            _rdy.write_text(_js.dumps({
+                "version": "aaaaaa1",
+                "zip_filename": "f.zip",
+                "signature": "x",
+                "current_version_at_download": "bbbbbb2",
+            }))
+            check("a stage from before this install moved on is not offered",
+                  _ms._update_ready() == "",
+                  "staged while on bbbbbb2, now on " + str(_ms._get_code_version()))
+            _rdy.write_text(_js.dumps({
+                "version": "aaaaaa1",
+                "zip_filename": "f.zip",
+                "signature": "x",
+                "current_version_at_download": _ms._get_code_version(),
+            }))
+            check("...while a stage from the version still running IS offered",
+                  _ms._update_ready() == "aaaaaa1")
+        finally:
+            if _wasrdy is None:
+                if _rdy.exists():
+                    _rdy.unlink()
+            else:
+                _rdy.write_bytes(_wasrdy)
+
+        _d = Path(_tf.mkdtemp())
+        _sv = (_cfg.INSTALLS_DIR, _cfg.SHARED_DIR_IS_FALLBACK)
+        _st = Path(_cfg.CHECKIN_STAMP_FILE)
+        _ust = Path(_cfg.UPDATE_CHECK_STAMP_FILE)
+        _wasst = _st.read_bytes() if _st.exists() else None
+        _wasust = _ust.read_bytes() if _ust.exists() else None
+        try:
+            _cfg.INSTALLS_DIR = _d
+            _cfg.SHARED_DIR_IS_FALLBACK = False
+            # Freeze the update channel so this measures the check-in only.
+            _ust.parent.mkdir(parents=True, exist_ok=True)
+            _ust.write_text("frozen")
+            os.utime(_ust, (_tm.time(), _tm.time()))
+            if _st.exists():
+                _st.unlink()
+
+            _body2 = "PLAIN ANSWER" * 20
+            _got = _ms._with_pending_notice("get_screening_rules", _body2)
+            check("an ordinary tool call writes the record",
+                  len(list(_d.glob("*.json"))) == 1,
+                  f"{len(list(_d.glob('*.json')))} record(s)")
+            # startswith, not ==: appending a genuine notice is allowed
+            # behaviour here. What must never happen is the answer being
+            # changed or lost.
+            check("...without altering the answer", _got.startswith(_body2))
+
+            # The daily gate must survive: this now runs on every tool call,
+            # and a shared-folder write per call is exactly the 5-second
+            # regression this codebase already clawed back once.
+            _first = next(_d.glob("*.json")).read_bytes()
+            _ms._with_pending_notice("get_screening_rules", _body2)
+            check("...and is not rewritten on the very next call",
+                  next(_d.glob("*.json")).read_bytes() == _first)
+
+            # And an unusable folder must cost the answer nothing at all.
+            _cfg.INSTALLS_DIR = _d / "blocked" / "deeper"
+            (_d / "blocked").write_text("a file where a folder must go")
+            if _st.exists():
+                _st.unlink()
+            check("an unusable team folder never costs the answer",
+                  _ms._with_pending_notice("get_screening_rules", _body2)
+                  .startswith(_body2))
+        finally:
+            (_cfg.INSTALLS_DIR, _cfg.SHARED_DIR_IS_FALLBACK) = _sv
+            if _wasst is None:
+                if _st.exists():
+                    _st.unlink()
+            else:
+                _st.write_bytes(_wasst)
+            if _wasust is None:
+                if _ust.exists():
+                    _ust.unlink()
+            else:
+                _ust.write_bytes(_wasust)
+            _sh.rmtree(_d, ignore_errors=True)
     except Exception as e:
         check("install-list registration checks ran", False, f"{type(e).__name__}: {e}")
 

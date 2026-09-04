@@ -413,6 +413,23 @@ Three details are load-bearing:
   having no "cannot tell" branch.
 * **The stamp is written BEFORE the channel is asked, not after**, so an unreachable shared folder
   cannot make every tool call for the rest of the conversation retry it.
+* **A stage the machine has already moved PAST is never offered (2026-09-04).** `_update_ready`
+  first refused only a staged version *equal* to the running one — and CLAUDE.md already records
+  that exact half-fix being made and found wanting in `_install_problems`, which "had already been
+  taught not to report a waiting update *equal* to the running version — but not one **older**
+  than it, which is the same lie in a shape that check could not see." Reintroduced in a new
+  place, three weeks later. The marker records the version that was running when it was
+  downloaded, so a mismatch means this install got current some other way (a `git pull`, a fresh
+  package) and the stage is superseded. A superseded stage also self-heals within the six-hour
+  gate, since `_check_and_stage_update` runs before the notice in the same wrapper; this closes
+  the window in between.
+
+  **Found by the new checks, not by reading**, on the development copy: `dfe1a2a` staged while
+  running `9712632`, and the notice offered it. Worth knowing why that copy staged a downgrade at
+  all — `_published_is_newer` returns True unconditionally when `_get_code_build_time()` is
+  `None`, which is any install with no `VERSION` file, which is a **git clone and therefore only
+  ever a development machine**. That branch is deliberate and unchanged; the guard above stops the
+  *notice* acting on it.
 
 Eleven checks in `check_portfolio_comparison.py` §6 hold the shape: the notice appears on an
 ordinary answer and names the version, tells Claude to ask before applying, leaves the answer
@@ -1298,9 +1315,23 @@ reports in the conversation.
 
 Five things here are load-bearing:
 
-* **Written from `check_system_health` AND from setup, never a background process** — the
-  health check is already the once-per-conversation shared-folder visit, and this project does not
-  run threads.
+* **Written from ANY tool call, from setup, and from `check_system_health` — never a background
+  process.** This project does not run threads; all three of these are things a person's own
+  machine is already doing.
+
+  **Riding on any tool call was added 2026-09-04, and the case that forced it is the clearest
+  evidence this feature has produced.** A teammate installed on 2026-09-01, had the system
+  *running*, and was **still absent from the list three days later** — indistinguishable from
+  somebody who never installed at all. Setup registering people (2026-09-02) fixed the next
+  person and could not help a machine already installed; and the health check, the only other
+  writer, is a request to Claude rather than a guarantee. So appearing on the list depended on
+  which tool a conversation happened to reach for. It now happens on the first tool call of any
+  kind, which needs nothing from the person but the question they were already asking.
+
+  Free to put there, and measured: `_write_install_checkin` gates itself to once a day or a
+  version change from **one local file read**, the shared write is 0.05s warm, and it swallows its
+  own failures. An ordinary tool call measured **0.49s** with it, and the answer is returned
+  untouched even when the team folder is on a drive that does not exist.
 
   **Setup registering the person was added 2026-09-02, and its absence was a real hole.** With the
   health check as the only writer, somebody appeared on this list when they first *used* the

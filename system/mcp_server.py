@@ -4434,9 +4434,31 @@ def _update_ready() -> str:
     never touches the shared folder: asking whether something newer exists out
     there is the separate, rate-limited job of _check_and_stage_update.
 
-    Returns "" when the staged version is the one already running, which is the
-    same false alarm _clear_superseded_stage exists to remove -- a notice on a
-    fully current machine is how people learn to ignore notices.
+    Silent in two cases, and the second was a real bug caught by this feature's
+    own checks rather than by reading it:
+
+      * the staged version IS the one running -- the false alarm
+        _clear_superseded_stage exists to remove. A notice on a fully current
+        machine is how people learn to ignore notices.
+      * the machine has moved on since that package was downloaded. The marker
+        records the version that was running at download time, so if that no
+        longer matches, this install got current by some other route -- a `git
+        pull`, or a fresh package -- and the stage is superseded. Without this,
+        a development copy running 9712632 with dfe1a2a staged was offered
+        dfe1a2a: a DOWNGRADE. CLAUDE.md already records this exact shape being
+        fixed once in _install_problems, which had learned to ignore a waiting
+        update EQUAL to the running version but not one OLDER than it. Same lie,
+        new place.
+
+    A superseded stage also self-heals within the six-hour gate, because
+    _check_and_stage_update runs before this in the same wrapper and clears it.
+    This closes the window in between, which is precisely when a machine that
+    got current another way sits with a stale marker.
+
+    Deliberately still reads only the LOCAL marker -- one small file read on this
+    machine's own disk, cheap enough to sit on every tool call. Asking whether
+    something newer exists out there stays the separate, rate-limited job of
+    _check_and_stage_update.
     """
     try:
         from config import PENDING_UPDATE_DIR
@@ -4444,7 +4466,14 @@ def _update_ready() -> str:
         if not staged:
             return ""
         version = staged.get("version")
-        if not version or version == _get_code_version():
+        running = _get_code_version()
+        if not version or version == running:
+            return ""
+        at_download = staged.get("current_version_at_download")
+        if at_download and running and at_download != running:
+            log.info(f"[NOTICE] {version} was staged when this install was on "
+                     f"{at_download}, and it is now on {running} -- superseded, "
+                     f"so not offering it.")
             return ""
         return str(version)
     except Exception:
@@ -4499,6 +4528,26 @@ def _with_pending_notice(tool_name: str, result):
                 _check_and_stage_update()
             except Exception as e:
                 log.warning(f"[NOTICE] Update check failed (continuing): {e}")
+
+        # Leave this machine's note in the team folder from here too, not only
+        # from check_system_health. Appearing on that list should not depend on
+        # which tool somebody's conversation happens to reach for.
+        #
+        # Measured 2026-09-04: a teammate who installed on 2026-09-01 and has
+        # the system RUNNING was still absent from the list three days later,
+        # indistinguishable from someone who never installed. The health check
+        # is the only writer and Claude is merely asked to call it. Setup now
+        # registers people too (2026-09-02), but that cannot reach a machine
+        # already installed -- this can, on its owner's very next question.
+        #
+        # Free to add here: _write_install_checkin gates itself to once a day
+        # or a version change from one local file read, the shared write is
+        # 0.05s warm, and it swallows its own failures -- nothing about
+        # reporting status is worth disturbing somebody's answer.
+        try:
+            _write_install_checkin()
+        except Exception as e:
+            log.warning(f"[NOTICE] Install check-in failed (continuing): {e}")
 
         waiting = _restart_pending()
         if waiting:
