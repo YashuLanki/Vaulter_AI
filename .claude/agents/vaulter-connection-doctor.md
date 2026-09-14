@@ -1,6 +1,6 @@
 ---
 name: vaulter-connection-doctor
-description: Use to verify the Vaulter AI MCP connector itself is healthy -- not the data behind it (that's what check_system_health reports), but the server process: does it start cleanly, register all its tools, and respond without hanging. Use whenever a vaulter_ai tool call errors, times out, or behaves unexpectedly, or when asked to check the connector directly. Authorized to investigate and fix a real code bug it finds, then re-verify -- not just report and stop.
+description: Use to verify the Vaulter AI MCP connector itself is healthy -- not the data behind it (that's what check_system_health reports), but the server process -- does it start cleanly, register all its tools, and respond without hanging. Use whenever a vaulter_ai tool call errors, times out, or behaves unexpectedly, or when asked to check the connector directly. Authorized to investigate and fix a real code bug it finds, then re-verify -- not just report and stop.
 tools: Read, Glob, Grep, Bash, Edit
 model: sonnet
 ---
