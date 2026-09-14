@@ -428,8 +428,16 @@ Three details are load-bearing:
   running `9712632`, and the notice offered it. Worth knowing why that copy staged a downgrade at
   all — `_published_is_newer` returns True unconditionally when `_get_code_build_time()` is
   `None`, which is any install with no `VERSION` file, which is a **git clone and therefore only
-  ever a development machine**. That branch is deliberate and unchanged; the guard above stops the
-  *notice* acting on it.
+  ever a development machine**. That branch is deliberate and unchanged.
+
+  **The guard does not cover that case, and an earlier version of this note wrongly said it did.**
+  It catches a machine that moved on AFTER staging; it deliberately allows a stage made while the
+  still-running version was current, which is exactly what a dev clone produces. Observed again
+  2026-09-14: the development copy sat on `56e5e45` with `79065b0` staged — a downgrade — and was
+  offered it, until the next commit moved it on and the guard then suppressed it correctly. Left
+  as is: it costs one development machine a wrong line in `get_install_status`, and the cheap fixes
+  all mean asking the shared folder on every tool call, which is the cost this design exists to
+  avoid.
 
 Eleven checks in `check_portfolio_comparison.py` §6 hold the shape: the notice appears on an
 ordinary answer and names the version, tells Claude to ask before applying, leaves the answer
