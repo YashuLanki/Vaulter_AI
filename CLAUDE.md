@@ -49,7 +49,7 @@ python system/main.py stats                     # what this instance has availab
 
 # Checks -- run the one that matches what you touched (see "Three regression suites" below)
 python system/scripts/check_screener.py             # 111 checks on the screener's arithmetic
-python system/scripts/check_portfolio_comparison.py # 75 checks on the comparison index
+python system/scripts/check_portfolio_comparison.py # 106 checks on the comparison index
 python system/scripts/check_answers.py              # 7 checks on the knowledge answers come from
 ```
 
@@ -439,7 +439,21 @@ Three details are load-bearing:
   all mean asking the shared folder on every tool call, which is the cost this design exists to
   avoid.
 
-Eleven checks in `check_portfolio_comparison.py` §6 hold the shape: the notice appears on an
+  **But that accepted wart was NOT the whole reason the dev copy kept being offered a downgrade
+  (found 2026-09-21).** `check_system_health` read `ready.json` **raw** and announced whatever it
+  found, so it never consulted this guard at all — not even the older "equal to the running
+  version" half. Three functions answered "is an update waiting?" and only two of them checked;
+  the third is the one that runs at the **start of every conversation**. Measured: the dev copy
+  reported `79065b0` "downloaded and ready" while running `258e968`, three commits newer, at the
+  same moment `_update_ready()` was correctly staying silent about it and logging why. On a
+  teammate's machine the live route is a **fresh package** (which CLAUDE.md already prescribes for
+  an install cut off from the channel): that leaves the old marker in place, so the health check
+  would have offered a genuine downgrade. Fixed by gating on `_update_ready()` and reading the
+  marker through `_json_object` for the notes only. Same family as the two staleness checks, the
+  two install-record writers, and `_install_problems`' own half-fix: **when three functions answer
+  one question, the rule belongs in one of them and the other two must ask it.**
+
+Twelve checks in `check_portfolio_comparison.py` §6 hold the shape: the notice appears on an
 ordinary answer and names the version, tells Claude to ask before applying, leaves the answer
 intact, never doubles up on `check_system_health`, never touches a structured result, stays silent
 when nothing is staged **and when the staged version is the one already running** (the phantom
@@ -524,6 +538,20 @@ function the rule is about. Both paths now separate it: the single path returns 
 naming the cause the code actually tested (an unmatched name), never folded into the "no date stamp"
 bucket — those summaries *do* carry dates, and reusing that message would have stated a cause that
 is false for them.
+
+**And that new list then invented its own false alarm, which took until 2026-09-21 to see.**
+`_properties_with_no_files()` searched the **raw** Project Master name, while
+`_newest_docs_for_many` resolved the real folder name through `_best_needle` — the resolver built
+in the same session, for this exact problem, one function away. So a property whose name carries a
+parenthetical alias was **currency-checked successfully and reported as unlocatable in the same
+answer**: measured, one active-stage property whose folder holds **90 files** was named every
+conversation as "nothing on the firm's drive matches the name". The fix is to ask the same
+resolver, with the summary texts passed through so the title-line aliases work. Note what the
+shape of the bug was: not a wrong answer about a missing property, but a **confident "I could not
+check this"** about one that was being checked fine — the mirror image of the collapse this
+function was written to prevent, in the function written to prevent it. Two new checks in §4 hold
+it, and both were confirmed to **fail against the pre-fix code** before being trusted: a real
+aliased name must not be flagged, and the helper's own source must go through `_best_needle`.
 
 Two process notes worth as much as the fix. **The regression suite caught me widening
 `_newest_docs_for_many`'s return shape** — three callers broke in the same run, which is why the
@@ -946,7 +974,7 @@ ranks or weights selection factors. They need a senior partner's judgment, not a
 `system/scripts/check_screener.py` runs **111 checks** across deformed market shapes. Run it after
 any change to `fit_screen.py`. Note it covers the screener only — **`geo_providers.py` has no
 automated coverage at all**, and that is where the worst measured bug of 2026-07-29 lived (see
-the proximity note below). It is one of three suites: `check_portfolio_comparison.py` (75 checks)
+the proximity note below). It is one of three suites: `check_portfolio_comparison.py` (106 checks)
 covers the comparison index, and `check_answers.py` (7) covers the shared knowledge answers are
 built from — see "Three regression suites" below for what each one can and cannot catch.
 
@@ -1455,7 +1483,8 @@ Four things here are load-bearing:
   "what I would do next" list for a person. An agent that fixed things unattended on a machine
   every teammate's install syncs to is a blast radius nobody asked for.
 * **It states the AGE of the file list every day, and checks it directly.** Registering this
-  found that the 7am refresh had been pointing at `%TEMP%ealinstall_.../Vaulter AI` — a
+  found that the 7am refresh had been pointing at `%TEMP%
+ealinstall_.../Vaulter AI` — a
   throwaway folder from an install test, deleted weeks earlier — so **it had been failing
   silently every night**, while Windows recorded `LastTaskResult: 0` because the `pythonw.exe`
   it was told to run did not exist to fail. Nothing in the system noticed, and a hand-run
@@ -1515,7 +1544,7 @@ one particular name, OCR installed and Python already working. Every teammate bu
 
 ## Three regression suites, and the third one checks answers (2026-08-14)
 
-`check_screener.py` (**111 checks**) and `check_portfolio_comparison.py` (**75**) both test
+`check_screener.py` (**111 checks**) and `check_portfolio_comparison.py` (**106**) both test
 deterministic Python, and both pass while the answer a person actually receives is still wrong —
 because the wrongness lives in the knowledge the answer was built from, not in the arithmetic.
 `system/scripts/check_answers.py` (**7 checks**) is the third suite, and that knowledge is what it

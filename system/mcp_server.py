@@ -1681,7 +1681,7 @@ def _newest_docs_for_many(wanted: dict, texts: dict = None):
     return newest
 
 
-def _properties_with_no_files(names) -> list:
+def _properties_with_no_files(names, texts=None) -> list:
     """
     Which of these property names match NOTHING on the drive.
 
@@ -1707,14 +1707,21 @@ def _properties_with_no_files(names) -> list:
         try:
             out = []
             for name in names:
-                needle = (str(name).strip().replace("!", "!!")
-                          .replace("%", "!%").replace("_", "!_"))
-                if not needle:
+                if not str(name).strip():
                     continue
-                hit = con.execute(
-                    "SELECT 1 FROM files WHERE path LIKE ? ESCAPE '!' LIMIT 1",
-                    (f"%{needle}%",)).fetchone()
-                if not hit:
+                # Resolve the folder name through the SAME resolver the
+                # staleness check uses. Searching the raw Project Master name
+                # was a bug of this file's own documented shape: a name
+                # carrying a parenthetical alias matches nothing, while the
+                # folder it actually lives in holds 90 files -- a property
+                # that IS on the drive, and WAS being currency-checked
+                # successfully by _newest_docs_for_many, got reported as
+                # unlocatable anyway.
+                # _best_needle returns "" only when no candidate finds
+                # anything, which is exactly the question being asked here.
+                # When two functions answer the same question, a rule added to
+                # one is a bug in the other.
+                if not _best_needle(name, con, (texts or {}).get(name, "")):
                     out.append(name)
             return out
         finally:
@@ -2401,7 +2408,7 @@ no score -- it's a diary, not a dial.""".replace(
             # Asked as its own question, by its own function -- see below for why
             # this is not folded into the call above.
             unmatched = sorted(_properties_with_no_files(
-                [n for n in stamps if n not in (found or {})]))
+                [n for n in stamps if n not in (found or {})], texts))
             behind = sorted(found.items()) if found else []
 
             if behind:
@@ -2483,16 +2490,26 @@ no score -- it's a diary, not a dial.""".replace(
 
         try:
             from config import PENDING_UPDATE_DIR
-            ready_path = PENDING_UPDATE_DIR / "ready.json"
-            if ready_path.exists():
-                staged = _json.loads(ready_path.read_text())
+            # Ask _update_ready rather than reading the marker directly. It
+            # is the one place that knows when a stage does NOT deserve
+            # announcing: equal to the version already running, or superseded
+            # because this install got current some other way since the
+            # download. Reading the file raw here meant this tool offered a
+            # DOWNGRADE -- measured on the development copy, which was offered
+            # 79065b0 while running 258e968, three commits newer. That guard
+            # already existed in _update_ready and _install_problems; this was
+            # the third place asking the same question and the only one
+            # without it.
+            waiting = _update_ready()
+            if waiting:
+                staged = _json_object(Path(PENDING_UPDATE_DIR) / "ready.json") or {}
                 notes = f" — {staged['notes']}" if staged.get("notes") else ""
-                lines.append(f"  A new version ({staged.get('version')}) is downloaded and "
+                lines.append(f"  A new version ({waiting}) is downloaded and "
                               f"ready{notes}. Ask the user if they'd like it installed now; if "
                               f"so, call apply_pending_update (this is never done "
                               f"automatically without asking first).")
                 issues.append(
-                    f"A new version ({staged.get('version')}) is ready — ask the user if "
+                    f"A new version ({waiting}) is ready — ask the user if "
                     f"they'd like it applied now, and if so, call apply_pending_update."
                 )
         except Exception:

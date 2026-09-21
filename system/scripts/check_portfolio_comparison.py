@@ -295,6 +295,33 @@ def main() -> int:
               "Zzz No Such Property Zzz" in
               _m._properties_with_no_files(["Zzz No Such Property Zzz"]))
 
+        # ...AND IT MUST NOT FLAG A PROPERTY THAT IS ACTUALLY THERE. Real bug,
+        # found 2026-09-21: this helper searched the RAW Project Master name
+        # while _newest_docs_for_many resolved the true folder name through
+        # _best_needle. So a property whose name carries a parenthetical alias
+        # was being currency-checked successfully and reported as unlocatable
+        # in the same breath -- one had 90 files on the drive under a shortened
+        # folder name. Names are derived at run time and never written down
+        # here; this repo is public.
+        _aliased = None
+        try:
+            _act2, _ = __import__("portfolio").load_properties()
+            for _p in _act2:
+                if "(" in _p["name"] and not _m._properties_with_no_files([_p["name"]]):
+                    _aliased = _p["name"]
+                    break
+        except Exception:
+            pass
+        check("...and does NOT flag a property whose folder name is shortened",
+              _aliased is not None,
+              _aliased or "no aliased-name property resolved -- the raw name "
+                          "is probably being searched again")
+
+        # Asked through the same resolver, by construction rather than by luck.
+        check("the no-files helper resolves names like the staleness check does",
+              "_best_needle" in
+              __import__("inspect").getsource(_m._properties_with_no_files))
+
         # THE one that matters most: with no index to read, the answer is
         # "cannot tell" (None) and must never collapse into "nothing new" (0).
         _real_idx = _c.CORPUS_INDEX_FILE
@@ -1011,6 +1038,17 @@ def main() -> int:
             }))
             check("...while a stage from the version still running IS offered",
                   _ms._update_ready() == "aaaaaa1")
+
+            # AND THE HEALTH CHECK MUST ASK THAT SAME GUARD. It used to read
+            # ready.json raw and announce whatever it found, so every guard
+            # above was bypassed by the one tool that runs at the start of
+            # every conversation -- the development copy was offered a version
+            # three commits OLDER than the one it was running. Three functions
+            # answered "is an update waiting"; only two of them checked.
+            _srv_src = Path(_ms.__file__).read_text(encoding="utf-8")
+            check("the health check asks that guard, not the marker directly",
+                  "waiting = _update_ready()" in _srv_src
+                  and "_json.loads(ready_path.read_text())" not in _srv_src)
         finally:
             if _wasrdy is None:
                 if _rdy.exists():
