@@ -50,7 +50,7 @@ python system/main.py stats                     # what this instance has availab
 # Checks -- run the one that matches what you touched (see "Three regression suites" below)
 python system/scripts/check_screener.py             # 111 checks on the screener's arithmetic
 python system/scripts/check_portfolio_comparison.py # 106 checks on the comparison index
-python system/scripts/check_answers.py              # 7 checks on the knowledge answers come from
+python system/scripts/check_answers.py              # 16 checks on the knowledge answers come from
 ```
 
 There is no lint/test framework configured (no pytest, no linter config) — the three
@@ -245,6 +245,37 @@ Both limits **say so in the returned text** ("Scanning stopped at page 4 of 42�
 were NOT read"), and a drawing whose page yields no lettering says *that* too rather than coming
 back silently empty. A truncated read that admits it is useful; one that stays quiet is the
 confident partial answer this project distrusts everywhere else.
+
+**Reviewer comments live in a layer `extract_text()` never touched, and for months were
+unreadable (fixed 2026-09-21).** A PDF keeps sticky notes in a separate annotation layer. Found by
+bringing nine property summaries up to date in one afternoon: **three of the findings existed ONLY
+as comments** — including the sole piece of evidence anywhere that one deal had fallen through,
+which happened to be that property's biggest open question, and an LOI outcome that the documents
+otherwise never recorded. **954 PDFs in this library carry "comments" in their own filename**, so
+the gap was wide as well as deep; the agents only found these by going looking by hand. Now
+`_pdf_comments()` returns them with author and date, at no measurable cost (0.33s against 0.39s
+for the uncommented twin of the same report).
+
+Three things about the shape are load-bearing:
+
+* **A comment is NOT page text and is never mixed into it.** A sticky note is one person's
+  informal remark — often a question or a proposed edit — and quoting it as though the document
+  said it is exactly the confident-wrong answer this project removes everywhere else. Measured
+  example: beside a "$530 per square foot" line a reviewer had written only `$5.30?`. That is a
+  doubt, not a correction, and must read as neither the document's own figure nor a fact. The
+  returned header says so explicitly.
+* **Every comment carries its date, because the date is what makes it usable.** On one property
+  the comments turned out to **predate** the summary being checked, so the correct answer was
+  "nothing new here" — reachable only because the dates were visible.
+* **They go FIRST, not last.** `read_document` truncates at `max_chars` from the END, so comments
+  appended after a long document's text would be cut off on precisely the documents where a reader
+  most needs to know they exist.
+
+`/Popup` and `/Link` are excluded, and requiring real contents excludes them anyway: one real
+report carried five sticky notes and five popups, and counting the popups would have doubled it.
+That same report also proved the filter right in the other direction — its fifth sticky note is
+**empty**, so four comments is the correct count where a hand read reported five. Capped at
+`_MAX_COMMENTS` (40) per document, and it says so when it caps.
 
 **Search matches names, not contents — and this is load-bearing, not a shortcut.** The
 library is hundreds of thousands of files synced as OneDrive Files On-Demand *placeholders*: filenames
@@ -975,7 +1006,7 @@ ranks or weights selection factors. They need a senior partner's judgment, not a
 any change to `fit_screen.py`. Note it covers the screener only — **`geo_providers.py` has no
 automated coverage at all**, and that is where the worst measured bug of 2026-07-29 lived (see
 the proximity note below). It is one of three suites: `check_portfolio_comparison.py` (106 checks)
-covers the comparison index, and `check_answers.py` (7) covers the shared knowledge answers are
+covers the comparison index, and `check_answers.py` (16) covers the shared knowledge answers are
 built from — see "Three regression suites" below for what each one can and cannot catch.
 
 #### What was removed with it
@@ -1547,7 +1578,7 @@ one particular name, OCR installed and Python already working. Every teammate bu
 `check_screener.py` (**111 checks**) and `check_portfolio_comparison.py` (**106**) both test
 deterministic Python, and both pass while the answer a person actually receives is still wrong —
 because the wrongness lives in the knowledge the answer was built from, not in the arithmetic.
-`system/scripts/check_answers.py` (**7 checks**) is the third suite, and that knowledge is what it
+`system/scripts/check_answers.py` (**16 checks**) is the third suite, and that knowledge is what it
 tests.
 
 **Why it exists.** On 2026-08-11 Claude stated as fact that no documents newer than 2026-08-03
@@ -1577,6 +1608,29 @@ documents is real corpus detail and this repo is public:
   any cited name, so nothing was truncated; some cited names have no near match at all, and others
   differ from the real filename by enough that a reader could not find the file. Deliberately
   abbreviated citations (a wildcard or an ellipsis) are **excluded**, not counted as failures.
+
+  **A RENAMED file is not a missing one, and conflating them made this check cry wolf
+  (fixed 2026-09-21).** The suite had gone red reporting 30 unfindable citations against a
+  baseline of 12. Tracing every one: of 12 distinct names, **eight were documents still sitting on
+  the drive that had simply been renamed** — the firm appends `_TS Done` to each quarterly report
+  as its review finishes — and a ninth differed from the real filename **by a single missing
+  hyphen**. The citations were accurate when written. Reporting them as fabricated sources is this
+  suite's own failure mode turned on itself: a confident wrong cause, which also **buried the real
+  four**. Those stale citations are not folded into the passing count either, because a reader
+  cannot find the file under the name given — they get their own category, named with the reason
+  (`renamed` / `punctuation`) and the real filename to correct it to. After the fix: **7/7, with
+  the baseline left at 12, untouched.** Green because the cause was found, not because a threshold
+  moved.
+
+  **The ambiguity guard is the part to not "simplify".** Punctuation-insensitive matching compares
+  letters and digits only, and accepts a recovery **only when exactly one real file matches**. This
+  library holds **six signature pages of one resolution differing only by the signer's surname**, so
+  a looser match could cheerfully cite the wrong person's signature — worse than the missing-file
+  report it replaces. Measured across all 265,111 distinct squashed names: **750 (0.3%) are
+  ambiguous and are refused**, and each of those six signature pages resolves to itself alone.
+  The suffix-rename path is narrow for the same reason: same extension, the cited name must be a
+  prefix, the remainder must begin with a separator, and a stem under 12 characters is never
+  recovered at all.
 * **Every summary can be currency-checked** — all carry a `Source files as of` line, but a
   handful state it as prose no code can read, which is the same "cannot be checked" state
   `check_system_health` already reports out loud rather than skips.

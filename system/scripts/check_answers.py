@@ -129,6 +129,77 @@ _CITED_BASELINE = 52
 # name.
 _UNRESOLVED_BASELINE = 12
 
+# A citation can fail for two completely different reasons, and until
+# 2026-09-21 this check could not tell them apart -- so it reported both as
+# "unfindable", which reads as "somebody cited a document that does not exist".
+#
+# Measured that day: of 12 distinct unresolvable names, EIGHT were documents
+# that are still on the drive and had simply been RENAMED -- the firm added a
+# "_TS Done" suffix (and sometimes a reviewer marker like "(AHG COMMENTS)") to
+# each quarterly report as its review finished. The citation was accurate when
+# written. Only four were genuinely absent.
+#
+# Reporting those eight as fabricated citations is the same failure this whole
+# suite exists to catch, pointed at itself: a confident wrong cause. It also
+# hides the real four. They are NOT folded into the passing count either -- a
+# stale citation is a genuine defect, because a person reading that summary
+# cannot find the file under the name given. They get their own category.
+#
+# The match is deliberately narrow: same extension, the cited name must be a
+# PREFIX of the real one, the remainder must begin with a separator, and the
+# cited name must be long enough that a prefix match means something. Without
+# that last rule a short citation would "recover" to any longer file starting
+# the same way, which is how a checker starts inventing reassurance.
+_RENAME_MIN_STEM = 12
+_RENAME_SEPARATORS = (" ", "(", "_", "-", "[", ".")
+
+
+def _squash(name: str) -> str:
+    """A filename reduced to its letters and digits, so separators stop mattering."""
+    return "".join(c for c in name.lower() if c.isalnum())
+
+
+def _squash_index(names) -> dict:
+    """
+    Every real filename keyed by its letters and digits alone.
+
+    Values are LISTS, and that is the safety mechanism rather than an
+    implementation detail: a key with two or more real files behind it is
+    ambiguous, and an ambiguous recovery is refused. This library holds five
+    signature pages of one resolution differing only by the signer's surname,
+    so a looser match could cheerfully cite the wrong person's signature --
+    a confident wrong answer, which is worse than the missing-file report it
+    would replace.
+    """
+    out = {}
+    for real in names:
+        out.setdefault(_squash(real), []).append(real)
+    return out
+
+
+def _renamed_to(leaf: str, names) -> str:
+    """
+    The real filename a stale citation almost certainly meant -- the cited name
+    plus a suffix -- or "" if there is no such file. Shortest match wins, since
+    that is the least-assuming one.
+    """
+    if "." not in leaf:
+        return ""
+    stem, _, ext = leaf.rpartition(".")
+    if len(stem) < _RENAME_MIN_STEM or not ext:
+        return ""
+    suffix = "." + ext
+    best = ""
+    for cand in names:
+        if not cand.startswith(stem) or not cand.endswith(suffix):
+            continue
+        rest = cand[len(stem):-len(suffix)]
+        if not rest or not rest.startswith(_RENAME_SEPARATORS):
+            continue
+        if not best or len(cand) < len(best):
+            best = cand
+    return best
+
 # Summaries whose "Source files as of" is written as prose rather than a date.
 # Was 10 when this check was written; 5 after the active-stage ones were fixed on
 # 2026-08-21; now ZERO -- all 49 carry a machine-readable date, so every summary
@@ -272,6 +343,33 @@ def main() -> int:
                 total += 1
                 if leaf not in names:
                     missing.append((f.stem, leaf))
+
+        # Separate "the file is still there under another name" from "the file
+        # is not there". Same discipline as _newer_readable_docs' "couldn't
+        # check" versus "nothing new": two causes that need two different
+        # answers.
+        #
+        # Two ways a citation goes stale while its document stays put, both
+        # measured 2026-09-21:
+        #   renamed     -- a suffix was added later ("_TS Done"); 17 mentions.
+        #   punctuation -- the citation dropped a separator, so it differs from
+        #                  the real name by a hyphen; 1 mention, and it had been
+        #                  reported as a fabricated source for weeks.
+        squashed = _squash_index(names) if missing else {}
+        recoverable, genuinely_missing = [], []
+        for who, leaf in missing:
+            real = _renamed_to(leaf, names)
+            why = "renamed"
+            if not real:
+                # Exactly one candidate, or none: never guess between two.
+                same = squashed.get(_squash(leaf), [])
+                if len(same) == 1:
+                    real, why = same[0], "punctuation"
+            if real:
+                recoverable.append((who, leaf, real, why))
+            else:
+                genuinely_missing.append((who, leaf))
+        missing = genuinely_missing
         # Baseline rather than zero, for the same reason the coverage number is
         # a baseline: a suite that is permanently red gets ignored, and this
         # project's checks are trusted precisely because they stay quiet unless
@@ -286,6 +384,18 @@ def main() -> int:
               len(missing) <= _UNRESOLVED_BASELINE,
               f"{total - len(missing)} of {total} exact citations resolve; "
               f"{len(missing)} do not (baseline {_UNRESOLVED_BASELINE})")
+        if recoverable:
+            distinct = {}
+            for who, leaf, real, why in recoverable:
+                distinct.setdefault((leaf, real, why), set()).add(who)
+            note(f"{len(recoverable)} citation(s) across {len(distinct)} name(s) point "
+                 f"at a file that IS still on the drive under a different name -- the "
+                 f"document exists, the citation is stale. Not counted as unfindable; "
+                 f"fix by correcting the name in the summary, never by deleting the "
+                 f"citation")
+            for (leaf, real, why), whos in sorted(distinct.items()):
+                note(f"  {why}: '{leaf}'")
+                note(f"      is really '{real}' (cited by {', '.join(sorted(whos))})")
         note(f"{abbreviated} citations are deliberately shortened (a wildcard or "
              f"'...'), so they are not expected to resolve")
         note(f"{own} cite a file this system produces itself, not a library "
@@ -435,6 +545,66 @@ def main() -> int:
           grounded > 0 and abstain > 0,
           f"{grounded} answerable, {abstain} that must be refused")
     note(f"written to {out} (gitignored -- it holds real firm facts)")
+
+    # ---------------------------------------------------------------- 6 -----
+    # The two rules added 2026-09-21, tested on made-up inputs rather than on
+    # a real library file. Depending on a particular document would make these
+    # checks break the moment somebody renames it -- which is precisely the
+    # bug being fixed here, and it would be a poor joke to reintroduce it in
+    # the checks for the fix.
+    print("\n6. Reading reviewer comments, and recovering a stale citation")
+
+    from corpus.extract import _pdf_date, _NOT_COMMENT_SUBTYPES, _MAX_COMMENTS
+
+    check("a PDF date becomes a plain date",
+          _pdf_date(b"D:20260908171335-07'00'") == "2026-09-08",
+          _pdf_date(b"D:20260908171335-07'00'"))
+    # An unreadable date must come back empty, never as a wrong date -- the
+    # same rule the staleness checks follow. A comment's date is the whole
+    # basis for judging whether it is news, so a guessed one is worse than none.
+    check("...and an unreadable one yields nothing, not a guess",
+          all(_pdf_date(x) == "" for x in (None, b"", "rubbish", b"D:xx", 7)))
+
+    # A /Popup is the on-screen bubble belonging to another annotation and a
+    # /Link is not a comment at all. One real report carried five sticky notes
+    # and five popups; counting the popups would have doubled it.
+    check("pop-up bubbles and links are not treated as comments",
+          {"popup", "link"} <= _NOT_COMMENT_SUBTYPES)
+    check("there is a cap on how many comments one read returns",
+          isinstance(_MAX_COMMENTS, int) and 0 < _MAX_COMMENTS <= 200,
+          f"{_MAX_COMMENTS} per document")
+
+    # Invented names, deliberately. The rule under test is about SHAPE, and
+    # this repo is public -- real filenames are firm detail that does not
+    # belong in tracked code.
+    real_names = {
+        "north field 12 q3 2031 (ok)_ts done.pdf",
+        "sample site - utility resolution - alpha sig pg - 2031-01-02.pdf",
+        "sample site - utility resolution - bravo sig pg - 2031-01-03.pdf",
+        "twin.pdf",
+        "twin .pdf",
+    }
+    check("a citation missing a later suffix is recognised, not called missing",
+          _renamed_to("north field 12 q3 2031.pdf", real_names)
+          == "north field 12 q3 2031 (ok)_ts done.pdf")
+    # Narrow on purpose: a short citation must not "recover" to any longer
+    # file that happens to start the same way.
+    check("...but a too-short name is never recovered that way",
+          _renamed_to("a.pdf", real_names) == "")
+    check("...and never across file types",
+          _renamed_to("north field 12 q3 2031.docx", real_names) == "")
+
+    idx = _squash_index(real_names)
+    check("a citation differing only by punctuation is recognised",
+          len(idx.get(_squash(
+              "sample site - utility resolution alpha sig pg - 2031-01-02.pdf"), [])) == 1)
+    # THE SAFETY MECHANISM. This library holds five signature pages of one
+    # resolution differing only by the signer's surname, so a looser match
+    # could cite the wrong person's signature -- a confident wrong answer,
+    # worse than the missing-file report it replaces. Two candidates means
+    # refuse, never pick one.
+    check("...but an ambiguous one is refused rather than guessed",
+          len(idx.get(_squash("twin.pdf"), [])) == 2)
 
     passed = sum(1 for _, ok, _ in RESULTS if ok)
     print(f"\n{passed}/{len(RESULTS)} checks passed")

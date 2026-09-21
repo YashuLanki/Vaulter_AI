@@ -90,6 +90,7 @@ def read_document(rel_path: str, max_chars: int = 200_000) -> tuple[str, dict]:
         "page_count": 0,
         "has_tables": False,
         "ocr_used": False,
+        "comment_count": 0,
         "truncated": False,
     }
 
@@ -183,6 +184,106 @@ def _poppler_readable(path: Path):
                 pass
 
 
+# --- PDF reviewer comments ---------------------------------------------------
+#
+# WHY THIS EXISTS, measured 2026-09-21. A PDF keeps reviewer comments in a
+# separate ANNOTATION layer that page.extract_text() does not touch, so for as
+# long as this module has existed those comments were unreadable. Not a
+# cosmetic gap: bringing nine property summaries up to date in one afternoon,
+# THREE of the findings existed ONLY as sticky notes -- including the sole
+# piece of evidence anywhere that one deal had fallen through, which happened
+# to be that property's biggest open question. 954 PDFs in this library carry
+# "comments" in their own filename, so the gap is wide as well as deep.
+#
+# Three things about the shape of this are deliberate:
+#
+# * A COMMENT IS NOT PAGE TEXT, and is never mixed into it. A sticky note is
+#   one person's informal remark, often a question or a proposed edit, and
+#   quoting it as though the document said it is exactly the confident-wrong
+#   answer this project removes everywhere else. Real example from the run
+#   that prompted this: beside a "$530 per square foot" line a reviewer had
+#   written only "$5.30?". That is a doubt, not a correction, and must read as
+#   neither the document's own figure nor a fact.
+# * EVERY COMMENT CARRIES ITS DATE, because the date is what makes it usable.
+#   On one property the comments turned out to PREDATE the summary being
+#   checked, so the right answer was "nothing new here" -- reachable only
+#   because the dates were visible.
+# * THEY GO FIRST, not last. read_document truncates at max_chars from the END,
+#   so comments appended after a long document's text would be cut off on
+#   precisely the documents where a reader most needs to know they exist.
+
+_MAX_COMMENTS = 40
+
+# A /Link is not a comment, and a /Popup is only the on-screen bubble belonging
+# to another annotation -- both would be noise. Requiring real contents rules
+# them out too, without maintaining a subtype allowlist a new PDF writer could
+# defeat.
+_NOT_COMMENT_SUBTYPES = {"link", "popup"}
+
+
+def _pdf_date(raw) -> str:
+    """
+    A PDF date (D:20260908171335-07'00') as plain YYYY-MM-DD, or "" when it
+    cannot be read. Returns "" rather than guessing: an unreadable date must
+    never become a wrong one, the same rule the staleness checks follow.
+    """
+    try:
+        text = raw.decode("latin-1", "replace") if isinstance(raw, bytes) else str(raw)
+        text = text.strip()
+        if text.startswith("D:"):
+            text = text[2:]
+        if len(text) < 8 or not text[:8].isdigit():
+            return ""
+        return text[0:4] + "-" + text[4:6] + "-" + text[6:8]
+    except Exception:
+        return ""
+
+
+def _pdf_comments(pdf) -> tuple[list, int]:
+    """
+    Reviewer comments out of the PDF's annotation layer, as (lines, count).
+
+    Never raises. A document whose annotations cannot be parsed must still be
+    readable -- a partial answer that says so beats a crash, which under MCP is
+    indistinguishable from a hang.
+    """
+    lines, count, capped = [], 0, False
+    for page in pdf.pages:
+        try:
+            annots = page.annots or []
+        except Exception:
+            continue
+        for annot in annots:
+            try:
+                body = " ".join((annot.get("contents") or "").split())
+                if not body:
+                    continue
+                data = annot.get("data") or {}
+                raw_sub = data.get("Subtype", "")
+                if isinstance(raw_sub, bytes):
+                    raw_sub = raw_sub.decode("latin-1", "replace")
+                sub = "".join(c for c in str(raw_sub) if c.isalpha()).lower()
+                if sub in _NOT_COMMENT_SUBTYPES:
+                    continue
+                if count >= _MAX_COMMENTS:
+                    capped = True
+                    continue
+                when = _pdf_date(data.get("CreationDate")) or _pdf_date(data.get("M"))
+                who = (annot.get("title") or "").strip()
+                stamp = " on ".join(x for x in (who, when) if x)
+                if not stamp:
+                    stamp = "author and date not recorded"
+                lines.append("  - [page %s] (%s) %s"
+                             % (annot.get("page_number"), stamp, body))
+                count += 1
+            except Exception:
+                continue
+    if capped:
+        lines.append("  - [Only the first %d comments are listed; this document has"
+                     " more. Everything above is real.]" % _MAX_COMMENTS)
+    return lines, count
+
+
 def _extract_pdf(path: Path, metadata: dict) -> tuple[str, dict]:
     """
     Extract each page with pdfplumber. Any individual page that yields no
@@ -258,7 +359,28 @@ def _extract_pdf(path: Path, metadata: dict) -> tuple[str, dict]:
                     if table_text:
                         full_text.append(table_text)
 
-    return "\n\n".join(full_text), metadata
+        # Read this while the document is still open, and never let it break
+        # the read -- the page text is the thing that must always come back.
+        try:
+            comment_lines, comment_count = _pdf_comments(pdf)
+        except Exception as exc:
+            log.warning("  Could not read this PDF's comments: %s" % exc)
+            comment_lines, comment_count = [], 0
+
+    metadata["comment_count"] = comment_count
+    body = "\n\n".join(full_text)
+    if not comment_lines:
+        return body, metadata
+
+    header = (
+        "[%d REVIEWER COMMENT(S) are attached to this PDF. These are notes people"
+        " added to the file -- they are NOT text the document itself says. Treat"
+        " each as that person's remark on the date shown: a question or a proposed"
+        " change, not an established fact, and never a correction to the document"
+        " unless a signed or recorded document agrees. The document's own pages"
+        " follow below.]" % comment_count
+    )
+    return header + "\n" + "\n".join(comment_lines) + "\n\n" + body, metadata
 
 
 def _table_to_text(table: list, page_num: int) -> str:
