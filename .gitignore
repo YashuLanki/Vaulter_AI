@@ -195,3 +195,11 @@ $RECYCLE.BIN/
 *_scratch.txt
 *_extract.txt
 /tmp_*.txt
+
+# Duplicate-finder output. Real firm file paths and document names -- the same
+# reason corpus_index.db above is ignored. The scripts that build these are
+# tracked; what they find never is.
+system/data/content_duplicates.json
+system/data/verified_duplicates.json
+system/data/_*.txt
+system/data/_*.log
