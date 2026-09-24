@@ -50,7 +50,7 @@ python system/main.py stats                     # what this instance has availab
 # Checks -- run the one that matches what you touched (see "Three regression suites" below)
 python system/scripts/check_screener.py             # 111 checks on the screener's arithmetic
 python system/scripts/check_portfolio_comparison.py # 106 checks on the comparison index
-python system/scripts/check_answers.py              # 16 checks on the knowledge answers come from
+python system/scripts/check_answers.py              # 20 checks on the knowledge answers come from
 ```
 
 There is no lint/test framework configured (no pytest, no linter config) — the three
@@ -307,6 +307,46 @@ question, from any user, reads a few hundred tokens instead of tens of thousands
 lazy: properties nobody asks about never get a file here, so this never becomes a second copy of
 the whole corpus. Each summary stamps the newest source file's mtime it was built from, so a
 later check can tell whether new documents have shown up since and the summary might be stale.
+
+**Every summary opens with a data card, and the Sources list closes it (2026-09-24).** Asked for
+by the team: a fenced ```json block directly under the title, stating in a fixed layout the facts a
+program needs -- state, county, land type, acres, entry year and price, plan type and where that
+classification came from, outcome, the exit figures where sold, a one-line takeaway, and the
+summary's own three dates (`summary_written`, `source_files_as_of`, `last_updated`). `system/summaries.py`
+is the only reader and writer of it; `scripts/add_summary_cards.py` converted the 49 existing files
+(backed up first under `system/data/backups/`) and adds a card to any summary written without one.
+
+What it changed, and the reason it was worth a day: **the comparison now reads the cards.**
+`portfolio_comparison.load_index()` used to read `portfolio_comparison_index.json`, a separate list
+an agent rebuilt by hand whenever a summary changed -- and it went five days stale once, unnoticed.
+The facts now live inside the summary they describe, so a summary written or updated is compared
+correctly the moment it is saved; the JSON file survives only as the fallback for a machine that
+cannot read the folder. Verified before the switch: every match list identical from cards and from
+the file across sample deals in five markets. `_summary_stamp` reads the card's date first, the
+folder-finder takes the card's `aliases`, and `update_property_summary` now inserts above the
+Sources section and refreshes the card's dates. Vocabulary is checked once, in `card_problems()`:
+a `plan_type` outside the fixed list makes the card unusable and says so, because the silent
+alternative is that deal dropping out of every "similar to our history" answer.
+
+Three things were found by testing on a copy, not by reasoning, and each shaped the result:
+
+* **The date line stays under the card; only the Sources list moved.** Installs on the pre-card
+  code read the date by its FIRST mention in the file, and one summary quotes an older date inside
+  an update section -- so moving the real line to the end would have told every old install that
+  summary was behind. Asserted with the old code loaded from git: stamp and folder names unchanged
+  on all 49.
+* **The citation-coverage baseline moved 52 -> 51 and nothing got worse**: the Sources list had
+  been counted as cited *findings* (322 filename lines) because it sat above the Gaps heading the
+  count stops at. The originals re-measured without it also give 51. Recorded in the check.
+* **The first dry run silently lost the Sources line from 27 files** -- the date line and the
+  Sources line are adjacent in those, and lifting "the block after the date line" took both. The
+  line-by-line census (zero lines lost, every extra line accounted for) is what caught it, and it
+  runs on every conversion.
+
+Passed-on deals and sold deals are records, not per-property files, so they carry no card. Giving
+each passed-on deal one -- so a new listing can be compared against what the firm *rejected*, not
+only what it bought -- is the natural next step, and a reading-and-judgment job rather than a
+formatting one.
 
 ### The portfolio (`system/portfolio.py`)
 Reads the Smartsheet Project Master export. CSV and .xlsx only — the PDF/OCR parsing path
@@ -1006,7 +1046,7 @@ ranks or weights selection factors. They need a senior partner's judgment, not a
 any change to `fit_screen.py`. Note it covers the screener only — **`geo_providers.py` has no
 automated coverage at all**, and that is where the worst measured bug of 2026-07-29 lived (see
 the proximity note below). It is one of three suites: `check_portfolio_comparison.py` (106 checks)
-covers the comparison index, and `check_answers.py` (16) covers the shared knowledge answers are
+covers the comparison index, and `check_answers.py` (20) covers the shared knowledge answers are
 built from — see "Three regression suites" below for what each one can and cannot catch.
 
 #### What was removed with it
@@ -1578,7 +1618,7 @@ one particular name, OCR installed and Python already working. Every teammate bu
 `check_screener.py` (**111 checks**) and `check_portfolio_comparison.py` (**106**) both test
 deterministic Python, and both pass while the answer a person actually receives is still wrong —
 because the wrongness lives in the knowledge the answer was built from, not in the arithmetic.
-`system/scripts/check_answers.py` (**16 checks**) is the third suite, and that knowledge is what it
+`system/scripts/check_answers.py` (**20 checks**) is the third suite, and that knowledge is what it
 tests.
 
 **Why it exists.** On 2026-08-11 Claude stated as fact that no documents newer than 2026-08-03

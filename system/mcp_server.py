@@ -1301,12 +1301,27 @@ def _acres_str(v) -> str:
 ACTIVE_DEAL_STAGES = ("Acquisition", "Disposition")
 
 
+def _summary_card(summary_text: str) -> dict:
+    """The summary's data card (see summaries.py), or {} -- never an error."""
+    try:
+        from summaries import parse_card
+        return parse_card(summary_text) or {}
+    except Exception:
+        return {}
+
+
 def _summary_stamp(summary_text: str):
-    """The 'Source files as of:' date a summary stamps itself with, or None."""
+    """The date a summary's sources were last checked, or None.
+
+    The data card's `source_files_as_of` is the authority (2026-09-24); the
+    prose 'Source files as of:' line is the fallback for a summary written
+    before cards existed, or by hand without one."""
     import re
     import datetime as _dt
 
-    m = re.search(r"Source files as of:\*{0,2}\s*(\d{4})-(\d{2})-(\d{2})", summary_text)
+    card_date = _summary_card(summary_text).get("source_files_as_of")
+    m = (re.match(r"(\d{4})-(\d{2})-(\d{2})$", str(card_date or ""))
+         or re.search(r"Source files as of:\*{0,2}\s*(\d{4})-(\d{2})-(\d{2})", summary_text))
     if not m:
         return None
     try:
@@ -1382,6 +1397,11 @@ def _search_needles(property_name: str, summary_text: str = "") -> list:
                 piece = piece.strip(" #*-")
                 if len(piece) > 6:
                     add(piece)
+        # The data card's aliases are the same bridge, stated outright.
+        card = _summary_card(summary_text)
+        add(card.get("property"))
+        for a in card.get("aliases") or []:
+            add(a)
 
     return out
 
@@ -3003,9 +3023,11 @@ no score -- it's a diary, not a dial.""".replace(
           closed), say so explicitly rather than leaving the two to conflict.
         - Say what you did NOT read, if you skipped some of the newer files.
 
-        This APPENDS a dated section to the end of the file. It never edits
-        or deletes the original text, so a bad update can't destroy the
-        summary -- the worst case is an extra section a human can review.
+        This ADDS a dated section after the last finding (above the Sources
+        list at the end of the file) and refreshes the dates on the summary's
+        data card. It never edits or deletes the original text, so a bad
+        update can't destroy the summary -- the worst case is an extra
+        section a human can review.
 
         Args:
             property_name: Property name, as in the Project Master
@@ -3065,16 +3087,35 @@ no score -- it's a diary, not a dial.""".replace(
                            f"documents filed since the last read")
             section = ("\n\n" + heading + "\n\n" + update_text.strip() + "\n")
 
-            # Append first, bump the freshness stamp second -- the stamp is
+            # Insert first, bump the freshness stamp second -- the stamp is
             # what silences the out-of-date warning, so it must only ever
             # advance once the update is actually in the file.
-            new_text = text.rstrip("\n") + "\n" + section
+            #
+            # Since 2026-09-24 the Sources list is the LAST section, so the
+            # update goes in above it; a summary without that section (one
+            # written before the restructure) still gets it appended.
+            body, sep, sources = text.rstrip("\n").rpartition("\n## Sources")
+            if sep:
+                new_text = body + section + "\n" + sep + sources + "\n"
+            else:
+                new_text = text.rstrip("\n") + "\n" + section
             if stamp_new:
+                # The prose line, where it still exists -- the bold LINE, not
+                # the first mention: one summary quotes an older date in an
+                # update section's prose, and count=1 used to land on it.
                 new_text = re.sub(
-                    r"(Source files as of:\*{0,2}\s*)\d{4}-\d{2}-\d{2}",
+                    r"(^\*\*Source files as of:?\*\*\s*)\d{4}-\d{2}-\d{2}",
                     rf"\g<1>{stamp_new}",
-                    new_text, count=1,
+                    new_text, count=1, flags=re.M,
                 )
+            # ...and the data card, which is what the health check reads.
+            card = _summary_card(new_text)
+            if card:
+                from summaries import replace_card
+                if stamp_new:
+                    card["source_files_as_of"] = stamp_new
+                card["last_updated"] = today
+                new_text = replace_card(new_text, card)
             match.write_text(new_text, encoding="utf-8")
 
             log.info(f"[MCP] Summary updated: {match.name} "

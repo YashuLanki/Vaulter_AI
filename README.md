@@ -128,7 +128,7 @@ Three regression suites, checking three different kinds of thing:
 ```bash
 python system/scripts/check_screener.py              # 111 checks -- the screener's arithmetic
 python system/scripts/check_portfolio_comparison.py  # 106 checks -- deal matching and its index
-python system/scripts/check_answers.py               #  16 checks -- the knowledge answers are built from
+python system/scripts/check_answers.py               #  20 checks -- the knowledge answers are built from
 ```
 
 The first two test deterministic Python — same input, same output, every time.

@@ -139,19 +139,53 @@ any new document. Otherwise, use Write to create or update
 ```markdown
 # <Property name>
 
-**Source files as of:** <mtime of the newest file you read or checked>, <ISO date you wrote this>
-**Sources:** <every filename this summary is built from>
+```json
+{
+  "format_version": 1,
+  "property": "<Project Master name>",
+  "aliases": ["<other names the firm uses for it, e.g. the folder name>"],
+  "state": "<AZ>", "county": "<county>",
+  "land_type": "<residential | commercial | industrial | mixed-use | agricultural | unclear>",
+  "acres": <number or null>,
+  "entry_year": <year or null>, "entry_price_usd": <number or null>,
+  "plan_type": "<rezone | subdivide | entitle-only | annex | hold-only | acquire-finished-lots | assemble-resell | recapitalization | unclear>",
+  "plan_type_source": "<documents | summary | unrecorded>",
+  "outcome_status": "<sold | still-held | pending-sale | transferred-not-sold | pending-acquisition | unclear>",
+  "disposition_detail": null,
+  "exit_year": null, "exit_price_usd": null, "exit_form": null, "hold_years": null, "gross_price_multiple": null,
+  "notes": "<one or two sentences: what the deal was and what happened, with its citation>",
+  "summary_written": "<YYYY-MM-DD>",
+  "source_files_as_of": "<YYYY-MM-DD: the modified date of the newest file you read or checked>",
+  "last_updated": "<YYYY-MM-DD>"
+}
+```
 
 ## Findings
 - <finding> — <filename>, p.<page>
 - ...
 
+## Approach & Outcome
+<what the firm set out to do with the land, and what actually happened, cited>
+
 ## Gaps
 - <what you looked for and couldn't establish>
+
+## Sources
+- <every filename this summary is built from>
 ```
+
+**The data card comes first and the Sources list comes last (since 2026-09-24).** The card is
+read by a program: `compare_to_portfolio_history` and every `screen_listings` run find "deals
+like this one" from these cards, and the health check reads `source_files_as_of` to tell whether
+the summary has fallen behind the drive. So every label must be one of the values listed —
+a misspelling silently drops the property out of every comparison. `plan_type_source` is
+`documents` only if you classified the approach from a recorded instrument or a professional's
+report you actually read; `summary` if from prose; `unrecorded` if nothing says. Leave a fact
+`null` rather than guessing it. `system/scripts/add_summary_cards.py` can add a card to a summary
+written without one.
 
 If a file already exists, merge — keep every prior finding still supported by its cited source,
 add what you just found, and only remove something if the newer documents actually contradict it
-(say so explicitly rather than silently dropping it). This file is what makes the next person's
-question about this property nearly free instead of a repeat of your work — treat writing it as
-part of the job, not an optional extra.
+(say so explicitly rather than silently dropping it). Keep the card's dates current. This file is
+what makes the next person's question about this property nearly free instead of a repeat of
+your work — treat writing it as part of the job, not an optional extra.

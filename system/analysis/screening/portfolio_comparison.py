@@ -11,19 +11,25 @@ approached similar deals and what happened), never a price or a verdict.
 "how did we approach deals like this, and what happened" -- not
 "should we do this deal."
 
-## Where the comparison data comes from, and why it isn't fully automatic
+## Where the comparison data comes from (changed 2026-09-24)
 
-Every property now has a `## Approach & Outcome` section (see
-Vaulter AI Shared/property_summaries/*.md), but classifying a deal's
-land type, plan type, and outcome from that free-text prose is a judgment
-call, not something a regex can reliably do -- exactly why fit_screen.py's own
-docstring warns that name-based column matching alone misreads real exports.
-So INDEX_PATH is built by having an agent read each summary and
-tag it against the fixed category lists below (LAND_TYPES, PLAN_TYPES,
-OUTCOME_STATUSES) -- a one-time (or periodic, after new summaries are added)
-curation pass, not a push-button rebuild. What IS deterministic, tested, and
-argue-with-able is everything downstream of that index: the scoring in
-find_similar_deals() below.
+Each property summary (Vaulter AI Shared/property_summaries/*.md) opens with
+a data card -- a fenced json block stating the deal's state, county, land
+type, acres, entry year and price, plan type, outcome, and the summary's own
+dates (see `summaries.py`). `load_index()` reads those cards, so a summary
+that is written or updated is compared correctly the moment it is saved.
+
+Classifying a deal's land type, plan type and outcome is still a judgment
+call made by whoever writes the summary, against the fixed lists below
+(LAND_TYPES, PLAN_TYPES, OUTCOME_STATUSES) -- a regex cannot reliably do it
+from prose, which is exactly why fit_screen.py's own docstring warns that
+name-based column matching alone misreads real exports. What changed is
+WHERE that judgment is recorded: inside the summary it describes, rather
+than in a separate `portfolio_comparison_index.json` an agent had to rebuild
+by hand and which went five days stale once without anyone noticing. That
+file survives only as the fallback for a machine that cannot read the
+summaries folder. Everything downstream -- the scoring in
+find_similar_deals() -- is deterministic, tested and argue-with-able.
 
 ## Comparable to the WEIGHTS caveat in fit_screen.py
 
@@ -166,6 +172,36 @@ def _band_distance(band_a: str, band_b: str) -> int:
     return abs(_BAND_ORDER.index(band_a) - _BAND_ORDER.index(band_b))
 
 
+def _cards_from_summaries() -> list[dict]:
+    """The data cards, or [] when the folder is unreachable or carries none.
+    Never raises: a comparison with no data says so, same as a missing file."""
+    try:
+        from config import PROPERTY_SUMMARIES_DIR
+        from summaries import load_cards
+        cards = load_cards(Path(PROPERTY_SUMMARIES_DIR))
+    except Exception as e:  # an unreadable folder is "no cards", not a crash
+        logging.warning("Could not read the property summaries' data cards (%s); "
+                        "falling back to the comparison index file.", e)
+        return []
+    if cards:
+        try:
+            on_file = len(_records_from_file(index_path()))
+        except Exception:
+            on_file = 0
+        if on_file > len(cards):
+            logging.warning("Comparing against %d property data cards, but the fallback "
+                            "index file lists %d properties -- some summaries may be "
+                            "missing a card or not yet synced.", len(cards), on_file)
+    return cards
+
+
+def _records_from_file(p: Path) -> list[dict]:
+    if not p.exists():
+        return []
+    loaded = json.loads(p.read_text(encoding="utf-8"))
+    return [r for r in loaded if isinstance(r, dict)] if isinstance(loaded, list) else []
+
+
 def load_index(path: Path = None) -> list[dict]:
     """
     Loads the portfolio comparison index. Returns [] (not an error) if the
@@ -173,11 +209,19 @@ def load_index(path: Path = None) -> list[dict]:
     data available" and say so, the same way an unevidenced market in
     fit_screen.py still ranks normally rather than raising.
 
-    Resolves local-then-shared via index_path() unless a specific path is
-    given (callers that pass INDEX_PATH explicitly, e.g. a rebuild script,
-    still target the local file only).
+    With no path given, the summaries' own data cards are the source (see the
+    module docstring): every usable card in `config.PROPERTY_SUMMARIES_DIR`.
+    Only when that yields nothing -- no folder, or no summary carries a card
+    yet -- does it fall back to the JSON file, resolved local-then-shared via
+    index_path(). A specific path always means that file and nothing else
+    (callers that pass INDEX_PATH explicitly still target the local file).
 
-    It must come back as a LIST OF OBJECTS, and that is checked here rather
+    A card is the truth even when the fallback file lists more properties:
+    a summary written since the conversion has a card and no file record, and
+    it must be compared immediately. Fewer cards than file records is logged,
+    because it is also what a half-synced folder looks like.
+
+    The FILE must come back as a LIST OF OBJECTS, and that is checked here rather
     than trusted. This file is resolved local-then-shared, and the shared copy
     sits in a folder every teammate can write to -- so a truncated sync, a
     hand-edit, or a rebuild script writing the wrong thing produces valid JSON
@@ -189,6 +233,10 @@ def load_index(path: Path = None) -> list[dict]:
     Wrong shape is therefore treated exactly like a missing file -- no
     comparison data, said out loud in the log, never an exception.
     """
+    if path is None:
+        cards = _cards_from_summaries()
+        if cards:
+            return cards
     p = path or index_path()
     if not p.exists():
         return []

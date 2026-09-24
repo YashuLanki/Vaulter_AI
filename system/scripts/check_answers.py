@@ -87,6 +87,10 @@ _CITED_PAGE = re.compile(
     r"[—\-]{1,2}\s*([^\n,;`]+?\.(?:pdf|docx?|xlsx?|xls|txt))\s*,?\s*p+\.?\s*(\d+)", re.I)
 
 _STAMP = re.compile(r"Source files as of:?\*{0,2}\s*(\d{4}-\d{2}-\d{2})")
+# The stamp LINE itself, as distinct from any mention of the phrase: one
+# summary's update section quotes an older "Source files as of" date in prose,
+# and the first-mention pattern above reads that one (found 2026-09-24).
+_STAMP_LINE = re.compile(r"^\*\*Source files as of:?\*\*\s*(\d{4}-\d{2}-\d{2})", re.M)
 
 # What proportion of substantive bullets carried a source when this check was
 # first run (2026-08-14). MEASURED, not chosen --
@@ -94,7 +98,11 @@ _STAMP = re.compile(r"Source files as of:?\*{0,2}\s*(\d{4}-\d{2}-\d{2})")
 # the exact habit this project removes everywhere else. It exists to catch the
 # number FALLING, not to claim it is where it should be. Raise it only after a
 # deliberate pass that improves coverage, never to make a run go green.
-_CITED_BASELINE = 52
+# 52 -> 51 on 2026-09-24, and nothing got worse: the Sources list moved to the
+# end of every summary, below the Gaps heading this count stops at, so its
+# filename lines (322 of them) are no longer counted as cited FINDINGS. The
+# originals re-measured with that list excluded also give 51.
+_CITED_BASELINE = 51
 
 # Citations naming a document nobody can find. Lowered from 25 to 12 on
 # 2026-08-20 after a correction pass, which is the only direction this number
@@ -423,12 +431,16 @@ def main() -> int:
     # written as prose ("newest file checked ... is dated 7/16/2025"), which no
     # code can read. Reporting those as "no source date" would have sent
     # someone to add a stamp that is already there.
+    # Since 2026-09-24 the data card's `source_files_as_of` is the stamp; the
+    # prose line is accepted for a summary written without a card.
+    from summaries import parse_card
     no_line, unreadable = [], []
     for f, t in texts.items():
-        has_line = re.search(r"Source files as of", t, re.I)
+        card_date = (parse_card(t) or {}).get("source_files_as_of")
+        has_line = card_date or re.search(r"Source files as of", t, re.I)
         if not has_line:
             no_line.append(f.stem)
-        elif not _STAMP.search(t):
+        elif not card_date and not _STAMP.search(t):
             unreadable.append(f.stem)
     check("every summary says when its sources were read",
           not no_line,
@@ -494,6 +506,48 @@ def main() -> int:
               f"now {pct}% — this is a regression detector, not a standard anyone ratified")
     else:
         skip("citation coverage", "no bullets long enough to judge")
+
+    # ---- 4b. Every summary carries a usable data card ----------------------
+    # Added 2026-09-24 with the card itself. The comparison now reads these
+    # cards instead of a separate hand-kept list, so a card that is missing,
+    # malformed, or carries a label outside the fixed vocabulary silently drops
+    # that deal out of every "similar to our history" answer. `parse_card`
+    # already refuses such a card; this is where the refusal becomes visible.
+    print("\n4b. Every summary carries a usable data card")
+    from summaries import card_problems, _FENCE
+    no_card, bad_card, disagree, sources_not_last = [], [], [], []
+    for f, text in texts.items():
+        head = text.split("\n## ", 1)[0]
+        m = _FENCE.search(head)
+        if not m:
+            no_card.append(f.stem)
+            continue
+        try:
+            raw = json.loads(m.group(1))
+        except ValueError:
+            bad_card.append((f.stem, "not valid JSON"))
+            continue
+        problems = card_problems(raw)
+        if problems:
+            bad_card.append((f.stem, "; ".join(problems)))
+            continue
+        # Where the old prose line survives, it must agree with the card --
+        # two records of one date that drift is the bug this replaces.
+        prose = _STAMP_LINE.search(text)
+        if prose and prose.group(1) != raw.get("source_files_as_of"):
+            disagree.append(f.stem)
+        heads = re.findall(r"^## (.+)$", text, re.M)
+        if not heads or not heads[-1].strip().startswith("Sources"):
+            sources_not_last.append(f.stem)
+    check("every summary opens with a data card",
+          not no_card, f"missing in: {', '.join(no_card[:4])}" if no_card else f"all {len(files)}")
+    check("  ...that is readable and uses only the agreed labels",
+          not bad_card, "; ".join(f"{n}: {why}" for n, why in bad_card[:3]))
+    check("  ...whose source date agrees with the file's own stamp line",
+          not disagree, f"differ in: {', '.join(disagree[:4])}")
+    check("the Sources list is the last section of every summary",
+          not sources_not_last,
+          f"not last in: {', '.join(sources_not_last[:4])}" if sources_not_last else "")
 
     # ---- 5. Build the question set a model-in-the-loop run needs -----------
     # Derived, never stored in the repo: these lines contain real firm facts.
