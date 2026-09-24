@@ -241,33 +241,88 @@ def _renamed_groups():
     return data
 
 
-def _renamed_frame(pd, meta):
-    data = _renamed_groups()
-    if not data or not data["groups"]:
-        return None
-    rows = []
-    for n, rec in enumerate(data["groups"], 1):
-        paths = rec.get("paths", [])
-        keeper = _suggest_keeper(paths) if paths else None
+def _confirmed_groups(buckets):
+    """Every group of files PROVEN to be the same file, from both passes.
+
+    Two passes find duplicates: verify_duplicates.py compares the copies that
+    share a name and a size, and find_content_duplicates.py finds the same
+    contents filed under different names. They overlap -- a file with three
+    copies, two under one name and one under another, is found by both -- and
+    listing it twice would put the same path in two groups with two different
+    KEEP suggestions. So groups that share a path are merged here, and each
+    path appears exactly once.
+
+    Only groups the byte-for-byte check confirmed are included. A same-name
+    group that turned out to hold DIFFERENT files, or that was never compared,
+    is left out entirely -- the sheet this feeds is the one people delete from.
+    """
+    verdicts, _ = _verdicts()
+    content = _renamed_groups()
+
+    # Every source group, as (paths, size, verdict text).
+    sources = []
+    for rec in buckets["document"]:
+        v = verdicts.get("{}\t{}".format(rec["name"], rec["size"]), "not checked")
+        if v.startswith("identical"):
+            sources.append((rec["paths"], rec["size"], v))
+    if content:
+        for rec in content["groups"]:
+            paths = rec.get("paths", [])
+            if len(paths) > 1:
+                sources.append((paths, rec.get("size", 0),
+                                "identical - all {} copies compared".format(len(paths))))
+
+    # Merge any two groups that share a path (union-find, keyed by path).
+    parent = {}
+
+    def find(p):
+        while parent[p] != p:
+            parent[p] = parent[parent[p]]
+            p = parent[p]
+        return p
+
+    for paths, _size, _v in sources:
         for p in paths:
-            rows.append({
-                "Group": n,
-                "File name": p.rsplit("/", 1)[-1],
-                "Other names for this same file": ", ".join(rec.get("distinct_names", []))[:300],
-                "Copies": rec.get("copies"),
-                "Size of each": _human_bytes(rec.get("size", 0)),
-                "Space wasted by this group": _human_bytes(rec.get("wasted", 0)),
-                "Suggestion": "KEEP (suggestion)" if p == keeper else "duplicate",
-                "Where this copy is": p,
-                "Full path on this computer": os.path.join(meta["root"], p.replace("/", os.sep)),
-                "Proof": "contents compared byte for byte",
-                "Wasted in bytes": rec.get("wasted", 0),
-            })
-    return pd.DataFrame(rows)
+            parent.setdefault(p, p)
+        first = find(paths[0])
+        for p in paths[1:]:
+            parent[find(p)] = first
+
+    members = defaultdict(set)
+    sizes = {}
+    partial = defaultdict(bool)   # any source group with copies left uncompared
+    for paths, size, v in sources:
+        root = find(paths[0])
+        members[root].update(paths)
+        sizes[root] = size
+        if not v.startswith("identical - all"):
+            partial[root] = True
+
+    groups = []
+    for root, paths in members.items():
+        paths = sorted(paths)
+        names = sorted({p.rsplit("/", 1)[-1] for p in paths})
+        size = sizes[root]
+        if partial[root]:
+            proof = "identical so far - some copies are cloud-only and were not compared"
+        else:
+            proof = "identical - all {} copies compared byte for byte".format(len(paths))
+        groups.append({
+            "paths": paths,
+            "names": names,
+            "size": size,
+            "copies": len(paths),
+            "wasted": size * (len(paths) - 1),
+            "proof": proof,
+            "keeper": _suggest_keeper(paths),
+            "folders": sorted({_deal_folder(p) for p in paths}),
+        })
+    groups.sort(key=lambda g: (-g["wasted"], -g["copies"], g["names"][0]))
+    return groups
 
 
 def _verdict_summary():
-    """One line for the front sheet about the byte-for-byte pass."""
+    """One line for the README about the byte-for-byte pass."""
     verdicts, meta = _verdicts()
     if not verdicts:
         return ("NOT RUN. Matching is on name + exact size, which is a strong signal "
@@ -288,7 +343,7 @@ def _verdict_summary():
 
 
 def _renamed_summary():
-    """One line for the front sheet. Says plainly when the pass has not run --
+    """One line for the README. Says plainly when the pass has not run --
     a silent absence would read as 'there are none', which is the confident
     empty answer this whole report is careful to avoid."""
     data = _renamed_groups()
@@ -299,7 +354,7 @@ def _renamed_summary():
     if not groups:
         return "Checked, none found among the files readable without downloading."
     waste = sum(g.get("wasted", 0) for g in groups)
-    note = "{:,} groups, {} -- see the 'Same file different name' sheet".format(
+    note = "{:,} groups, {} -- in the workbook, marked 'different names, same contents'".format(
         len(groups), _human_bytes(waste))
     if data.get("stopped_early"):
         note += " (partial run -- hit its time limit)"
@@ -314,98 +369,52 @@ def _renamed_summary():
 def _write_workbook(out_dir, buckets, meta):
     import pandas as pd
 
+    """One sheet, holding every confirmed duplicate and nothing else.
+
+    Asked for directly (2026-09-24): the workbook is the list somebody works
+    through to remove duplicates, so it holds only files proven to be copies --
+    both the same file under the same name and the same file under different
+    names -- and no sheet of things that are NOT duplicates. The disproved and
+    unverified same-name groups, the program files and the front page are
+    dropped from the workbook; the README beside it carries the caveats.
+    """
     path = out_dir / "duplicate_files.xlsx"
-
-    verdicts, _vmeta = _verdicts()
-
-    def sheet_frame(items):
-        rows = []
-        for n, rec in enumerate(items, 1):
-            verdict = verdicts.get(
-                "{}	{}".format(rec["name"], rec["size"]),
-                "not checked - run verify_duplicates.py")
-            spread = "across different deals" if len(rec["folders"]) > 1 else "same deal folder"
-            for p in rec["paths"]:
-                rows.append({
-                    "Group": n,
-                    "File name": rec["name"],
-                    "Copies": rec["copies"],
-                    "Size of each": _human_bytes(rec["size"]),
-                    "Space wasted by this group": _human_bytes(rec["wasted"]),
-                    "Contents actually compared?": verdict,
-                    "Suggestion": "KEEP (suggestion)" if p == rec["keeper"] else "duplicate",
-                    "Folder it is in": p.rsplit("/", 1)[0] if "/" in p else "(top of the library)",
-                    "Full path on this computer": os.path.join(meta["root"], p.replace("/", os.sep)),
-                    "Copies sit": spread,
-                    "Size in bytes": rec["size"],
-                    "Wasted in bytes": rec["wasted"],
-                })
-        return pd.DataFrame(rows)
-
-    doc_waste = sum(r["wasted"] for r in buckets["document"])
-    front = pd.DataFrame([
-        ("What this is", "Files that appear more than once in the firm's document library."),
-        ("Built on", meta["generated"]),
-        ("Read from", "the local list of file names -- no document was opened or downloaded"),
-        ("File list last rebuilt", meta["age_text"]),
-        ("Files in the library", meta["file_count"]),
-        ("", ""),
-        ("Real documents duplicated", "{:,} groups".format(len(buckets["document"]))),
-        ("  extra copies of them", "{:,}".format(sum(r["copies"] - 1 for r in buckets["document"]))),
-        ("  space those copies take", _human_bytes(doc_waste)),
-        ("", ""),
-        ("Program files duplicated", "{:,} groups, {}".format(
-            len(buckets["program"]), _human_bytes(sum(r["wasted"] for r in buckets["program"])))),
-        ("Emails left out on purpose", "{:,} groups, {}".format(
-            len(buckets["excluded"]), _human_bytes(sum(r["wasted"] for r in buckets["excluded"])))),
-        ("", ""),
-        ("How two files were matched", "Same file name AND same exact size."),
-        ("Is that proof?", "No. It is a strong signal. Two different files can coincide. "
-                           "Check before deleting anything."),
-        ("Has anything been deleted?", "No. Nothing was deleted, moved or copied."),
-        ("The KEEP column", "A SUGGESTION -- the copy in the shallowest folder. Not an instruction."),
-        ("", ""),
-        ("Same file, different name", _renamed_summary()),
-        ("Contents actually compared?", _verdict_summary()),
-        ("", ""),
-        ("SHEET: Confirmed duplicates", "Contents compared and they MATCH. The only sheet safe to act on."),
-        ("SHEET: NOT duplicates", "Same name, same size, but DIFFERENT contents. Do NOT delete these."),
-        ("SHEET: Unverified", "Not compared -- copies are cloud-only. No opinion offered either way."),
-    ], columns=["", " "])
-
-    # Split by what the byte-for-byte check actually proved, so the sheet
-    # somebody works from contains only real duplicates. The disproved ones are
-    # MOVED, never dropped -- "same name, same size, different document" is the
-    # most useful thing in this whole report and deleting it would throw away
-    # the warning it exists to give.
-    def _verdict_of(rec):
-        return verdicts.get("{}	{}".format(rec["name"], rec["size"]), "not checked")
-
-    confirmed, disproved, unverified = [], [], []
-    for rec in buckets["document"]:
-        v = _verdict_of(rec)
-        (disproved if v.startswith("NOT IDENTICAL")
-         else confirmed if v.startswith("identical")
-         else unverified).append(rec)
+    rows = []
+    for n, g in enumerate(_confirmed_groups(buckets), 1):
+        renamed = len(g["names"]) > 1
+        spread = "across different deals" if len(g["folders"]) > 1 else "same deal folder"
+        for p in g["paths"]:
+            rows.append({
+                "Group": n,
+                "File name": p.rsplit("/", 1)[-1],
+                "Matched by": "different names, same contents" if renamed else "same name",
+                "Other names for this same file": ", ".join(g["names"])[:300] if renamed else "",
+                "Copies": g["copies"],
+                "Size of each": _human_bytes(g["size"]),
+                "Space wasted by this group": _human_bytes(g["wasted"]),
+                "Contents actually compared?": g["proof"],
+                "Suggestion": "KEEP (suggestion)" if p == g["keeper"] else "duplicate",
+                "Folder it is in": p.rsplit("/", 1)[0] if "/" in p else "(top of the library)",
+                "Full path on this computer": os.path.join(meta["root"], p.replace("/", os.sep)),
+                "Copies sit": spread,
+                "Size in bytes": g["size"],
+                "Wasted in bytes": g["wasted"],
+            })
+    columns = ["Group", "File name", "Matched by", "Other names for this same file", "Copies",
+               "Size of each", "Space wasted by this group", "Contents actually compared?",
+               "Suggestion", "Folder it is in", "Full path on this computer", "Copies sit",
+               "Size in bytes", "Wasted in bytes"]
+    frame = pd.DataFrame(rows, columns=columns)
 
     with pd.ExcelWriter(path, engine="openpyxl") as xl:
-        front.to_excel(xl, sheet_name="Read me first", index=False)
-        sheet_frame(confirmed).to_excel(xl, sheet_name="Confirmed duplicates", index=False)
-        sheet_frame(disproved).to_excel(xl, sheet_name="NOT duplicates-do not delete", index=False)
-        sheet_frame(unverified).to_excel(xl, sheet_name="Unverified-not checked", index=False)
-        sheet_frame(buckets["program"]).to_excel(xl, sheet_name="Program files", index=False)
-
-        renamed = _renamed_frame(pd, meta)
-        if renamed is not None:
-            renamed.to_excel(xl, sheet_name="Same file different name", index=False)
-
-        widths = {"A": 46, "B": 62, "C": 10, "D": 16, "E": 26, "F": 20,
-                  "G": 95, "H": 115, "I": 22}
+        frame.to_excel(xl, sheet_name="Confirmed duplicates", index=False)
+        widths = {"A": 8, "B": 62, "C": 30, "D": 60, "E": 8, "F": 12, "G": 16,
+                  "H": 50, "I": 18, "J": 95, "K": 115, "L": 22}
         for sheet in xl.book.worksheets:
             for col, w in widths.items():
                 sheet.column_dimensions[col].width = w
             sheet.freeze_panes = "A2"
-    return path
+    return path, len(rows), frame["Group"].nunique() if rows else 0
 
 
 # --- Web page ----------------------------------------------------------------
@@ -560,6 +569,9 @@ def _write_page(out_dir, buckets, meta):
 
 def _write_readme(out_dir, buckets, meta):
     docs, prog, excl = buckets["document"], buckets["program"], buckets["excluded"]
+    verdicts, _ = _verdicts()
+    heads = [verdicts.get("{}	{}".format(r["name"], r["size"]), "not checked").split(" -")[0]
+             for r in docs]
     text = """# Duplicate files
 
 Built {generated}.
@@ -572,8 +584,26 @@ and nothing else. Every file it describes is still exactly where it was.
 - **duplicate_files.html** -- open this first. A readable page: the headline
   numbers, where the duplication is concentrated, and the biggest groups with
   every location listed under them.
-- **duplicate_files.xlsx** -- the complete record. One row per copy, so you can
-  sort and filter it yourself. The first sheet explains the columns.
+- **duplicate_files.xlsx** -- the list to work from. ONE sheet, holding only
+  files proven to be copies of each other: {conf_groups:,} groups, {conf_rows:,}
+  rows, one row per copy. Both kinds are there, told apart by the "Matched by"
+  column -- the same file under the same name, and the same file filed under
+  different names. Filter "Suggestion" to "duplicate" for the copies that could go.
+
+## What is deliberately NOT in the workbook
+
+- **Same-name, same-size pairs whose contents turned out to be DIFFERENT** --
+  {disproved:,} groups. Their names match and their sizes match and they are
+  not the same file. They are left out so that nobody deletes one.
+- **Same-name pairs that could not be compared** -- {unverified:,} groups whose
+  copies are cloud-only, so nothing could read them without downloading. No
+  opinion is offered either way; they may or may not be duplicates.
+- **Program files** and **emails** (see below).
+
+## How it was checked
+
+- Contents compared: {verdict_summary}
+- Same file, different name: {renamed_summary}
 
 ## What counts as a duplicate
 
@@ -603,7 +633,7 @@ decides what to keep. This report does not.
   itself rather than anyone writing them: settings, autosaves, drawing backups.
   They cost almost none of the wasted space, and a big pile of copies usually
   means a whole folder got duplicated rather than a document worth chasing, so
-  they sit in their own section.
+  they sit in their own section of the web page, not in the workbook.
 
 ## How fresh this is
 
@@ -621,6 +651,9 @@ Takes seconds and overwrites this folder. Safe to run as often as you like.
         excl_n=len(excl), excl_waste=_human_bytes(sum(r["wasted"] for r in excl)),
         prog_n=len(prog), prog_waste=_human_bytes(sum(r["wasted"] for r in prog)),
         age=meta["age_text"],
+        conf_groups=meta.get("conf_groups", 0), conf_rows=meta.get("conf_rows", 0),
+        disproved=heads.count("NOT IDENTICAL"), unverified=heads.count("not checked"),
+        verdict_summary=_verdict_summary(), renamed_summary=_renamed_summary(),
     )
     out = out_dir / "README.md"
     out.write_text(text, encoding="utf-8")
@@ -658,7 +691,8 @@ def main():
     out_dir.mkdir(parents=True, exist_ok=True)
 
     page = _write_page(out_dir, buckets, meta)
-    book = _write_workbook(out_dir, buckets, meta)
+    book, conf_rows, conf_groups = _write_workbook(out_dir, buckets, meta)
+    meta["conf_rows"], meta["conf_groups"] = conf_rows, conf_groups
     readme = _write_readme(out_dir, buckets, meta)
 
     docs = buckets["document"]
@@ -666,7 +700,9 @@ def main():
     print("  {:,} groups of duplicated documents".format(len(docs)))
     print("  {:,} extra copies".format(sum(r["copies"] - 1 for r in docs)))
     print("  {} of space they take up".format(_human_bytes(sum(r["wasted"] for r in docs))))
-    print("  {:,} groups of program files (their own section)".format(len(buckets["program"])))
+    print("  {:,} groups confirmed as duplicates in the workbook ({:,} rows)".format(
+        conf_groups, conf_rows))
+    print("  {:,} groups of program files (web page only)".format(len(buckets["program"])))
     print("  {:,} groups of emails left out on purpose".format(len(buckets["excluded"])))
     print()
     print("Written to:")

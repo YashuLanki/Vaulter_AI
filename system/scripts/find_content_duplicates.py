@@ -29,7 +29,8 @@ counts match, so only files sharing a size with a DIFFERENTLY-named file are
 ever read.
 
 Writes system/data/content_duplicates.json, which `find_duplicates.py` picks up
-and turns into a "Same file, different name" sheet in the shared workbook.
+and merges into the "Confirmed duplicates" sheet of the shared workbook, marked
+"different names, same contents".
 NOTHING IS DELETED, MOVED OR COPIED.
 """
 
