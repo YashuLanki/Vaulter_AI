@@ -255,6 +255,39 @@ def main() -> int:
         check("an impossible date (month 13) yields None, not a crash",
               _m._summary_stamp("Source files as of: 2026-13-45") is None)
 
+        # A summary lookup must never land a LONGER name in a SHORTER file.
+        # 2026-09-24: "<Name> - Phases 2 3 & 4" resolved -- uniquely, confidently
+        # -- to <name>.md, the Phase 1 summary, and a Phase 2-4 update was
+        # written there while that file's freshness date moved BACKWARDS. Two
+        # tools shared the bug because each carried its own copy of the rule.
+        import tempfile as _tf
+        _d = Path(_tf.mkdtemp())
+        _card = ('```json\n{"format_version":1,"property":"%s","aliases":%s,"state":"AZ",'
+                 '"land_type":"residential","plan_type":"rezone","outcome_status":"still-held",'
+                 '"source_files_as_of":"2026-01-01"}\n```')
+        (_d / "alpha-ridge.md").write_text(
+            "# Alpha Ridge\n\n" + _card % ("Alpha Ridge", '["Alpha Ridge - Phase 2"]')
+            + "\n\n## Findings\n- x\n")
+        (_d / "alpha-ridge-ph-2.md").write_text(
+            "# Alpha Ridge Phase 2\n\n" + _card % ("Alpha Ridge - Phase 2", '["AR2"]')
+            + "\n\n## Findings\n- x\n")
+        # The file is named with an ABBREVIATION ("ph"), as the real one is, so
+        # the long name has no exact slug match -- that is what sent the old
+        # containment rule to the shorter file. Asserted below that the old rule
+        # really does fail this layout, so the check is known to bite.
+        _hit = lambda n: (_m._find_summary(n, _d)[0] or Path("NONE")).name
+        _w = "alpha-ridge-phase-2"
+        _old = [q for q in _d.glob("*.md") if _w in q.stem or q.stem in _w]
+        check("the layout reproduces the bug under the old rule",
+              [q.name for q in _old] == ["alpha-ridge.md"], str([q.name for q in _old]))
+        check("a longer property name never lands in a shorter summary's file",
+              _hit("Alpha Ridge - Phase 2") == "alpha-ridge-ph-2.md", _hit("Alpha Ridge - Phase 2"))
+        check("  ...even when the shorter file lists the longer name as an alias",
+              _hit("Alpha Ridge") == "alpha-ridge.md", _hit("Alpha Ridge"))
+        check("  ...a card alias still finds its file", _hit("AR2") == "alpha-ridge-ph-2.md")
+        check("  ...and an unknown name is refused, not guessed",
+              _m._find_summary("Alpha Ridge Phase 9", _d) == (None, ""))
+
         _st = _dt.datetime(2026, 1, 1, tzinfo=_dt.timezone.utc)
 
         # A NAME THAT MATCHES NOTHING IS "CANNOT TELL", NOT "NOTHING NEWER".

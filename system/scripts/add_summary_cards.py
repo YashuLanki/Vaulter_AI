@@ -48,6 +48,10 @@ _DATE = re.compile(r"\d{4}-\d{2}-\d{2}")
 _UPDATE_HEADING = re.compile(r"^#{2,3} .*?(\d{4}-\d{2}-\d{2})", re.M)
 
 
+def _squash(s) -> str:
+    return re.sub(r"[^a-z0-9]", "", str(s or "").lower())
+
+
 def _dates_from_stamp(stamp_line: str):
     """(source_files_as_of, summary_written) as the stamp line states them."""
     dates = _DATE.findall(stamp_line)
@@ -158,6 +162,11 @@ def main() -> int:
         backup = Path(config.DATA_DIR) / "backups" / f"property_summaries_{_dt.date.today():%Y%m%d}"
         backup.mkdir(parents=True, exist_ok=True)
 
+    # An alias must never be ANOTHER summary's own name. The registry's fuzzy
+    # resolve handed the two phases of one project each other's names on the
+    # first run, and the lookup then found both files for one name (2026-09-24).
+    own_names = {_squash(r.get("property_name")) for r in index.values()}
+
     for p, text in iter_summaries(folder):
         rec = index.get(p.name)
         if rec is None:
@@ -168,6 +177,8 @@ def main() -> int:
         if pid:
             r = registry.get(pid, {})
             aliases = [r.get("canonical_name")] + list(r.get("aliases", []))
+        aliases = [a for a in aliases
+                   if _squash(a) == _squash(rec.get("property_name")) or _squash(a) not in own_names]
         card = build_card(p.name, text, rec, aliases)
         new, problem = convert(text, card)
         if problem:

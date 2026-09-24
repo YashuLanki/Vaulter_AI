@@ -1301,6 +1301,69 @@ def _acres_str(v) -> str:
 ACTIVE_DEAL_STAGES = ("Acquisition", "Disposition")
 
 
+def _find_summary(property_name: str, summaries_dir: Path):
+    """
+    Which summary file a property name means: (path, problem). Exactly one of
+    the two is set.
+
+    Order, and why each step is there:
+      1. the file whose name is the slug of the name given;
+      2. the file whose DATA CARD names it -- `property` or an alias, compared
+         with everything but letters and digits stripped;
+      3. a SHORTER name typed for a LONGER filename ("Alpha Ridge" for
+         alpha-ridge-phase-2.md) -- only when exactly one file qualifies, and
+         only in that direction.
+
+    Step 3 used to run both ways, and the other way put an update in the wrong
+    property (2026-09-24): "<Name> - Phases 2 3 & 4" slugs to something that
+    CONTAINS "<name>", so with no exact match it resolved -- uniquely and
+    confidently -- to <name>.md, the Phase 1 summary, and wrote a Phase 2-4
+    update there while also moving that file's freshness date backwards. A
+    longer name never lands in a shorter file now; if nothing matches it, that
+    is said. The two tools that look summaries up share this so the rule
+    cannot drift between them.
+    """
+    import re as _re
+
+    def _slug(name: str) -> str:
+        return _re.sub(r"[^a-z0-9]+", "-", name.lower().strip()).strip("-")
+
+    def _squash(s) -> str:
+        return _re.sub(r"[^a-z0-9]", "", str(s or "").lower())
+
+    wanted = _slug(property_name)
+    available = sorted(summaries_dir.glob("*.md")) if summaries_dir.is_dir() else []
+    available = [p for p in available if not p.name.startswith("_")]
+    match = next((p for p in available if p.stem == wanted), None)
+    if match is not None:
+        return match, ""
+
+    # A card's OWN name outranks an alias: two phases of one project can each
+    # list the other's name as an alias, and only one of them IS that name.
+    target = _squash(property_name)
+    by_name, by_alias = [], []
+    for p in available:
+        card = _summary_card(p.read_text(encoding="utf-8", errors="replace"))
+        if _squash(card.get("property")) == target:
+            by_name.append(p)
+        elif any(_squash(a) == target for a in card.get("aliases") or []):
+            by_alias.append(p)
+    for group in (by_name, by_alias):
+        if len(group) == 1:
+            return group[0], ""
+        if len(group) > 1:
+            return None, (f"Several summaries name '{property_name}': "
+                          f"{', '.join(p.stem for p in group)}. Use the exact name.")
+
+    candidates = [p for p in available if wanted and wanted in p.stem]
+    if len(candidates) == 1:
+        return candidates[0], ""
+    if len(candidates) > 1:
+        return None, (f"Several summaries could match '{property_name}': "
+                      f"{', '.join(p.stem for p in candidates)}. Ask again with the exact name.")
+    return None, ""
+
+
 def _summary_card(summary_text: str) -> dict:
     """The summary's data card (see summaries.py), or {} -- never an error."""
     try:
@@ -2963,25 +3026,11 @@ no score -- it's a diary, not a dial.""".replace(
                 return ("No shared summaries folder found on this machine. Check that "
                         "OneDrive is syncing, then read documents directly instead.")
 
-            def _slug(name: str) -> str:
-                return re.sub(r"[^a-z0-9]+", "-", name.lower().strip()).strip("-")
-
-            wanted = _slug(property_name)
-            available = sorted(summaries_dir.glob("*.md"))
-
-            match = next((p for p in available if p.stem == wanted), None)
-            if match is None:
-                # Fall back to a containment match so a short property name
-                # still finds a file slugged from a longer folder-style
-                # name, and a partial name the user typed still lands.
-                candidates = [p for p in available
-                              if wanted in p.stem or p.stem in wanted]
-                if len(candidates) == 1:
-                    match = candidates[0]
-                elif len(candidates) > 1:
-                    names = ", ".join(p.stem for p in candidates)
-                    return (f"Several summaries could match '{property_name}': {names}. "
-                            f"Ask again with the exact name.")
+            match, problem = _find_summary(property_name, summaries_dir)
+            if problem:
+                return problem
+            available = [p for p in sorted(summaries_dir.glob("*.md"))
+                         if not p.name.startswith("_")]
 
             if match is None:
                 have = ", ".join(p.stem for p in available) or "none yet"
@@ -3046,20 +3095,10 @@ no score -- it's a diary, not a dial.""".replace(
             if not update_text.strip():
                 return "The update text is empty -- nothing was saved."
 
-            def _slug(name: str) -> str:
-                return re.sub(r"[^a-z0-9]+", "-", name.lower().strip()).strip("-")
-
             summaries_dir = Path(PROPERTY_SUMMARIES_DIR)
-            wanted = _slug(property_name)
-            available = sorted(summaries_dir.glob("*.md")) if summaries_dir.is_dir() else []
-            match = next((p for p in available if p.stem == wanted), None)
-            if match is None:
-                candidates = [p for p in available if wanted in p.stem or p.stem in wanted]
-                if len(candidates) == 1:
-                    match = candidates[0]
-                elif len(candidates) > 1:
-                    return (f"Several summaries could match '{property_name}': "
-                            f"{', '.join(p.stem for p in candidates)}. Use the exact name.")
+            match, problem = _find_summary(property_name, summaries_dir)
+            if problem:
+                return problem
             if match is None:
                 return (f"No summary exists for '{property_name}' yet, so there is nothing "
                         f"to update. A first summary needs the full treatment -- reading the "
