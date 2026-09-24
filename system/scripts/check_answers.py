@@ -10,7 +10,7 @@ know?"
 
 Why this exists
 ---------------
-`check_screener.py` (106 checks) and `check_portfolio_comparison.py` (58) test
+`check_screener.py` (111 checks) and `check_portfolio_comparison.py` (106) test
 deterministic Python. Both pass while an answer to a person is still wrong,
 because the wrongness lives in the knowledge the answer was built from, not in
 the arithmetic. Measured 2026-08-11: Claude stated as fact that no documents

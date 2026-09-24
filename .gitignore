@@ -203,3 +203,6 @@ system/data/content_duplicates.json
 system/data/verified_duplicates.json
 system/data/_*.txt
 system/data/_*.log
+
+# Per-machine editor connector settings (e.g. PyCharm) -- local only.
+.mcp.json

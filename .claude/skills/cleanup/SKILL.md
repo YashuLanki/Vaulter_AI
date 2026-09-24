@@ -50,7 +50,7 @@ Before proposing removal, state which of these you checked:
 3. **String dispatch** — `system/main.py` routes on `args[0] == "index-corpus"`. The function is never
    referenced by name anywhere.
 4. **Decorator registration** — every `@mcp.tool()` function is called by the MCP framework, never
-   by this codebase. **A "no callers" check flags all 20 of them. None are dead.**
+   by this codebase. **A "no callers" check flags all 30 of them. None are dead.**
 5. **Deliberate no-ops** — some things are retained on purpose with a comment saying so. Read the
    comment before believing the code.
 
@@ -168,7 +168,7 @@ from corpus import search; print(len(search('closing memo')), 'search hits OK')
 "
 ```
 
-Expected: all compile, **20 tools**, **49 properties**, non-zero search hits. A drop in the tool
+Expected: all compile, **30 tools**, **49 properties**, non-zero search hits. A drop in the tool
 count means you deleted something live — restore it before reporting.
 
 If the tool count *should* change because the cleanup removed a tool deliberately, say so and

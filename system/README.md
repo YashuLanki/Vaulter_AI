@@ -218,49 +218,64 @@ each time.
 ## Project Structure
 
 ```
-Vaulter_AI/
-├── main.py                    # Entry point — all commands run from here
-├── config.py                  # All settings and paths in one place
-├── portfolio.py               # Reads the Smartsheet Project Master export
-├── mcp_server.py              # MCP server — no background threads
-├── requirements.txt
+vaulter_ai/
+├── quick_start/               # Double-clickable setup launchers (Windows .bat, Mac .command)
 │
-├── system/corpus/                    # The firm's document library (read-only)
-│   ├── index.py               # SQLite name index, search, and the scope guard
-│   └── extract.py             # PDF/Word/Excel/CSV/text -> plain text
+├── system/                    # The program — the only part that ships to teammates
+│   ├── main.py                # Entry point — all commands run from here
+│   ├── mcp_server.py          # MCP server — no background threads
+│   ├── config.py              # All settings and paths in one place
+│   ├── portfolio.py           # Reads the Smartsheet Project Master export
+│   ├── requirements.txt
+│   ├── release_public_key.pem # Checks that an update really came from the maintainer
+│   │
+│   ├── corpus/                # The firm's document library (read-only)
+│   │   ├── index.py           # SQLite name index, search, and the scope guard
+│   │   └── extract.py         # PDF/Word/Excel/CSV/text -> plain text (OCR, reviewer comments)
+│   │
+│   ├── analysis/screening/    # CoStar Listing Screener
+│   │   ├── fit_screen.py          # THE LIVE SCREENER — portfolio-fit ranking
+│   │   ├── portfolio_comparison.py # Past deals similar to a listing
+│   │   ├── market_eras.py         # Public-record market timeline for those deals
+│   │   ├── passed_on_patterns.py  # Cautions from deals the firm passed on
+│   │   ├── jurisdiction_notes.py  # Quotes the team's city research dossiers
+│   │   ├── geo_federal.py         # Ground truth (FEMA flood over the parcel area, Census roads)
+│   │   ├── geo_providers.py       # Keyless geodata + the Overpass mirror/cache layer
+│   │   ├── report.py              # Builds the self-contained HTML report
+│   │   └── report_template.html
+│   │
+│   ├── pipeline/
+│   │   ├── proximity_tool.py       # Proximity export — one OpenStreetMap query, all categories
+│   │   ├── property_coordinates.py # Hand-verified coordinates per property, read off deeds
+│   │   └── property_registry.py    # One durable ID per property across its many spellings
+│   │
+│   ├── core/
+│   │   ├── safe_io.py         # Safe JSON reads and crash-proof writes
+│   │   └── release_signing.py # Signs and verifies update packages
+│   │
+│   ├── scripts/               # setup_wizard, release, apply_update, build_handoff,
+│   │                          #   the three check_* suites, check_mcp_health,
+│   │                          #   team_status (morning round), duplicate-file finders
+│   ├── confidentials/         # Secrets — never committed to git
+│   └── data/                  # Per-machine working files — never committed
+│       ├── drop/              # Drop CoStar exports here (nothing watches it)
+│       ├── project_master/    # Smartsheet Project Master export
+│       ├── pending_update/    # A staged code update, waiting for you to say yes
+│       ├── pending_settings/  # A staged org-wide setting, same
+│       ├── corpus_index.db    # Local index of library filenames (no contents)
+│       └── logs/
 │
-├── system/analysis/screening/        # CoStar Listing Screener
-│   ├── fit_screen.py              # THE LIVE SCREENER — portfolio-fit ranking
-│   ├── geo_federal.py             # Ground truth (FEMA flood over the parcel area, Census roads)
-│   ├── geo_providers.py           # Keyless geodata + the Overpass mirror/cache layer
-│   ├── report.py                  # Builds the self-contained HTML report
-│   └── report_template.html
-│
-├── system/pipeline/
-│   ├── proximity_tool.py       # Proximity export — one OpenStreetMap query, all categories
-│   └── property_coordinates.py # Hand-verified coordinates per property, read off deeds
-│
-├── system/core/safe_io.py            # Atomic writes, file locking, conflict merging
-├── system/scripts/                   # release, apply_update, push_org_setting, setup_wizard,
-│                              #   check_screener (the screener's test harness)
-├── quick_start/               # Double-clickable setup launchers
-├── system/confidentials/             # Secrets — never committed to git
-│
-├── docs/
+├── docs/                      # Internal notes — never shipped
 │   ├── PORTFOLIO_STANDARD.md  # The measured evidence base — every figure, with its source
 │   ├── COMPANY_PROFILE.md     # Draft screening standard, ratified by nobody
 │   ├── REBUILD_PLAN.md        # What was removed and why; what's built vs planned
-│   ├── MULTI_USER_TRANSITION.md  # Historical — why the old design had its problems
-│   └── jurisdictions/         # Per-city dossiers (comp plans, CIPs, water/sewer)
+│   └── MULTI_USER_TRANSITION.md  # Historical — why the old design had its problems
 │
-└── system/data/
-    ├── drop/                  # Drop CoStar exports here (nothing watches it)
-    ├── project_master/        # Smartsheet Project Master export
-    ├── pending_update/        # A staged code update, waiting for you to say yes
-    ├── pending_settings/      # A staged org-wide setting, same
-    ├── corpus_index.db        # Local index of library filenames (no contents)
-    └── logs/
+└── .claude/                   # Agents, skills and hooks for Claude Code
 ```
+
+Jurisdiction dossiers and property summaries live in the shared team folder
+(`Vaulter AI Shared/`), not in the repo, so every teammate reads the same copy.
 
 **No documents are parsed by any of this.** `PORTFOLIO_STANDARD.md` and the
 jurisdiction dossiers are written for people to read. The screener's numbers live

@@ -126,9 +126,9 @@ workers) — except the desks small enough that the worker *is* the whole desk.
 Three regression suites, checking three different kinds of thing:
 
 ```bash
-python system/scripts/check_screener.py              # 106 checks -- the screener's arithmetic
-python system/scripts/check_portfolio_comparison.py  #  58 checks -- deal matching and its index
-python system/scripts/check_answers.py               #   7 checks -- the knowledge answers are built from
+python system/scripts/check_screener.py              # 111 checks -- the screener's arithmetic
+python system/scripts/check_portfolio_comparison.py  # 106 checks -- deal matching and its index
+python system/scripts/check_answers.py               #  16 checks -- the knowledge answers are built from
 ```
 
 The first two test deterministic Python — same input, same output, every time.
