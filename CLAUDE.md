@@ -343,6 +343,19 @@ Three things were found by testing on a copy, not by reasoning, and each shaped 
   line-by-line census (zero lines lost, every extra line accounted for) is what caught it, and it
   runs on every conversion.
 
+**A longer property name could land in a shorter property's file, and did (fixed 2026-09-24).**
+Both summary tools resolved a name by containment in either direction, so with no exact match
+"<Name> - Phases 2 3 & 4" resolved -- uniquely and confidently -- to `<name>.md`, the Phase 1
+summary, and `update_property_summary` wrote a Phase 2-4 update there while moving that file's
+freshness date **backwards**. Caught on the first such write of a 29-property refresh because the
+readers only reported and the main session wrote each one in, one file at a time. Now one
+`_find_summary()` serves both tools: exact slug, then the card's own `property` name, then its
+aliases, then a SHORTER typed name for a LONGER filename -- never the reverse. The cards had also
+been seeded with each other's names as aliases by the registry's fuzzy resolve (the two Mesquite
+Trails phases), so a card's own name outranks any alias and the conversion script refuses an alias
+that is another summary's name. Four checks in `check_portfolio_comparison.py` §4 use the real
+abbreviated-filename shape and first assert the old rule fails it.
+
 Passed-on deals and sold deals are records, not per-property files, so they carry no card. Giving
 each passed-on deal one -- so a new listing can be compared against what the firm *rejected*, not
 only what it bought -- is the natural next step, and a reading-and-judgment job rather than a
