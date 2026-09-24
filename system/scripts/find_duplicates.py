@@ -252,9 +252,14 @@ def _confirmed_groups(buckets):
     KEEP suggestions. So groups that share a path are merged here, and each
     path appears exactly once.
 
-    Only groups the byte-for-byte check confirmed are included. A same-name
-    group that turned out to hold DIFFERENT files, or that was never compared,
-    is left out entirely -- the sheet this feeds is the one people delete from.
+    Only groups where EVERY copy was compared byte for byte are included. A
+    same-name group that turned out to hold different files, one that was never
+    compared, and one only PARTLY compared (some copies cloud-only, so matched
+    on name and size alone -- wrong about 5% of the time on this library) are
+    all left out. The sheet this feeds is the one people delete from, and the
+    reason given for it (2026-09-24) was that nobody wants to delete a file
+    that only looked like a duplicate. The partial groups are counted in the
+    README, with what it would take to bring them in.
     """
     verdicts, _ = _verdicts()
     content = _renamed_groups()
@@ -263,7 +268,7 @@ def _confirmed_groups(buckets):
     sources = []
     for rec in buckets["document"]:
         v = verdicts.get("{}\t{}".format(rec["name"], rec["size"]), "not checked")
-        if v.startswith("identical"):
+        if v.startswith("identical - all"):
             sources.append((rec["paths"], rec["size"], v))
     if content:
         for rec in content["groups"]:
@@ -290,23 +295,17 @@ def _confirmed_groups(buckets):
 
     members = defaultdict(set)
     sizes = {}
-    partial = defaultdict(bool)   # any source group with copies left uncompared
-    for paths, size, v in sources:
+    for paths, size, _v in sources:
         root = find(paths[0])
         members[root].update(paths)
         sizes[root] = size
-        if not v.startswith("identical - all"):
-            partial[root] = True
 
     groups = []
     for root, paths in members.items():
         paths = sorted(paths)
         names = sorted({p.rsplit("/", 1)[-1] for p in paths})
         size = sizes[root]
-        if partial[root]:
-            proof = "identical so far - some copies are cloud-only and were not compared"
-        else:
-            proof = "identical - all {} copies compared byte for byte".format(len(paths))
+        proof = "identical - all {} copies compared byte for byte".format(len(paths))
         groups.append({
             "paths": paths,
             "names": names,
@@ -586,18 +585,26 @@ and nothing else. Every file it describes is still exactly where it was.
   every location listed under them.
 - **duplicate_files.xlsx** -- the list to work from. ONE sheet, holding only
   files proven to be copies of each other: {conf_groups:,} groups, {conf_rows:,}
-  rows, one row per copy. Both kinds are there, told apart by the "Matched by"
-  column -- the same file under the same name, and the same file filed under
-  different names. Filter "Suggestion" to "duplicate" for the copies that could go.
+  rows, one row per copy. Every copy in every group was read in full and
+  compared byte for byte -- nothing in this sheet was matched on name alone.
+  Both kinds are there, told apart by the "Matched by" column -- the same file
+  under the same name, and the same file filed under different names. Filter
+  "Suggestion" to "duplicate" for the copies that could go.
 
 ## What is deliberately NOT in the workbook
 
 - **Same-name, same-size pairs whose contents turned out to be DIFFERENT** --
   {disproved:,} groups. Their names match and their sizes match and they are
   not the same file. They are left out so that nobody deletes one.
-- **Same-name pairs that could not be compared** -- {unverified:,} groups whose
-  copies are cloud-only, so nothing could read them without downloading. No
-  opinion is offered either way; they may or may not be duplicates.
+- **Same-name groups only PARTLY compared** -- {partial:,} groups. The copies on
+  this computer matched, but one or more copies live only in the cloud and were
+  never read, so those match on name and size alone. Left out rather than
+  listed half-proven. To bring them in, download those copies (open the folder
+  in OneDrive and mark it "Always keep on this device"), then re-run
+  `python system/scripts/verify_duplicates.py` and this script.
+- **Same-name pairs that could not be compared at all** -- {unverified:,} groups
+  whose copies are all cloud-only. No opinion is offered either way; they may
+  or may not be duplicates.
 - **Program files** and **emails** (see below).
 
 ## How it was checked
@@ -653,6 +660,7 @@ Takes seconds and overwrites this folder. Safe to run as often as you like.
         age=meta["age_text"],
         conf_groups=meta.get("conf_groups", 0), conf_rows=meta.get("conf_rows", 0),
         disproved=heads.count("NOT IDENTICAL"), unverified=heads.count("not checked"),
+        partial=heads.count("identical so far"),
         verdict_summary=_verdict_summary(), renamed_summary=_renamed_summary(),
     )
     out = out_dir / "README.md"
