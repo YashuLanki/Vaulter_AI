@@ -27,6 +27,7 @@ skipped -- `read_document` says so explicitly when asked for one.
 
 import itertools
 import logging
+import re
 from datetime import datetime
 from pathlib import Path
 
@@ -402,10 +403,20 @@ def _extract_docx(path: Path, metadata: dict) -> tuple[str, dict]:
 
     try:
         with open(path, "rb") as f:
-            result = mammoth.convert_to_markdown(f)
+            # Pictures are dropped, not embedded. mammoth's default writes every
+            # image into the text as base64 -- measured 2026-09-24 on a 17 MB
+            # environmental study: the first 400,000 characters returned were
+            # encoded picture data with not one word of the document in them, so a
+            # capped read saw nothing but gibberish and a full read would have put
+            # megabytes of noise into a conversation. A placeholder says a picture
+            # was there, which is all the text layer can honestly say about it.
+            result = mammoth.convert_to_markdown(
+                f, convert_image=mammoth.images.img_element(lambda image: {"src": ""}))
+        text = re.sub(r"!\[[^\]]*\]\(\s*\)", "[picture]", result.value)
         metadata["page_count"] = 1
-        metadata["has_tables"] = "|" in result.value
-        return result.value, metadata
+        metadata["has_tables"] = "|" in text
+        metadata["pictures_dropped"] = text.count("[picture]")
+        return text, metadata
     except Exception as e:
         log.error(f"  [ERROR] Failed to extract Word file: {e}")
         return f"[Could not read {path.name}: {e}]", metadata
