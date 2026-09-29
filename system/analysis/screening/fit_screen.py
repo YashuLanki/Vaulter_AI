@@ -354,8 +354,28 @@ EXIT_LOT_COMPS = tuple(
 # The fourth question -- whether resembling a past deal should move the score --
 # is NOT reflected below; see add_portfolio_comparison and the sold-deal note in
 # CLAUDE.md for why that one is harder than it looks.
+# PROXIMITY SET TO ZERO, 2026-09-28, on the first written disagreement with a
+# ranking that this screener has ever received. A teammate who had run it on
+# her own export reported that "it was initially ranking properties based on
+# their proximity to our existing sites, which isn't necessarily something we
+# base an acquisition off of", and that re-weighting toward growth factors --
+# new and proposed developments, school quality, population growth, freeway
+# access, interchanges, airports -- gave results "much more aligned with our
+# acquisition strategy". That is the person who uses the tool saying what the
+# firm actually selects on, which outranks the §7 inference above (clustering
+# is a pattern in what the firm ENDED UP owning, not a stated reason it bought).
+# The distance and nearest-holding columns stay, as context a reader can see;
+# they simply no longer move the score. A growth-factor score is the intended
+# replacement and is a separate piece of work; its weight, like these, needs a
+# partner's sign-off. Until then the remaining three carry the whole ranking.
+# GROWTH takes the slot proximity vacated (2026-09-29), and that is a
+# PLACEHOLDER, not a measurement: the ranking needs some weight on the factor
+# the team says it selects on, and inheriting the vacated number is the one
+# choice that invents nothing new. It still needs a partner's sign-off, like
+# the three beside it. What the score measures is in growth.py.
 WEIGHTS = {
-    "proximity": 35,
+    "proximity":  0,
+    "growth":    35,
     "pricing":   30,
     "distress":  20,
     "size_fit":  15,
@@ -831,48 +851,38 @@ def add_size_context(df: pd.DataFrame) -> pd.DataFrame:
     """
     §6: "the real standard is not 'small good, large bad'."
 
-      * Small (6-40ac) is normal INSIDE an existing cluster
-      * Large (500-700ac) is normal AS a master-plan assemblage
-      * Large AND standalone in a market with no presence is THE documented
-        failure mode -- 41 CA foreclosures were overwhelmingly 200-640 acre
-        desert parcels, and the firm's recovery in that same market was 6-37
-        acre infill.
+      * 20-200 acres is the portfolio's core band
+      * Large (200+) standalone parcels are THE documented failure mode -- 41 CA
+        foreclosures were overwhelmingly 200-640 acre desert parcels, and the
+        firm's recovery in that same market was 6-37 acre infill
+      * Small (under 20) needs an entitlement angle this score cannot see, so
+        it sits at neutral
+
+    Until 2026-09-28 this also read Cluster_Tier: a large parcel NEAR a holding
+    scored 75 as an "assemblage", a small one inside a cluster 95, and the core
+    band 80 near holdings but 65 away from them. Those branches were removed
+    the day proximity itself was dropped from the ranking (see WEIGHTS): the
+    team said closeness to existing sites is not how acquisitions are chosen,
+    and a size score that quietly rewarded it would have kept proximity in the
+    ranking through a side door. The three figures that remain are the ones
+    the old table already gave the no-holding-nearby case; nothing new was
+    invented.
     """
     acres = _num(_col(df, "Land Area (AC)"))
-    near = df["Cluster_Tier"]
 
     verdicts, scores = [], []
-    for ac, tier in zip(acres, near):
-        inside = tier == "Inside cluster"
-        in_cluster = tier in ("Inside cluster", "Adjacent")
+    for ac in acres:
         if pd.isna(ac):
-            verdicts.append("Unknown acreage"); scores.append(50); continue
-
-        # Same neutral-floor principle as proximity: absence of a nearby holding
-        # is often just a geocoding gap, and it is already reflected in the
-        # proximity dimension. Penalising it again here would double-count it,
-        # which is what dragged whole non-core markets down. Only the ONE
-        # combination the corpus actually documents as a failure -- large AND
-        # standalone, the 200-640 acre desert parcels behind 41 California
-        # foreclosures -- scores below neutral.
-        if ac >= 200 and not in_cluster:
-            verdicts.append("LARGE + standalone — documented failure mode (§6)")
-            scores.append(20)
+            verdicts.append("Unknown acreage"); scores.append(50)
         elif ac >= 200:
-            verdicts.append("Large, but near existing holdings — assemblage pattern")
-            scores.append(75)
-        elif ac < 20 and inside:
-            verdicts.append("Small infill inside a cluster — normal")
-            scores.append(95)
-        elif ac < 20 and in_cluster:
-            verdicts.append("Small, near existing holdings")
-            scores.append(80)
+            verdicts.append("LARGE (200+ac) — the documented failure mode (§6)")
+            scores.append(20)
         elif ac < 20:
-            verdicts.append("Small parcel — needs a cluster or an entitlement angle")
+            verdicts.append("Small parcel — needs an entitlement angle")
             scores.append(50)
         else:
             verdicts.append("Mid-size (20–200ac) — the portfolio's core band")
-            scores.append(80 if in_cluster else 65)
+            scores.append(80)
     return _attach(df, {"Size_Context": verdicts, "_size_score": scores})
 
 
@@ -1534,6 +1544,11 @@ _TIER_BANDS = [(0.10, "1 — Pursue"), (0.35, "2 — Investigate"),
                (0.65, "3 — Watch"), (1.01, "4 — Low fit")]
 
 
+# Share of the file that may tie at one score before that tied block is called
+# Unranked rather than tiered. See _assign_tiers.
+UNRANKED_TIE_SHARE = 0.5
+
+
 def _assign_tiers(scores: pd.Series) -> pd.Series:
     """
     Tier each row by its percentile rank within this export (best = 0.0).
@@ -1559,7 +1574,24 @@ def _assign_tiers(scores: pd.Series) -> pd.Series:
     # whole file in the top tier. max gives the honest reading: how many
     # listings are at least as good as this one.
     pct = scores.rank(ascending=False, method="max", pct=True)
-    return pct.map(lambda p: next(label for cut, label in _TIER_BANDS if p <= cut))
+    tiers = pct.map(lambda p: next(label for cut, label in _TIER_BANDS if p <= cut))
+
+    # The MOSTLY-identical case, found 2026-09-28 the day proximity stopped
+    # scoring. A teammate's 88-row export carried acreage on 5 rows, prices on
+    # 27, no days-on-market and no distress signal, so once location was out,
+    # 87 rows tied at one score -- and method="max" put every one of them in
+    # "4 - Low fit". That is a claim ("these are poor fits") about listings the
+    # screener could not tell apart. Same rule as above, applied to the tied
+    # block instead of the whole file: rows sharing a score with at least
+    # UNRANKED_TIE_SHARE of the file are Unranked, while rows genuinely above
+    # or below that block keep their earned tier. A HALF IS A JUDGEMENT, NOT A
+    # MEASUREMENT; what is measured is that 87 of 88 must not read as "low".
+    counts = scores.value_counts()
+    tied_score, tied_n = counts.index[0], int(counts.iloc[0])
+    if tied_n / len(scores) >= UNRANKED_TIE_SHARE:
+        tiers = tiers.where(scores != tied_score,
+                            "Unranked — nothing in this file separates them")
+    return tiers
 
 
 # Where the portfolio evidence actually comes from. Everything measured during
@@ -1746,14 +1778,16 @@ def _why(row) -> str:
     """
     bits = []
 
-    # Where it is, relative to what the firm owns.
+    # Where it is, relative to what the firm owns -- context, said LAST. Until
+    # 2026-09-28 it led the sentence, which read as the reason for the rank;
+    # proximity no longer carries weight, so the money leads and location
+    # closes.
+    where = ""
     tier, dist = row["Cluster_Tier"], row.get("Distance_Mi")
     if tier not in ("Unknown", "New market") and pd.notna(dist):
         near = ("under a mile" if dist < 1 else
                 "1 mile" if round(dist) == 1 else f"{dist:.0f} miles")
-        bits.append(f"{near} from {row['Nearest_Holding']}")
-    elif tier == "New market":
-        bits.append("in a market where the firm owns nothing nearby")
+        where = f"{near} from {row['Nearest_Holding']}"
 
     # Whether the money can work, in words rather than a ratio.
     h = row.get("Exit_Headroom")
@@ -1778,6 +1812,17 @@ def _why(row) -> str:
         n = row.get("Exit_Comp_N")
         bits.append(f"but only {int(n)} comparable listing{'s' if n != 1 else ''} to judge that on")
 
+    # Is the place going anywhere -- the factor the team says it selects on.
+    g = []
+    pg = row.get("County_Pop_Growth_Pct")
+    if pd.notna(pg):
+        g.append(f"county {'growing' if pg >= 0 else 'shrinking'} {abs(pg):.0f}%")
+    fw = row.get("Freeway_Mi")
+    if pd.notna(fw) and fw < 15:
+        g.append(f"freeway {fw:.0f} mi" if fw >= 1 else "freeway under a mile")
+    if g:
+        bits.append(", ".join(g))
+
     # Why it might be cheap -- the firm's strongest historical signal.
     if row["Distress_Signals"] != "none evident":
         bits.append(str(row["Distress_Signals"]).lower())
@@ -1789,6 +1834,9 @@ def _why(row) -> str:
     if (pd.notna(h) and isinstance(row.get("Cost_Basis"), str)
             and "understated" in row["Cost_Basis"]):
         bits.append("entitlement cost not included — no record for this type")
+
+    if where:
+        bits.append(where)
 
     # Uppercase the first letter only -- str.capitalize() would lowercase the
     # rest and turn "Example Trails" into "example trails".
@@ -1828,6 +1876,8 @@ def screen(source_path: Path, moic: float = None, write_workbook: bool = True) -
 
     holdings = load_holdings()
     df = add_proximity(df, holdings)
+    from analysis.screening.growth import add_growth
+    df = add_growth(df)
     df = add_size_context(df)
     df = add_pricing(df, moic)
     df = add_distress(df)
@@ -1851,6 +1901,7 @@ def screen(source_path: Path, moic: float = None, write_workbook: bool = True) -
     total = sum(weights.values())
     fit = ((
         df["_proximity_score"] * weights["proximity"]
+        + df["_growth_score"] * weights["growth"]
         + df["_pricing_score"] * weights["pricing"]
         + df["_distress_score"] * weights["distress"]
         + df["_size_score"] * weights["size_fit"]
@@ -1863,6 +1914,7 @@ def screen(source_path: Path, moic: float = None, write_workbook: bool = True) -
         "Fit_Score": fit,
         "Fit_Tier": _assign_tiers(fit),
         "Score_Proximity": df["_proximity_score"],
+        "Score_Growth": df["_growth_score"],
         "Score_Pricing": df["_pricing_score"],
         "Score_Distress": df["_distress_score"],
         "Score_Size": df["_size_score"],
@@ -1873,9 +1925,11 @@ def screen(source_path: Path, moic: float = None, write_workbook: bool = True) -
     df.insert(0, "Rank", range(1, len(df) + 1))
 
     front = ["Rank", "Fit_Tier", "Fit_Score",
-             "Score_Proximity", "Score_Pricing", "Score_Distress", "Score_Size",
+             "Score_Growth", "Score_Pricing", "Score_Distress", "Score_Size", "Score_Proximity",
              "Property Address", "City", "State",
              "Secondary Type", "Land Area (AC)", "For Sale Price", "Ask_Per_Acre",
+             "Growth_Basis", "Freeway_Mi", "Airport_Mi", "Nearest_Airport",
+             "County_Pop_Growth_Pct", "County_Permits_Per_1k",
              "Nearest_Holding", "Distance_Mi", "Cluster_Tier", "Size_Context",
              "Size_Band", "Exit_As_Band", "Cost_Basis",
              "Entitlement_Per_Acre", "Carry_Per_Acre", "Required_Exit_Per_Acre",
@@ -1896,6 +1950,7 @@ def screen(source_path: Path, moic: float = None, write_workbook: bool = True) -
         "holdings_used": len(holdings),
         "portfolio_coverage": round(portfolio_coverage, 3),
         "evidence_coverage": _coverage(df, holdings),
+        "growth_status": __import__("analysis.screening.growth", fromlist=["last_status"]).last_status,
         "column_sources": column_sources,
         "weights_used": weights,
         "assumptions": {**ASSUMPTIONS, **_purchase_assumptions()},

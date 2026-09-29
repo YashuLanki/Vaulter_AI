@@ -963,12 +963,23 @@ def main() -> int:
         pcol = next((c for c in ("For Sale Price", "Sale Price", "Price") if c in big.columns), None)
         if pcol:
             big[pcol] = 99_000_000
-            az = _run(big, full, tmp, "bigask_az")["dataframe"]
-            other = big.copy()
-            for sc in ("State", "State Name"):
-                if sc in other.columns:
-                    other[sc] = "TX"
-            tx = _run(other, full, tmp, "bigask_tx")["dataframe"]
+            # Since 2026-09-29 the STATE legitimately moves the score, through
+            # the growth score's county population and permits lookups. Hold
+            # those still for this comparison, so the only thing that can
+            # differ between the two runs is the caution being tested.
+            import analysis.screening.growth as _gr
+            _keep = (_gr.county_population, _gr.county_permits)
+            try:
+                _gr.county_population = lambda: ({}, "", "off for this check")
+                _gr.county_permits = lambda: ({}, 0, "off for this check")
+                az = _run(big, full, tmp, "bigask_az")["dataframe"]
+                other = big.copy()
+                for sc in ("State", "State Name"):
+                    if sc in other.columns:
+                        other[sc] = "TX"
+                tx = _run(other, full, tmp, "bigask_tx")["dataframe"]
+            finally:
+                (_gr.county_population, _gr.county_permits) = _keep
             check("Fit_Score is identical whichever market the reference came from",
                   tx["Fit_Score"].equals(az["Fit_Score"]),
                   "the reference is context, never arithmetic")
@@ -1155,6 +1166,120 @@ def main() -> int:
         check("  ...nor when the land type is unknown",
               _pc.stuck_deal_caution({"state": "AZ", "county": "pinal",
                                       "land_type": ""}) is None)
+
+    # ── 24. Proximity is context, not a score (2026-09-28) ────────────────────
+    # The first written disagreement with a ranking: a teammate said closeness
+    # to existing sites is not how the firm chooses an acquisition. So the
+    # distance columns must survive as context, and nothing about WHERE the
+    # holdings are may move Fit_Score -- including through the size score,
+    # which used to reward a large parcel "near holdings" through a side door.
+    print("\n23. Proximity is context, not a score")
+    check("the proximity weight is zero", fs.WEIGHTS["proximity"] == 0,
+          f"WEIGHTS = {fs.WEIGHTS}")
+    if len(full) and "latitude" in full.columns:
+        moved = full.copy()
+        moved["latitude"] = moved["latitude"] + 3.0   # every holding ~200 miles north
+        far = _run(src, moved, tmp, "prox_moved")
+        a, b = base["dataframe"], far["dataframe"]
+        key = [c for c in ("Property Address", "Land Area (AC)", "For Sale Price") if c in a.columns]
+        a = a.sort_values(key).reset_index(drop=True)
+        b = b.sort_values(key).reset_index(drop=True)
+        same_scores = list(a["Fit_Score"]) == list(b["Fit_Score"])
+        check("moving every holding 200 miles changes no Fit_Score", same_scores,
+              "" if same_scores else "the score still reads location")
+        check("  ...while the distance context DID change, so those columns are live",
+              list(a["Distance_Mi"].fillna(-1)) != list(b["Distance_Mi"].fillna(-1)))
+    else:
+        skip("moving every holding changes no Fit_Score", "no geocoded holdings on this machine")
+    d = base["dataframe"]
+    if "Score_Size" in d.columns and d["Cluster_Tier"].nunique() > 1:
+        per_context = d.groupby("Size_Context")["Score_Size"].nunique()
+        check("the size score is the same whatever the cluster tier",
+              bool((per_context <= 1).all()), str(per_context.to_dict()))
+    else:
+        skip("the size score ignores the cluster tier", "one cluster tier or no size score in this export")
+    whys = d["Why"].dropna().astype(str)
+    leads = whys.str.match(r"^(Under a mile|\d+ miles?|1 mile) from ")
+    check("no Why sentence opens with the distance to a holding", not bool(leads.any()),
+          f"{int(leads.sum())} do" if leads.any() else "")
+
+    # The mostly-tied file. Once location stopped scoring, a real 88-row export
+    # tied 87 rows at one score and every one of them read "4 - Low fit". The
+    # tied block must be Unranked; rows genuinely above or below it keep their
+    # earned tier; and a file with real spread is untouched by the rule.
+    tied = pd.Series([80.0] * 5 + [42.3] * 90 + [20.0] * 5)
+    t = fs._assign_tiers(tied)
+    check("a block tied at one score across most of the file is Unranked, not Low fit",
+          (t[5:95].str.startswith("Unranked")).all(), str(t.value_counts().to_dict()))
+    check("  ...rows above the tied block still earn Tier 1", (t[:5] == "1 — Pursue").all())
+    check("  ...rows below it still earn Tier 4", (t[95:] == "4 — Low fit").all())
+    spread = pd.Series(range(100), dtype=float)
+    check("  ...and a file with real spread is untouched",
+          not fs._assign_tiers(spread).str.startswith("Unranked").any())
+
+    # ── 25. The growth score abstains, never votes blind (2026-09-29) ─────────
+    # Built to replace proximity as the factor the team says it selects on.
+    # Every source is public and keyless, and every one can be unreachable, so
+    # the properties that matter are: an unreachable source scores NEUTRAL and
+    # says so; a constant signal moves nothing; a nearer freeway ranks higher;
+    # and a screen never dies or drops a row over a growth lookup.
+    print("\n25. The growth score abstains, never votes blind")
+    import analysis.screening.growth as _g
+    check("the growth weight took proximity's old slot", fs.WEIGHTS["growth"] == 35 and fs.WEIGHTS["proximity"] == 0)
+    # release.py drops any path part named "data" from an update package, so a
+    # bundled table under such a folder would exist here and nowhere else.
+    from scripts.release import EXCLUDED_DIR_NAMES as _excl
+    check("the bundled airport table sits where an update package will carry it",
+          _g.AIRPORTS_CSV.exists()
+          and not any(part in _excl for part in _g.AIRPORTS_CSV.relative_to(PROJECT_ROOT).parts),
+          str(_g.AIRPORTS_CSV.relative_to(PROJECT_ROOT)))
+    d = base["dataframe"]
+    check("every listing carries a growth basis sentence", d["Growth_Basis"].astype(str).str.len().gt(0).all())
+    check("  ...which admits what is never measured",
+          d["Growth_Basis"].astype(str).str.contains("interchanges and school quality are not measured").all())
+    check("Score_Growth stays inside 0-100", d["Score_Growth"].between(0, 100).all())
+    # percentiles: a constant abstains at 50, NaN survives, direction is honoured
+    pct = _g._pct(pd.Series([5.1, 5.1, 5.1, float("nan")]))
+    check("a constant signal ranks every row at 50 and leaves a blank blank",
+          list(pct[:3]) == [50.0, 50.0, 50.0] and pd.isna(pct[3]))
+    near = _g._pct(pd.Series([1.0, 10.0, 30.0]), higher_is_better=False)
+    check("a nearer freeway ranks higher", near[0] > near[1] > near[2], str(list(near)))
+    # every source unreachable: neutral, said out loud, no exception, no row lost
+    saved = (_g.county_population, _g.county_permits, _g.airports, _g.primary_road_points)
+    try:
+        _g.county_population = lambda: ({}, "", "unreachable and not cached")
+        _g.county_permits = lambda: ({}, 0, "unreachable and not cached")
+        _g.airports = lambda: []
+        _g.primary_road_points = lambda bbox: ([], "road layer unavailable for this map extent")
+        dark = _run(src, full, tmp, "growth_dark")
+        dd = dark["dataframe"]
+        check("with every source unreachable the screen still runs and keeps every row",
+              len(dd) == len(d))
+        check("  ...and every growth score is the neutral 50", (dd["Score_Growth"] == 50).all(),
+              str(dd["Score_Growth"].value_counts().to_dict()))
+        check("  ...and the basis says neutral rather than staying quiet",
+              dd["Growth_Basis"].astype(str).str.contains("scored neutral").all())
+        check("  ...and the run reports what was unavailable",
+              len(dark.get("growth_status", {}).get("unavailable", [])) >= 3
+              and not dark.get("growth_status", {}).get("used"))
+    finally:
+        (_g.county_population, _g.county_permits, _g.airports, _g.primary_road_points) = saved
+    # a synthetic freeway: the listing nearest to it must get the higher freeway percentile
+    if "Latitude" in src.columns and src["Latitude"].notna().sum() >= 2:
+        try:
+            xy = src[["Latitude", "Longitude"]].dropna().astype(float)
+            anchor = (float(xy.iloc[0]["Longitude"]), float(xy.iloc[0]["Latitude"]))
+            _g.primary_road_points = lambda bbox: ([anchor], "")
+            _g.county_population = lambda: ({}, "", "off for this check")
+            _g.county_permits = lambda: ({}, 0, "off for this check")
+            one = _run(src, full, tmp, "growth_one_road")["dataframe"]
+            near_row = one.loc[(one["Latitude"].astype(float) == anchor[1]) & (one["Longitude"].astype(float) == anchor[0])]
+            check("the listing sitting on the only freeway has the shortest freeway distance",
+                  len(near_row) >= 1 and float(near_row["Freeway_Mi"].iloc[0]) == float(one["Freeway_Mi"].min()))
+        finally:
+            (_g.county_population, _g.county_permits, _g.airports, _g.primary_road_points) = saved
+    else:
+        skip("the listing on the only freeway scores highest", "no coordinates in this export")
 
     passed = sum(1 for _, ok, _ in RESULTS if ok)
     print(f"\n{passed}/{len(RESULTS)} checks passed")

@@ -480,10 +480,17 @@ footer{margin-top:60px;padding-top:18px;border-top:1px solid var(--rule);
     <div class="body">
       <p id="w-note" class="d-p" style="max-width:70ch;margin-bottom:12px" hidden></p>
       <dl>
-      <dt id="w-proximity">Proximity</dt><dd>Distance to the nearest Vaulter holding. Clustering is the firm&rsquo;s
-        most consistent behaviour &mdash; roughly 34 of 57 holdings sit in one of 15 clusters. Where
-        the firm owns nothing nearby this factor goes neutral rather than counting against a listing,
-        so an unfamiliar market isn&rsquo;t penalised for being unfamiliar.</dd>
+      <dt id="w-growth">Growth</dt><dd>Is the place going anywhere. Four measured signals, each ranked within this
+        file: miles to the nearest freeway (Census road data), miles to the nearest airport with scheduled
+        service, the county&rsquo;s population change (Census estimates), and homes permitted per 1,000
+        residents (Census permits survey). Added September 2026 on the team&rsquo;s feedback; its weight is
+        the slot proximity vacated, a placeholder until a partner signs it off. <em>Not</em> measured:
+        interchanges, proposed developments and school quality &mdash; weigh those yourself.</dd>
+      <dt id="w-proximity">Proximity</dt><dd>Distance to the nearest Vaulter holding, shown for context only.
+        It carries no weight: the team confirmed (September 2026) that closeness to existing sites is
+        not how the firm chooses an acquisition. Growth factors &mdash; development activity, population
+        trend, freeway and airport access &mdash; are the intended replacement and are not yet scored here,
+        so weigh them yourself when reading the shortlist.</dd>
       <dt id="w-pricing">Pricing</dt><dd>Not whether the asking price is fair against comparable sales &mdash;
         Vaulter is not a builder. It asks what the entitled position must sell for to return 3&times;,
         and compares that to what the market actually pays for parcels of the size this would be
@@ -491,9 +498,9 @@ footer{margin-top:60px;padding-top:18px;border-top:1px solid var(--rule);
       <dt id="w-distress">Distress</dt><dd>Long time on market, a lender or REO owner, an asking price at or below
         what the seller paid. Counted as favourable, not risky: a distressed basis was the stated
         reason behind one of the firm&rsquo;s best-returning acquisitions.</dd>
-      <dt id="w-size_fit">Size</dt><dd>Judged in context. Small is normal inside a cluster; large is normal as an
-        assemblage. Only one combination scores badly &mdash; large <em>and</em> isolated in a market
-        with no presence, the pattern behind 41 California foreclosures.</dd>
+      <dt id="w-size_fit">Size</dt><dd>20&ndash;200 acres is the portfolio&rsquo;s core band. 200 acres and up is the
+        documented failure mode &mdash; the pattern behind 41 California foreclosures. Under 20 sits at
+        neutral: it needs an entitlement angle this score cannot see.</dd>
     </dl></div>
   </details>
 
@@ -629,7 +636,7 @@ const andList = a => a.length<2 ? (a[0]||"") : a.slice(0,-1).join(", ")+" and "+
    the red step is just under 3:1 on the dark surface, so the label is doing
    required work rather than decoration. */
 const band = v => v>=75 ? "var(--good)" : v>=50 ? "var(--warn)" : "var(--crit)";
-const FACT = [["Location","proximity"],["Price","pricing"],["Seller","distress"],["Size","size"]];
+const FACT = [["Growth","growth"],["Price","pricing"],["Seller","distress"],["Size","size"],["Location","proximity"]];
 const bars = x => FACT.map(([lab,key])=>{
   const v = x.comp[key] ?? 0;
   return `<span class="bar"><span>${lab}</span>
@@ -650,7 +657,6 @@ const renamed  = SRC.filter(c=>c.rows && !c.derived && c.note);
 const flagged  = new Set([...derived,...renamed].map(c=>c.field));
 const sparse   = SRC.filter(c=>c.rows && c.rows < N*0.5 && !flagged.has(c.field));
 const noEvid   = (DATA.evidenceCoverage||[]).filter(e=>/^none/i.test(e.evidence||""));
-const proxOff  = DATA.weights && DATA.weights.proximity === 0;
 const thin     = absent.length>0 || derived.length>0;
 
 let gaps = "";
@@ -667,10 +673,6 @@ if(sparse.length) gaps +=
   `<p><b>Present, but on a minority of rows.</b></p>
    <div class="tags">${sparse.map(c=>
      `<span class="tag warn">${esc(flab(c.field))} &mdash; ${c.rows} of ${N}</span>`).join("")}</div>`;
-if(proxOff) gaps +=
-  `<p><b>Location was dropped from the score.</b> The firm owns nothing within reach of this market,
-   so distance to a holding could not separate one listing from another. It was removed from the
-   weighting rather than counted against every row &mdash; an absent signal abstains, it does not vote.</p>`;
 if(noEvid.length) gaps +=
   `<p><b>No portfolio history for ${esc(andList(noEvid.map(e=>e.state)))}.</b> No cost, timing,
    exit-price or rejection record there, so everything below is measured from this file alone.
@@ -806,6 +808,8 @@ function ledger(x){
 
   // The cost basis is the sentence that says the required exit above is
   // understated. It must sit next to the number, not in a footnote.
+  const gb = !x.growthBasis ? ""
+    : `<p class="d-p" style="margin-top:8px;color:var(--ink-3)">Growth: ${esc(x.growthBasis)}.</p>`;
   const cb = !x.costBasis ? ""
     : /understated/.test(x.costBasis)
       ? `<p class="d-p" style="margin-top:8px"><span class="tag warn">Cost basis</span> ${esc(x.costBasis)}.</p>`
@@ -820,7 +824,7 @@ function ledger(x){
      statements: ${comps}`:""}.</p>`;
 
   return `<h4 class="d-sub">What the money has to do</h4>
-    <div class="led">${out.join("")}</div>${hrow}${basis}${cb}${lot}`;
+    <div class="led">${out.join("")}</div>${hrow}${basis}${cb}${gb}${lot}`;
 }
 
 function detailHTML(x){
@@ -1165,23 +1169,15 @@ document.getElementById("assum").innerHTML=Object.entries(LABEL)
   .filter(([k])=>k in DATA.assumptions)
   .map(([k,[t,d]])=>`<dt>${t}</dt><dd>${d}</dd>`).join("");
 
-/* The weights the run ACTUALLY used, not the defaults. When the firm owns
-   nothing near the market the screener sets proximity to 0, and a page that
-   went on claiming "Proximity 35" would be describing a different run. */
+/* The weights the run ACTUALLY used, not the defaults, so the page never
+   describes a different run. Proximity is 0 by design since September 2026;
+   the factor list above says why. */
 const W = DATA.weights || {};
-Object.entries({proximity:"Proximity",pricing:"Pricing",distress:"Distress",size_fit:"Size"})
+Object.entries({growth:"Growth",proximity:"Proximity",pricing:"Pricing",distress:"Distress",size_fit:"Size"})
   .forEach(([k,lab])=>{
     const el = document.getElementById("w-"+k);
     if(el) el.textContent = W[k]!=null ? `${lab} ${W[k]}` : lab;
   });
-if(W.proximity===0){
-  const n = document.getElementById("w-note");
-  n.innerHTML = `<b>Location scored nothing on this run.</b> The firm owns no geocoded land within
-    reach of this market, so the distance factor could not tell one listing from another. It was
-    taken out of the weighting rather than counted against every row: the remaining three were
-    rescaled to 100.`;
-  n.hidden = false;
-}
 
 /* ── where each field came from ───────────────────────────── */
 const csb = document.querySelector("#colsrc tbody");

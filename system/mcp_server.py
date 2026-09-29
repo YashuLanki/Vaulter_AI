@@ -3728,18 +3728,27 @@ no score -- it's a diary, not a dial.""".replace(
                 "a reason. Tiers are assigned by rank within the file, so a market the firm",
                 "has not entered yet still produces a usable shortlist.",
                 "",
-                "FOUR FACTORS:",
-                f"  Proximity {WEIGHTS['proximity']:>3}  distance to land the firm already owns. Heaviest weight —",
-                "               clustering is the most consistent pattern in the portfolio. Where",
-                "               nothing is owned nearby this goes neutral rather than counting against.",
+                "FIVE FACTORS (four carry weight):",
+                f"  Growth    {WEIGHTS['growth']:>3}  is the place going anywhere. Four measured signals, each a",
+                "               percentile within this file: miles to a freeway (Census TIGER",
+                "               primary roads), miles to an airport with scheduled service, the",
+                "               county's population change (Census estimates), and homes",
+                "               permitted per 1,000 residents (Census permits survey). Added",
+                "               2026-09-29 on a teammate's feedback; the weight is proximity's",
+                "               old slot, a placeholder until a partner signs it off. NOT",
+                "               measured: interchanges, proposed developments, school quality --",
+                "               weigh those in the conversation and the jurisdiction dossiers.",
+                f"  Proximity {WEIGHTS['proximity']:>3}  distance to land the firm already owns. Shown as context, NOT",
+                "               scored: on 2026-09-28 the team said closeness to existing sites is",
+                "               not how acquisitions are chosen.",
                 f"  Pricing   {WEIGHTS['pricing']:>3}  what the entitled position must sell for to return the target",
                 "               multiple, against what the market pays for the parcel size this",
                 "               would be subdivided into. Not a comparison to recent sales —",
                 "               Vaulter is not a builder.",
                 f"  Distress  {WEIGHTS['distress']:>3}  long time on market, lender or REO owner, asking at or below",
                 "               what the seller paid. Counted as favourable.",
-                f"  Size      {WEIGHTS['size_fit']:>3}  judged in context. Small is normal inside a cluster, large is",
-                "               normal as an assemblage. Only large AND isolated scores badly.",
+                f"  Size      {WEIGHTS['size_fit']:>3}  20-200 acres is the portfolio's core band. 200+ acres is the",
+                "               documented failure mode. Under 20 sits at neutral.",
                 "",
                 "ASSUMPTIONS (none ratified by the firm, but most are now measured):",
             ]
@@ -3761,8 +3770,10 @@ no score -- it's a diary, not a dial.""".replace(
                 "  Hold period       six completed sales (6-15 years) against five models",
                 "                    (30-60 months). Schedules in the record slip 2.5-4x.",
                 "",
-                "THE WEAKEST INPUT IS NOW THE FOUR WEIGHTS ABOVE. Two independent document",
-                "searches found nothing in the corpus that ranks or weights selection factors.",
+                "THE WEAKEST INPUT IS NOW THE WEIGHTS ABOVE. Two independent document",
+                "searches found nothing in the corpus that ranks or weights selection factors,",
+                "and the one piece of evidence since -- a teammate's feedback that proximity",
+                "is not a criterion -- is what set that weight to zero.",
                 "The closest thing is a senior partner's unordered rationale list on one deal —",
                 "distressed basis, vested entitlements, low off-site cost, prepaid utility",
                 "credits. No document contradicts the weights either. This one needs a person,",
@@ -3839,10 +3850,11 @@ no score -- it's a diary, not a dial.""".replace(
                 x = df.iloc[i]
                 lines.append(f"#{int(x['Rank'])}  {str(x.get('Property Address'))[:44]}")
                 lines.append(f"     {x['Fit_Tier']}   overall {x['Fit_Score']:.0f}")
-                lines.append(f"     proximity {x.get('Score_Proximity', 0):>3.0f} · "
+                lines.append(f"     growth {x.get('Score_Growth', 0):>3.0f} · "
                              f"pricing {x.get('Score_Pricing', 0):>3.0f} · "
                              f"distress {x.get('Score_Distress', 0):>3.0f} · "
-                             f"size {x.get('Score_Size', 0):>3.0f}")
+                             f"size {x.get('Score_Size', 0):>3.0f} · "
+                             f"proximity {x.get('Score_Proximity', 0):>3.0f} (context only)")
                 lines.append(f"     {x['Why']}")
                 lines.append("")
 
@@ -4007,6 +4019,18 @@ no score -- it's a diary, not a dial.""".replace(
                         "than a verdict, and if a size or price column exists in CoStar for these "
                         "properties, re-exporting with it will sharpen this considerably."
                     )
+
+            # Which growth signals this run could measure, and which it could
+            # not. Said every time, because a silent "unavailable" would read
+            # downstream as "checked and neutral" -- the collapse this codebase
+            # guards against everywhere else.
+            gs = r.get("growth_status") or {}
+            if gs.get("used") or gs.get("unavailable"):
+                warn += ["", "GROWTH SIGNALS (each a percentile within this file)"]
+                warn += [f"  · {u}" for u in gs.get("used", [])]
+                warn += [f"  · NOT available — {u}" for u in gs.get("unavailable", [])]
+                warn.append("  Never measured here: interchanges, proposed developments, school "
+                            "quality — weigh those in the conversation.")
 
             # Whether this file can be MAPPED is a property of the file, known
             # now -- but it used to be discoverable only one refusal at a time,

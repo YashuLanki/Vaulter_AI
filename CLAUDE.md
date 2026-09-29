@@ -49,7 +49,7 @@ python system/main.py stats                     # what this instance has availab
 python system/scripts/pull_project_master.py  # (maintainer's machine only) refresh the portfolio from Smartsheet
 
 # Checks -- run the one that matches what you touched (see "Three regression suites" below)
-python system/scripts/check_screener.py             # 111 checks on the screener's arithmetic
+python system/scripts/check_screener.py             # 132 checks on the screener's arithmetic
 python system/scripts/check_portfolio_comparison.py # 121 checks on the comparison index
 python system/scripts/check_answers.py              # 20 checks on the knowledge answers come from
 ```
@@ -985,6 +985,65 @@ Four rules that must survive any edit:
   large spread driven purely by size. A current-use label like Agricultural maps to the
   residential/commercial product it would actually exit as (`_EXIT_TYPE_CANDIDATES`), taking
   the cheaper candidate so the test is never flattered.
+- **Proximity to existing holdings carries NO weight, since 2026-09-28, and the size score no
+  longer reads it either.** The first written disagreement with a ranking this screener ever
+  received: a teammate reported that it "was initially ranking properties based on their proximity
+  to our existing sites, which isn't necessarily something we base an acquisition off of", and
+  that re-weighting toward growth factors (new and proposed developments, school quality,
+  population growth, freeway access, interchanges, airports) gave results "much more aligned with
+  our acquisition strategy". Proximity had been the heaviest weight (35) on the strength of an
+  inference from the portfolio's shape -- clustering is a pattern in what the firm *ended up*
+  owning, not a stated reason it bought -- and the person using the tool saying what the firm
+  selects on outranks that. The distance and nearest-holding columns stay as context; the `Why`
+  sentence now says location last, because leading with it read as the reason for the rank. The
+  size score's cluster branches (a large parcel "near holdings" scoring 75, a small one "inside a
+  cluster" 95) went the same day, because a size score that rewarded closeness would have kept
+  proximity in the ranking through a side door; the three figures that remain are the ones the old
+  table already gave the no-holding-nearby case. **The intended replacement is a growth-factor
+  score**, split into what is measurable keylessly (freeway and interchange distance from Census
+  TIGER roads, airport distance, county population change from Census, building permits) and what
+  stays in the conversation and the jurisdiction dossiers (proposed developments, school quality).
+  Its weight, like the three that remain, still needs a partner's sign-off. Re-prompting in one
+  person's chat is not repeatable and never reaches the workbook or report other people read,
+  which is why the change belongs here and not in a prompt.
+
+  **What the change exposed, measured on the teammate's own export.** Her file carries acreage on
+  5 of 88 rows, prices on 27, no days-on-market and no distress signal, so pricing, distress and
+  size were flat across the file and **proximity was not the heaviest factor there, it was the
+  only one**: 7 of her 8 "Pursue" listings were "Inside cluster". With location out, 87 of 88
+  rows tied at one score and `method="max"` put every one of them in "4 — Low fit", which is a
+  claim about listings the screener could not tell apart. `_assign_tiers` now calls a block tied
+  across at least `UNRANKED_TIE_SHARE` (a half, a judgement) of the file **Unranked**, while rows
+  genuinely above or below it keep their earned tier; the fully-identical rule it extends already
+  produced that label and the report already renders it. Two lessons. A thin export now says so
+  instead of ranking on the one column that happened to vary, which is the honest answer and also
+  the argument for the growth score: on files like hers it is the only signal left. And the
+  workbook and report *she* read still show the old order until this ships, so "the results
+  seemed more aligned" describes her chat, not the artifact anyone else opens.
+
+- **The growth score (`growth.py`, 2026-09-29) is that replacement, and it takes proximity's old
+  slot as a PLACEHOLDER weight.** Four signals, each a percentile within the file so a Texas
+  export recalibrates like every other market-relative figure here: miles to the nearest primary
+  road in the Census TIGER layer (**reusing the road outlines the HTML report already fetches and
+  caches per half-degree cell, so a screen makes no new network calls for it**), miles to the
+  nearest of 505 US airports with scheduled service (a bundled public-domain table under
+  `screening/reference/`, offline; **not** under a folder named `data`, which `release.py` strips from
+  every package, so it would have reached no teammate),
+  the county's population change from the Census Population Estimates county file, and homes
+  permitted per 1,000 residents from the Census Building Permits Survey county file. **The
+  Census query API now refuses a keyless request**, so both Census figures come from their plain
+  bulk downloads instead, cached in the shared geo cache for 180 days with a stale copy used and
+  named when a refresh fails; the no-keys rule holds. A constant signal (every listing in one
+  county) ranks every row at 50 and abstains; a listing with nothing available scores 50 and
+  `Growth_Basis` says so; nothing here can raise out of the screen. Measured on the 216-row export:
+  all four signals on every row, 0.5s, scores 20-88. On the teammate's 88-row file it is the only
+  factor with any spread, and it turned 87 Unranked rows back into a shortlist. **Not measured, and
+  the basis text says so on every row:** interchanges (TIGER has no point layer for them), proposed
+  developments and school quality, which stay in the conversation and the jurisdiction dossiers.
+  The weight of 35 was inherited, not chosen, because inheriting invents nothing; it still needs a
+  partner's sign-off. `check_screener.py` §25 asserts the score abstains to neutral when every
+  source is unreachable, that a closer freeway ranks higher, that a constant county signal moves
+  nothing, and that nothing is eliminated.
 - **No two CoStar exports have the same columns, and the header is not always row 1.** Every
   export is shaped by whoever built the report, so **nothing indexes a raw column name** —
   `normalise_columns()` resolves each concept by alias, then by *pattern plus a value check*, then
@@ -1083,7 +1142,7 @@ ranks or weights selection factors. They need a senior partner's judgment, not a
 (Real names and figures behind every genericized citation in this file live in
 `docs/EVIDENCE_APPENDIX.md`, local-only — this repo is deliberately public.)
 
-`system/scripts/check_screener.py` runs **111 checks** across deformed market shapes. Run it after
+`system/scripts/check_screener.py` runs **132 checks** across deformed market shapes. Run it after
 any change to `fit_screen.py`. Note it covers the screener only — **`geo_providers.py` has no
 automated coverage at all**, and that is where the worst measured bug of 2026-07-29 lived (see
 the proximity note below). It is one of three suites: `check_portfolio_comparison.py` (121 checks)
@@ -1656,7 +1715,7 @@ one particular name, OCR installed and Python already working. Every teammate bu
 
 ## Three regression suites, and the third one checks answers (2026-08-14)
 
-`check_screener.py` (**111 checks**) and `check_portfolio_comparison.py` (**121**) both test
+`check_screener.py` (**132 checks**) and `check_portfolio_comparison.py` (**121**) both test
 deterministic Python, and both pass while the answer a person actually receives is still wrong —
 because the wrongness lives in the knowledge the answer was built from, not in the arithmetic.
 `system/scripts/check_answers.py` (**20 checks**) is the third suite, and that knowledge is what it

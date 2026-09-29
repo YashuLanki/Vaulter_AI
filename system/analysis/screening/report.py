@@ -245,7 +245,16 @@ def _listing(row) -> dict:
         "verdict": _str(g("Pricing_Verdict")),
         "perLot": _num(g("Implied_Exit_Per_Lot")),
 
-        "comp": {"proximity": _num(g("Score_Proximity")), "pricing": _num(g("Score_Pricing")),
+        # The growth score (2026-09-29): the factor the team says it selects on.
+        # Its basis sentence travels with the number, like Cost_Basis does, so
+        # a reader can see which of the four signals were actually measured.
+        "growthBasis": _str(g("Growth_Basis")),
+        "freewayMi": _num(g("Freeway_Mi")), "airportMi": _num(g("Airport_Mi")),
+        "airport": _str(g("Nearest_Airport")),
+        "popGrowth": _num(g("County_Pop_Growth_Pct")), "permits1k": _num(g("County_Permits_Per_1k")),
+
+        "comp": {"growth": _num(g("Score_Growth")),
+                 "proximity": _num(g("Score_Proximity")), "pricing": _num(g("Score_Pricing")),
                  "distress": _num(g("Score_Distress")), "size": _num(g("Score_Size"))},
     }
 
@@ -329,6 +338,7 @@ def build_report(result: dict, out_path: Path = None, include_imagery: bool = Fa
         # raising mid-rollout.
         "columnSources": result.get("column_sources", []),
         "evidenceCoverage": result.get("evidence_coverage", []),
+        "growthStatus": result.get("growth_status", {}),
         "portfolioCoverage": result.get("portfolio_coverage"),
         "exitLotComps": result.get("exit_lot_comps", []),
         "irr": _irr(df),
