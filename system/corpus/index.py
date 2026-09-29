@@ -332,6 +332,32 @@ def _escape_like(term: str) -> str:
     return term.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
 
+def count_matches(term: str, subtree: str = "") -> int | None:
+    """
+    How many files a single term matches, anywhere in the path. None if the
+    file list cannot be read. Used to explain an empty search: "nothing
+    matches all of A B C" is only useful next to "C matches nothing at all".
+    """
+    term = (term or "").strip().lower()
+    if not term:
+        return 0
+    con = _connect()
+    if con is None:
+        return None
+    try:
+        sql = "SELECT COUNT(*) FROM files WHERE LOWER(path) LIKE ? ESCAPE '\\'"
+        bind = [f"%{_escape_like(term)}%"]
+        prefix = subtree.strip().strip("/").replace("\\", "/").lower()
+        if prefix:
+            sql += " AND LOWER(path) LIKE ? ESCAPE '\\'"
+            bind.append(f"{_escape_like(prefix)}/%")
+        return int(con.execute(sql, bind).fetchone()[0])
+    except Exception:
+        return None
+    finally:
+        con.close()
+
+
 def search(query: str, limit: int = 40, subtree: str = "") -> list[dict]:
     """
     Find documents whose path or filename matches every term in `query`.

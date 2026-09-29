@@ -89,8 +89,14 @@ system/data/last_update_check.txt
 # What the monthly Smartsheet pull last did (row and sold counts, and the team-folder
 # path it wrote to, which names the firm's library). Local to the one machine that pulls.
 system/data/last_project_master_pull.json
+# Per-machine tool-use counts (names and numbers only), carried to the team list
+# by the daily check-in. Local to each machine.
+system/data/tool_usage.json
 system/data/corpus_index.db-journal
 system/data/corpus_index.db-wal
+# Text of scanned pages this machine has already read (corpus/extract.py). Real
+# document contents, local to each machine by design -- never commit, never share.
+system/data/ocr_cache/
 
 # ── Auto-update staging (local, transient -- code zips + org-wide ──
 # setting values in plain text; the latter can be real API keys, so

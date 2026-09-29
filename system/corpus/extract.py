@@ -26,6 +26,7 @@ skipped -- `read_document` says so explicitly when asked for one.
 """
 
 import itertools
+import json
 import logging
 import re
 from datetime import datetime
@@ -285,6 +286,60 @@ def _pdf_comments(pdf) -> tuple[list, int]:
     return lines, count
 
 
+# ─── Remembering scanned pages (2026-09-29) ──────────────────────────────────
+#
+# Scanning is the slowest thing this system does: 11 to 34 seconds a page,
+# measured on the live copy's own log, where one scanned plan set took 174
+# seconds. Until now nothing was remembered, so the second read of the same
+# document cost exactly what the first did.
+#
+# The text of each scanned page is kept on THIS machine, in system/data/,
+# keyed by the document's path, size and last-changed date, so a changed file
+# is scanned again rather than answered from an old copy. Deliberately LOCAL,
+# never the team folder: a shared copy could hand one person the text of a
+# document in a folder they cannot open, which is the boundary the whole
+# corpus package exists to hold.
+#
+# A remembered page does not count against the scan budget, so asking for the
+# same long document twice gets FURTHER into it the second time instead of
+# stopping at the same page.
+
+def _ocr_cache_file(path: Path) -> Path | None:
+    try:
+        import hashlib
+        from config import DATA_DIR
+        folder = Path(DATA_DIR) / "ocr_cache"
+        folder.mkdir(parents=True, exist_ok=True)
+        st = path.stat()
+        key = f"{path.resolve()}|{st.st_size}|{int(st.st_mtime)}"
+        return folder / (hashlib.sha1(key.encode("utf-8")).hexdigest() + ".json")
+    except Exception:
+        return None
+
+
+def _ocr_cache_load(cache_file: Path | None) -> dict:
+    if cache_file is None or not cache_file.exists():
+        return {}
+    try:
+        data = json.loads(cache_file.read_text(encoding="utf-8"))
+        pages = data.get("pages") if isinstance(data, dict) else None
+        return {int(k): str(v) for k, v in pages.items()} if isinstance(pages, dict) else {}
+    except Exception:
+        return {}
+
+
+def _ocr_cache_save(cache_file: Path | None, pages: dict, filename: str) -> None:
+    if cache_file is None or not pages:
+        return
+    try:
+        tmp = cache_file.with_suffix(".tmp")
+        tmp.write_text(json.dumps({"file": filename, "pages": {str(k): v for k, v in pages.items()}}),
+                       encoding="utf-8")
+        os.replace(tmp, cache_file)
+    except Exception as e:
+        log.warning(f"Could not remember scanned pages for {filename}: {e}")
+
+
 def _extract_pdf(path: Path, metadata: dict) -> tuple[str, dict]:
     """
     Extract each page with pdfplumber. Any individual page that yields no
@@ -305,11 +360,19 @@ def _extract_pdf(path: Path, metadata: dict) -> tuple[str, dict]:
 
         _ocr_pages = 0
         _ocr_started = _t.perf_counter()
+        _cache_file = _ocr_cache_file(path)
+        _remembered = _ocr_cache_load(_cache_file)
+        _newly_scanned = {}
         for page_num, page in enumerate(pdf.pages, start=1):
             text = page.extract_text()
 
             if text and text.strip():
                 full_text.append(f"[Page {page_num}]\n{text.strip()}")
+            elif page_num in _remembered:
+                # Scanned on an earlier read of this exact file. Free.
+                metadata["ocr_used"] = True
+                metadata["ocr_pages_remembered"] = metadata.get("ocr_pages_remembered", 0) + 1
+                full_text.append(_remembered[page_num])
             else:
                 over_pages = _ocr_pages >= _OCR_MAX_PAGES
                 over_time = (_t.perf_counter() - _ocr_started) > _OCR_TIME_BUDGET_SECONDS
@@ -343,14 +406,15 @@ def _extract_pdf(path: Path, metadata: dict) -> tuple[str, dict]:
                 if page_images:
                     ocr_text = pytesseract.image_to_string(page_images[0], lang="eng")
                     if ocr_text.strip():
-                        full_text.append(f"[Page {page_num} - OCR]\n{ocr_text.strip()}")
+                        page_out = f"[Page {page_num} - OCR]\n{ocr_text.strip()}"
                     else:
                         # A drawing with no lettering OCR can read. Say it,
                         # rather than returning a silently empty page.
-                        full_text.append(
-                            "[Page %d is an image with no text OCR could read --"
-                            " typically a drawing, map or plan. It was scanned, not"
-                            " skipped.]" % page_num)
+                        page_out = ("[Page %d is an image with no text OCR could read --"
+                                    " typically a drawing, map or plan. It was scanned, not"
+                                    " skipped.]" % page_num)
+                    full_text.append(page_out)
+                    _newly_scanned[page_num] = page_out
 
             tables = page.extract_tables()
             if tables:
@@ -368,6 +432,8 @@ def _extract_pdf(path: Path, metadata: dict) -> tuple[str, dict]:
             log.warning("  Could not read this PDF's comments: %s" % exc)
             comment_lines, comment_count = [], 0
 
+    if _newly_scanned:
+        _ocr_cache_save(_cache_file, {**_remembered, **_newly_scanned}, path.name)
     metadata["comment_count"] = comment_count
     body = "\n\n".join(full_text)
     if not comment_lines:

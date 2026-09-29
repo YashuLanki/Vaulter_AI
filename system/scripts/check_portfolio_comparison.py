@@ -1231,6 +1231,114 @@ def main() -> int:
     except Exception as e:
         check("Project Master pull checks ran", False, f"{type(e).__name__}: {e}")
 
+    # ── §9: reading less, reading faster (2026-09-29) ────────────────────────
+    # Four efficiency changes, each of which could quietly give a WRONG answer
+    # if it misfired: a date read off a name that is not a date, an email filed
+    # as the document it discusses, an update history that swallows the
+    # Sources list, a remembered scan served for a file that has since changed.
+    print("\n§9 Reading less, reading faster")
+    try:
+        from corpus.describe import name_date, kind, status, property_folder
+        check("a YYMMDD prefix is read as the filed date", name_date("220419 Hearing Notice.pdf") == "2022-04-19")
+        check("  ...and a YYYYMMDD one", name_date("20240612_Plat.pdf") == "2024-06-12")
+        check("  ...but a six-digit job number is never a date", name_date("212411 Landscape Proposal.pdf") == "")
+        check("  ...nor digits with no separator after them", name_date("2204191.pdf") == "")
+        check("an email about a plat is labelled an email, not a plat",
+              kind("080124 CT re complete pre plat.msg") == "email about plat")
+        check("an amendment to a purchase agreement is an amendment",
+              kind("241004 2nd Amendment PSA.pdf") == "amendment")
+        check("a name with no kind word gets no kind, not a guess", kind("868065.pdf") == "")
+        check("executed and draft are read from the name",
+              status("260428 Amend FULLY EXECUTED.pdf") == "executed" and status("LOI REDLINE.docx") == "draft")
+        check("the property folder comes from the !PROPERTIES layout only",
+              property_folder("!PROPERTIES/ARIZONA/Some Ranch/01. Legal/x.pdf") == "Some Ranch"
+              and property_folder("Accounting/2024/x.pdf") == "")
+
+        import mcp_server as _ms2
+        _t = ("# T\n\nbody\n\n## Gaps\n\ng\n\n## Update history\n\n### Update 2026-08-06 — a\n\nold\n\n"
+              "## Update 2026-10-01 — b\n\nnew\n\n## Sources\n\n- a.pdf\n")
+        _o = _ms2._without_update_history(_t)
+        check("the update history is left out by default", "\nold\n" not in _o and "1 dated update" in _o)
+        check("  ...but an update written AFTER the fold is still returned", "\nnew\n" in _o)
+        check("  ...and so is the Sources list", "- a.pdf" in _o)
+        check("  ...and a summary with no history comes back unchanged",
+              _ms2._without_update_history("# T\n\n## Sources\n\n- a.pdf\n") == "# T\n\n## Sources\n\n- a.pdf\n")
+
+        import corpus.extract as _ex
+        import tempfile as _tf2, os as _os2, time as _time2
+        _dd = Path(_tf2.mkdtemp(prefix="vlt_ocr_"))
+        _f = _dd / "scan.pdf"; _f.write_bytes(b"one")
+        _saved_data = _ex.__dict__.get("DATA_DIR")
+        import config as _cfg2
+        _real = _cfg2.DATA_DIR
+        try:
+            _cfg2.DATA_DIR = _dd
+            _c1 = _ex._ocr_cache_file(_f)
+            _ex._ocr_cache_save(_c1, {1: "[Page 1 - OCR]\ntext"}, _f.name)
+            check("a scanned page is remembered for the same file", _ex._ocr_cache_load(_ex._ocr_cache_file(_f)) == {1: "[Page 1 - OCR]\ntext"})
+            _f.write_bytes(b"changed and longer")
+            check("  ...and forgotten the moment the file changes",
+                  _ex._ocr_cache_load(_ex._ocr_cache_file(_f)) == {})
+            check("  ...and the memory lives on this machine, never the team folder",
+                  str(_cfg2.SHARED_DIR) not in str(_c1))
+        finally:
+            _cfg2.DATA_DIR = _real
+            import shutil as _sh2; _sh2.rmtree(_dd, ignore_errors=True)
+    except Exception as e:
+        check("reading-less checks ran", False, f"{type(e).__name__}: {e}")
+
+    # ── §10: finding inside one document (2026-09-29) ─────────────────────────
+    # Each passage must say WHERE it came from, or a found fact cannot be cited;
+    # a table must not be sent twice; a spreadsheet number must arrive with the
+    # column headings that say what it is; and a reviewer's sticky note must
+    # never read as the document's own text.
+    print("\n§10 Finding inside one document")
+    try:
+        from corpus.find import passages as _fp, find as _ff
+        _doc = ("[1 REVIEWER COMMENT(S) are attached to this PDF.]\n  - p.2, J. Smith, 2026-01-01: price looks high?\n\n"
+                "[Page 1]\nThis Purchase Agreement is made between Seller and Buyer for the land described.\n\n"
+                "[Page 2]\nThe Purchase Price shall be One Million Dollars (USD 1,000,000.00), payable at Closing.\n\n"
+                "[Table on Page 2]\n| Purchase Price | USD 1,000,000.00 |\n\n"
+                "[Page 3]\nClosing shall occur on or before March 1, 2027, unless extended by the Buyer.\n")
+        _ps = _fp(_doc)
+        check("every passage says which page it came from",
+              all(p["heading"].startswith(("page ", "reviewer comment")) for p in _ps), str([p["heading"] for p in _ps]))
+        check("a table already in the page text is not returned a second time",
+              sum("1,000,000" in p["text"] for p in _ps) == 1)
+        check("a reviewer's note is labelled a reviewer comment, not document text",
+              any(p["heading"] == "reviewer comment" and "looks high" in p["text"] for p in _ps))
+        _hit, _n = _ff(_doc, "what's the sale price", 2)
+        check("a reworded question still finds the price, on its page",
+              _hit and "1,000,000" in _hit[0]["text"] and _hit[0]["heading"] == "page 2",
+              _hit[0]["heading"] if _hit else "nothing")
+        _hit, _n = _ff(_doc, "when do we have to close", 2)
+        check("  ...and the closing date", _hit and "March 1, 2027" in _hit[0]["text"])
+        _xls = "[Sheet: Budget]\nItem | Cost | Notes\nEngineering | 125,000 | civil\nLandscape | 40,000 | \n"
+        _hit, _ = _ff(_xls, "how much for engineering", 1)
+        check("a spreadsheet figure arrives with its sheet's column headings",
+              _hit and "Item | Cost" in _hit[0]["text"] and "125,000" in _hit[0]["text"])
+        _hit, _ = _ff(_doc, "zzqq xxyy", 3)
+        check("a question sharing no word with the document returns nothing, not a guess", _hit == [])
+        import mcp_server as _ms3
+        _fn = getattr(_ms3.create_mcp_server()._tool_manager._tools["find_in_document"].fn, "__wrapped__", None)
+        _fn = _fn or _ms3.create_mcp_server()._tool_manager._tools["find_in_document"].fn
+        check("a path outside the firm's library is refused",
+              "outside the firm's document library" in _fn(path="../../Desktop/x.pdf", question="price"))
+        # Both faults the answer test found (2026-09-29) came from the reply's
+        # own instructions: a pageless Word file got cited as "page 1", and two
+        # printed deposits were summed and cited to a section as if printed.
+        _pl = _fp("Earnest money of USD 25,000.00 is due at opening under Section 2.A of this agreement.")
+        check("a document with no pages is never labelled with a page",
+              _pl and not _pl[0]["heading"].startswith("page"), _pl[0]["heading"] if _pl else "")
+        import inspect as _insp
+        _src = _insp.getsource(_ms3)
+        check("the find reply tells Claude to call a worked-out figure its own calculation",
+              "your own" in _src and "calculation and show the parts" in _src)
+        check("  ...and to cite a section, never a page, where there are no pages",
+              "NO page numbers" in _src)
+    except Exception as e:
+        check("find-inside-a-document checks ran", False, f"{type(e).__name__}: {e}")
+
     passed = sum(1 for _, ok, _ in RESULTS if ok)
     print(f"\n{passed}/{len(RESULTS)} checks passed")
     return 0 if passed == len(RESULTS) else 1

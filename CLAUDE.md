@@ -50,8 +50,10 @@ python system/scripts/pull_project_master.py  # (maintainer's machine only) refr
 
 # Checks -- run the one that matches what you touched (see "Three regression suites" below)
 python system/scripts/check_screener.py             # 132 checks on the screener's arithmetic
-python system/scripts/check_portfolio_comparison.py # 121 checks on the comparison index
+python system/scripts/check_portfolio_comparison.py # 137 checks on the comparison index
 python system/scripts/check_answers.py              # 20 checks on the knowledge answers come from
+python system/scripts/check_retrieval.py            # does summary search find the right passage
+python system/scripts/check_find.py                 # does find-in-document find the right passage
 ```
 
 There is no lint/test framework configured (no pytest, no linter config) — the three
@@ -278,6 +280,58 @@ That same report also proved the filter right in the other direction — its fif
 **empty**, so four comments is the correct count where a hand read reported five. Capped at
 `_MAX_COMMENTS` (40) per document, and it says so when it caps.
 
+**Reading less, reading faster (2026-09-29).** Measured on the live copy's log, the four
+most-used tools are search, get summary, update summary and read document, and a read averaged
+15 seconds, scanned plan sets two to three minutes. So the efficiency work went where the time is:
+
+* **Scanned pages are remembered on the machine that read them** (`extract.py`,
+  `system/data/ocr_cache/`, gitignored), keyed by path, size and last-changed date so a changed
+  file is scanned again. A nine-page scanned document: **25.9s first read, 0.02s second, identical
+  text.** Local and never the team folder, because a shared copy could hand someone the text of a
+  document in a folder they cannot open. A remembered page does not count against the scan budget,
+  so asking twice gets further into a long document instead of stopping at the same page.
+* **Every search result says what its name says it is** (`corpus/describe.py`): the document kind
+  (amendment, LOI, title, plat, settlement statement...), whether the name marks it executed or a
+  draft, and the date the firm filed it under from the YYMMDD prefix -- which, unlike the drive date,
+  does not move when OneDrive re-syncs. Computed per result, never stored, so the file list's shape
+  is unchanged on every machine. Of ~450,000 files under `!PROPERTIES`, 198,629 carry a filed date
+  and 120,234 a kind; everything else stays blank rather than guessed. Emails are labelled "email
+  about <kind>", because a message discussing a plat is not the plat. A six-digit job number is not
+  read as a date (8,145 such prefixes are refused). `search_documents` gained `kind=` and
+  `newest_first=`; newest-first sorts the dated names across up to 400 matches, because sorting only
+  the best-scoring 32 returned a 2024 amendment as Arizona's newest when there was a 2026 one.
+  **It costs tokens, and was trimmed once already:** the first format made a 25-result list 31-48%
+  larger by repeating labels on every line. Labels are now explained once in the header and the
+  filed date is not printed (it leads the file name on the line above; sorting still uses it), which
+  leaves +10-31%, 60-250 tokens a search -- the kind and status words themselves. Worth it only
+  because one avoided wrong read costs 4,000-30,000; if that stops being true, drop the kind line.
+* **An empty search explains itself.** It counts each word on its own (`corpus.count_matches`),
+  names the word that matched nothing, and shows what the rest match, labelled as widened. The
+  empty answer is the one this system most needs to explain, since it reads as "no record exists".
+* **The staleness check was deliberately NOT changed to use the filed date.** It would suppress a
+  genuinely newly-filed old document (a 2019 deed scanned last week), and the warning already names
+  the file, whose name carries the date. Recorded so nobody "fixes" it without that trade in view.
+* **The two summary checks in `check_system_health` run on a 12-second budget**
+  (`SUMMARY_CHECK_BUDGET_SECONDS`), in a bounded worker like `_get_code_version`'s. They are where
+  the 27-67s cold-OneDrive mornings went. Out of time, it says the summaries were NOT checked --
+  never silence, which would read as "all current".
+* **An update now says what it contains.** `release.py` defaults `--notes` to the commit subjects
+  since the general channel's version (capped at five), and the mid-conversation notice quotes them.
+  Before, nobody ever typed `--notes`, and a teammate was asked "install bb93e29?" with nothing to
+  decide on. Note the trap found building it: `release.py` imports `config` and `safe_io` INSIDE
+  each function, and a new function that assumed module-level names failed silently into "".
+* **Each machine counts its own tool use** (`_count_tool_use`, `system/data/tool_usage.json`,
+  gitignored): names and counts only, never what was asked, 14 days kept, ~4ms a call. The daily
+  check-in carries the last seven days as `tools_last_7_days` and the morning round prints the top
+  five per person. Until now only errors travelled, so what the team uses was a guess from one log.
+* **`get_property_summary` leaves out an `## Update history` section by default**
+  (`include_history=True` returns it). That section holds dated updates verbatim after their
+  findings were folded into the main text; see the property-summaries note. It runs only to the next
+  `## ` heading, so the Sources list and any update written after the fold always come back.
+
+`check_portfolio_comparison.py` §9 holds these: the date and kind rules both ways, the history
+trimming that must keep later updates and Sources, and the scan memory forgetting a changed file.
+
 **Search matches names, not contents — and this is load-bearing, not a shortcut.** The
 library is hundreds of thousands of files synced as OneDrive Files On-Demand *placeholders*: filenames
 are local, file bytes are not, and opening one downloads it. Grepping the corpus would
@@ -343,6 +397,85 @@ Three things were found by testing on a copy, not by reasoning, and each shaped 
   Sources line are adjacent in those, and lifting "the block after the date line" took both. The
   line-by-line census (zero lines lost, every extra line accounted for) is what caught it, and it
   runs on every conversion.
+
+**Searching inside the summaries (`summary_search.py`, `search_property_summaries`,
+2026-09-29).** Retrieval over the team's summaries, NOT the document library -- the library was
+ruled out for the reasons the July rebuild removed the vector database (indexing means downloading
+every file; a shared index of document text crosses SharePoint's folder permissions). The summaries
+already sit where everyone can read them, so searching them crosses nothing. Keyword ranking
+(BM25) plus a short hand-written list of the firm's synonyms; no model, no key, nothing to install.
+
+**The answer to "what if the ranking picks the wrong passage?" was measured, and it changed the
+design.** `scripts/check_retrieval.py` runs 60 questions written by rephrasing summary facts the
+way a teammate asks ("who sold us" where the text says "grantor"); the set is gitignored under
+`system/data/eval/` because every entry is a real firm fact. The first version labelled its own
+result strong / partial / weak: 18 of 40 answers found, and **16 wrong or unanswerable results
+labelled "strong"** -- the label told Claude to trust a miss. Two findings fixed it:
+
+* **The property's own name was matching every passage** of its own summary, so almost anything
+  looked like a strong answer. Name words (card name and aliases) are now ignored when ranking
+  inside one property: 18 -> 27 of 40 found.
+* **No score separates right from wrong.** An unanswerable question outscored most correct
+  answers. A keyword search cannot know whether it found the answer; the reader of the passages
+  can. So the labels are gone: it returns ten CANDIDATES and tells Claude, in every reply, to read
+  the whole summary if none plainly states the answer and never to call something absent from this
+  search. Ten passages: the answer is among them **31 of 40** times at about **1,000 tokens against
+  5,500** for the whole summary; a miss costs the candidates plus the full read -- a little extra,
+  never a wrong answer. The card's figures (purchase price, year, status, sale) lead every reply,
+  because several "misses" were prices the card already held.
+
+Across properties it caps two passages per summary and says a property missing from the list is
+not evidence it lacks the thing asked about (20 of 28 answering properties named). Whether Claude
+actually notices a miss is Claude's judgement, not the script's -- the `answer-eval` skill is where
+that gets tested. The synonym list grows only from misses the check shows, never by guessing.
+
+**Finding inside one document (`corpus/find.py`, `find_in_document`, 2026-09-29)**, built because
+reading documents is where teammates' tokens go (a median ~4,400 and up to 33,000 a read, carried
+in the conversation afterwards). It reads the one chosen file on the person's own machine, as
+`read_document` does, and returns only the best-matching passages with their page -- same keyword
+ranking and synonyms as the summary search, same "candidates, not a verdict" rule. Tables are not
+searched (the page text already holds them; they were being sent twice), a spreadsheet chunk
+repeats its sheet's heading row so a number never arrives without its column names, and a
+reviewer's sticky note ranks behind the document's own words (it had outranked the purchase-price
+clause) and is labelled as a note.
+
+**Tested for truth, not just retrieval.** 944 of 944 returned passages were the document's exact
+words on the page claimed. `scripts/check_find.py` (51 rephrased questions over 17 real documents,
+gitignored under `system/data/eval/`): the answer is among eight passages 41 times, ~1,400 tokens
+against ~11,400 for the whole document; 68% less even counting a full read after every miss.
+Then the part a script cannot test: six answerers saw ONLY what the tools return, as Claude
+Desktop does, and three graders holding the full documents checked all 68 answers. **49 correct,
+17 honest "not in the document", 0 false absences, 0 invented answers to the 17 unanswerable
+questions -- and 2 faults, both in pageless Word files and both caused by the reply's own
+wording**: an answer cited "page 1" of a document with no pages, and one summed two printed
+deposits and cited the total to a section as though printed. The reply now says when a document
+has no pages (cite the section) and that a worked-out figure must be called a calculation with its
+parts; the same figure rule went into the summary search. A fresh answerer and grader re-ran all
+12 questions on those documents: **12 of 12 clean.** Answerers fell back to a full read 19 times in
+68 questions -- more than the misses alone required, which is the caution intended; it is also
+why the real saving (60% measured across the run) sits below the retrieval-only figure.
+
+**The ten summaries with three or more update sections were folded (2026-09-29), and the saving
+was not what was predicted.** Each carried its newest facts in dated `## Update` sections appended
+below Gaps, so a reader of the main text got an out-of-date picture: one summary stated the wrong plat
+recording date in three places, another still called a deal "under negotiation" after it had fallen
+through, a third called a map extension "pending" after it had been granted. One writer per summary
+rewrote the main sections to state the current picture, in scratch only, under hard rules: every
+`## ` heading kept in order, every cited file and dollar figure kept, verification markers kept,
+superseded statements replaced with a dated "(was: ...)", real disagreements left flagged. The
+original update sections move verbatim to an `## Update history` section above Sources, which
+`get_property_summary` leaves out by default. A checker (backup under
+`system/data/backups/summaries_pre_fold_20260929/`) refused any draft that lost a citation or a
+figure, or carried a number appearing nowhere in the originals; the four numbers it flagged were the
+same dates reformatted ("August 5, 2026" as "8/5/2026"), checked by hand. Card, title and date
+line are carried byte-for-byte, and apply refuses if the team copy changed since the backup.
+
+**The measured result: 100,969 tokens returned across the ten before, 98,300 after -- 3% less, not
+the "about half" predicted**, and four of the ten came back slightly longer. Keeping every citation
+and figure keeps nearly every sentence; the update sections were mostly NEW facts, not repetition.
+So the fold is a correctness change, not a size change: the main text now says what is true. If
+summaries must get cheaper, the lever is a shorter answer by default (the card plus the current
+status), not a rewrite -- and that is a separate decision about what a reader is allowed to skip.
 
 **A longer property name could land in a shorter property's file, and did (fixed 2026-09-24).**
 Both summary tools resolved a name by containment in either direction, so with no exact match
@@ -452,7 +585,7 @@ boundary is "is this your own computer, logged in as you." claude.ai (the web ap
 be used with this server: it runs in the cloud and can only reach a network address, never
 a process on someone's own machine. Claude Desktop or Claude Code are required.
 
-**30 tools.** Don't maintain this list by hand — it drifted to 19 entries with one duplicated
+**32 tools.** Don't maintain this list by hand — it drifted to 19 entries with one duplicated
 and two missing. Get the truth from the code:
 
 ```bash
@@ -463,10 +596,10 @@ python -c "import asyncio; from mcp_server import create_mcp_server; \
 Grouped by what they're for: **health & updates** — `check_system_health`,
 `apply_pending_update`, `apply_pending_settings`, `get_pending_setup_details`,
 `get_install_status`.
-**Documents** — `search_documents`, `read_document`, `browse_documents`.
+**Documents** — `search_documents`, `find_in_document`, `read_document`, `browse_documents`.
 **Team knowledge** (shared-folder files, deliberately outside the document index — each of
 these tools is the ONLY door to its record; see "Where answers live" in the server's own
-instructions) — `get_property_summary`, `update_property_summary`, `get_passed_on_deals`, `get_sold_deals`.
+instructions) — `search_property_summaries`, `get_property_summary`, `update_property_summary`, `get_passed_on_deals`, `get_sold_deals`.
 **Portfolio** — `get_property_info`, `get_portfolio_list`, `get_properties_by_stage`,
 `open_property_files`, `open_property_document`.
 **Screening** — `screen_listings`, `get_screening_rules`,
@@ -1145,7 +1278,7 @@ ranks or weights selection factors. They need a senior partner's judgment, not a
 `system/scripts/check_screener.py` runs **132 checks** across deformed market shapes. Run it after
 any change to `fit_screen.py`. Note it covers the screener only — **`geo_providers.py` has no
 automated coverage at all**, and that is where the worst measured bug of 2026-07-29 lived (see
-the proximity note below). It is one of three suites: `check_portfolio_comparison.py` (121 checks)
+the proximity note below). It is one of three suites: `check_portfolio_comparison.py` (137 checks)
 covers the comparison index, and `check_answers.py` (20) covers the shared knowledge answers are
 built from — see "Three regression suites" below for what each one can and cannot catch.
 
@@ -1715,7 +1848,7 @@ one particular name, OCR installed and Python already working. Every teammate bu
 
 ## Three regression suites, and the third one checks answers (2026-08-14)
 
-`check_screener.py` (**132 checks**) and `check_portfolio_comparison.py` (**121**) both test
+`check_screener.py` (**132 checks**) and `check_portfolio_comparison.py` (**137**) both test
 deterministic Python, and both pass while the answer a person actually receives is still wrong —
 because the wrongness lives in the knowledge the answer was built from, not in the arithmetic.
 `system/scripts/check_answers.py` (**20 checks**) is the third suite, and that knowledge is what it

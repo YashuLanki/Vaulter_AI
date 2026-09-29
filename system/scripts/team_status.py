@@ -295,6 +295,7 @@ def collect() -> dict:
             "days_since_used": quiet,
             "problems": flags,
             "state": state,
+            "tools_last_7_days": rec.get("tools_last_7_days") if isinstance(rec.get("tools_last_7_days"), dict) else {},
         })
 
     # Installed but never seen: a setup record with no check-in at all. This is
@@ -344,6 +345,10 @@ def as_text(data: dict) -> str:
         lines.append(f"    reported version {p['version']}"
                      + (" (up to date)" if p["up_to_date"] else " (behind)")
                      + f", as of {used}")
+        use = p.get("tools_last_7_days") or {}
+        if use:
+            top = ", ".join(f"{k.replace('_', ' ')} {v}" for k, v in list(use.items())[:5])
+            lines.append(f"    used in the 7 days before that: {top}")
         for flag in p["problems"]:
             lines.append(f"    NEEDS ATTENTION: {flag}")
 

@@ -351,8 +351,44 @@ def _prune_old_packages() -> None:
         print(f"  Cleaned up {removed} superseded package(s); kept {len(keep_names)}.")
 
 
+def _default_notes() -> str:
+    """
+    What changed since the version everyone is on, in plain words, when no
+    --notes was given: the subject lines of the commits since the general
+    channel's version. This repo's commit subjects are already written for a
+    non-technical reader ("Stop reporting a property as current when nothing
+    about it was checked"), so they are the release notes.
+
+    Until 2026-09-29 --notes defaulted to "", nobody ever typed one, and every
+    update was offered to a teammate as a bare version code. A person asked
+    "install bb93e29?" has no way to decide. Capped at five lines so the
+    notice stays one glance long; "" if git cannot say.
+    """
+    try:
+        from core import safe_io
+        from config import UPDATES_DIR
+        general = safe_io.load_json(UPDATES_DIR / "latest_version_general.json") or {}
+        since = str(general.get("version") or "").strip()
+        rng = [f"{since}..HEAD"] if since else ["-5"]
+        r = subprocess.run(["git", "log", "--format=%s", *rng], cwd=str(PROJECT_ROOT),
+                           capture_output=True, text=True, timeout=10,
+                           stdin=subprocess.DEVNULL)
+        subjects = [ln.strip() for ln in r.stdout.splitlines() if ln.strip()] if r.returncode == 0 else []
+    except Exception:
+        return ""
+    if not subjects:
+        return ""
+    shown = subjects[:5]
+    more = len(subjects) - len(shown)
+    return "; ".join(shown) + (f"; and {more} smaller change(s)" if more > 0 else "")
+
+
 def publish(notes: str, force: bool = False) -> None:
     print("Vaulter AI — publishing a new version to the CANARY channel")
+    if not notes.strip():
+        notes = _default_notes()
+    if notes:
+        print(f"  What changed: {notes}")
     version = _get_version()
     commit_time = _get_commit_time()
     print(f"  Version: {version}" + (f"  (committed {commit_time[:16]})" if commit_time else ""))
@@ -400,7 +436,9 @@ def promote() -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--notes", default="", help="Short description of what changed")
+    parser.add_argument("--notes", default="",
+                        help="Short description of what changed (default: the commit "
+                             "subjects since the version everyone is on)")
     parser.add_argument("--force", action="store_true",
                         help="publish even though this code is OLDER than what instances "
                              "run -- the deliberate way to roll a bad release back")

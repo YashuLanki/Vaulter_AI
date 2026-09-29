@@ -1087,6 +1087,12 @@ def _write_install_checkin() -> None:
         except Exception:
             pass
 
+        # What this person has used in the last week, names and counts only.
+        # Absent (not empty) when it cannot be read, like every field here.
+        usage = _tool_use_last_7_days()
+        if usage:
+            record["tools_last_7_days"] = usage
+
         # An update sitting downloaded-but-not-applied. This is the one flag
         # that says "this person has been offered the fix and has not taken
         # it yet", which is a different thing from simply being behind.
@@ -1298,7 +1304,37 @@ def _acres_str(v) -> str:
 # asks about that property by name. Deliberately narrow: check_system_health
 # is trusted BECAUSE it stays quiet, and naming 39 of 49 properties every
 # conversation is how a warning becomes wallpaper.
+# How long check_system_health gives the two property-summary checks before
+# reporting them as not checked (see where it is used). Normal is 1-4s; the
+# slow cold-OneDrive mornings ran to 67s. A judgement, set well above normal.
+SUMMARY_CHECK_BUDGET_SECONDS = 12
+
 ACTIVE_DEAL_STAGES = ("Acquisition", "Disposition")
+
+
+HISTORY_HEADING = "## Update history"
+
+
+def _without_update_history(text: str) -> str:
+    """
+    The summary minus its "## Update history" section, with a one-line marker
+    saying it was left out. That section holds the dated updates verbatim,
+    after their findings were folded into the main text (2026-09-29); it runs
+    to the next "## " heading, so the Sources list after it, and any update
+    written since the fold, are always returned. A summary with no such
+    section comes back unchanged.
+    """
+    start = text.find("\n" + HISTORY_HEADING)
+    if start < 0:
+        return text
+    rest = text[start + 1:]
+    nxt = rest.find("\n## ", len(HISTORY_HEADING))
+    end = start + 1 + nxt if nxt >= 0 else len(text)
+    n = text.count("\n### Update", start, end)
+    marker = (f"\n{HISTORY_HEADING} (left out: {n} dated update section(s) whose findings "
+              f"are already folded in above. Ask again with include_history=True for "
+              f"when each was learned.)\n")
+    return text[:start] + marker + text[end:]
 
 
 def _find_summary(property_name: str, summaries_dir: Path):
@@ -2092,9 +2128,14 @@ Never answer "the firm has no record of that" just because search_documents
 came back empty -- for everything above the first line, the record was never
 in that index to begin with.
 
-ASKED ABOUT A SPECIFIC PROPERTY? CALL get_property_summary FIRST.
-The team keeps one shared, cited summary per property. It costs a few hundred
-tokens and usually answers the question outright, with file and page citations.
+ASKED ABOUT A SPECIFIC PROPERTY? CHECK THE TEAM'S SUMMARY FIRST.
+For one specific fact, call search_property_summaries first: it returns the
+data card and the passages most likely to answer, for about a fifth of the
+tokens. It matches WORDS, so it can return the wrong passages without knowing:
+if none of them plainly states the answer, call get_property_summary and read
+the whole summary before answering, and never conclude a fact is absent from
+that search. For an overview, call get_property_summary directly. The team keeps one shared, cited summary per property, and it
+usually answers the question outright, with file and page citations.
 Going to the source documents instead costs tens of thousands of tokens to reach
 the same answer, and every teammate would pay it again. These summaries do NOT
 appear in search_documents (the shared folder is deliberately excluded from the
@@ -2111,7 +2152,12 @@ Work in two steps:
   1. search_documents (or browse_documents to explore the folder tree) to find
      candidate files. Names are informative — they usually carry a date, the
      counterparty, and the document kind.
-  2. read_document on the specific files that look right, to get their text.
+  2. For a specific fact in a file that looks right (a price, a date, a
+     deadline, who pays what), call find_in_document: it returns only the
+     passages that match, with pages, instead of the whole text. If none of
+     them plainly answers, or the question needs the whole document, call
+     read_document. Never conclude a document lacks something from
+     find_in_document alone.
 If a search comes back empty, that means no file NAME matched — not that the
 firm has nothing on the subject. Try broader terms or browse the property folder.
 Never tell the user the firm has no records on something based on an empty search.
@@ -2381,175 +2427,227 @@ no score -- it's a diary, not a dial.""".replace(
         except Exception as e:
             lines.append(f"Portfolio file: could not check ({e})")
 
-        # ── Property summaries ───────────────────────────────────
-        # A newly-acquired property has no summary until someone asks about
-        # it and Claude builds one -- deliberately lazy, see
-        # PROPERTY_SUMMARIES_DIR's own design note. But nothing previously
-        # NOTICED a gap existed at all, so a new acquisition could sit
-        # invisible indefinitely if nobody happened to ask. This only
-        # detects and names the gap; it never writes a summary itself --
-        # that stays a human-in-the-loop, reviewed-in-conversation action,
-        # same as it's always been.
-        try:
-            from portfolio import load_properties
-            from config import PROPERTY_SUMMARIES_DIR
-            import re as _re
-
-            def _norm(s):
-                return _re.sub(r"[^a-z0-9]", "", s.lower())
-
-            active, _sold = load_properties()
-            existing = [p.stem for p in Path(PROPERTY_SUMMARIES_DIR).glob("*.md")]
-            existing_norm = [_norm(e) for e in existing]
-            # Substring match, not exact -- Project Master names often carry
-            # a parenthetical alias or slash-suffix the summary's own
-            # filename dropped (e.g. a property name with a parenthetical
-            # alias vs. a summary filename that dropped it), so exact match
-            # alone flagged real, already-summarized properties as missing.
-            # Verified against the live 49-property Project Master: zero
-            # false positives.
-            # Known tradeoff, deliberately accepted: two properties sharing
-            # a name stem (e.g. a property name and a longer-named later-
-            # phase sibling sharing the same stem) can mask each other here
-            # if only the shorter-named one has been summarized -- a false
-            # negative, not a false
-            # positive. Chosen on purpose: a wrong "you're missing this"
-            # claim damages trust in a tool built to stay silent unless
-            # something is actually wrong; an occasional missed detection
-            # in this one narrow case is the safer failure direction, and
-            # asking about that property directly still works exactly as
-            # it always has.
-            no_summary = [
-                p["name"] for p in active
-                if not any(en in _norm(p["name"]) or _norm(p["name"]) in en
-                            for en in existing_norm)
-            ]
-            if no_summary:
-                names = ", ".join(no_summary[:5])
-                more = f" (+{len(no_summary) - 5} more)" if len(no_summary) > 5 else ""
-                lines.append(f"Property summaries: {len(no_summary)} propert"
-                              f"{'y' if len(no_summary) == 1 else 'ies'} with none yet: "
-                              f"{names}{more}")
-                issues.append(
-                    f"{len(no_summary)} propert{'y' if len(no_summary) == 1 else 'ies'} in the "
-                    f"Project Master ha{'s' if len(no_summary) == 1 else 've'} no shared summary "
-                    f"yet: {names}{more}. This is expected for a brand-new acquisition -- summaries "
-                    f"are only built the first time someone asks about a property. If this looks "
-                    f"like a real gap, offer to build one now (the same way a summary always gets "
-                    f"created): read that property's documents and save a summary."
-                )
-        except Exception as e:
-            lines.append(f"Property summaries: could not check ({e})")
-
-        # ── Summaries that have fallen behind their documents ────
-        # The missing-summary check above catches a property nobody has
-        # written up yet. This catches the opposite and more insidious case:
-        # a summary that EXISTS, reads as authoritative, and is months out of
-        # date. Until now that was only ever noticed if someone happened to
-        # ask about that exact property -- so a deal nobody asked about could
-        # drift indefinitely while still answering confidently.
+        # ── The two summary checks, on a time budget (2026-09-29) ───
+        # They read every property summary from the team folder and the
+        # property folders on the drive. On a cold OneDrive morning that took
+        # the whole health check to 27-67 seconds on the maintainer's machine
+        # (logged 2026-09-02, -18, -19), and this check runs BEFORE anybody's
+        # first answer. The side-jobs above time themselves and never fired,
+        # and the log shows the gap opening right after the portfolio loads,
+        # which is where these begin.
         #
-        # Active-stage properties only (see ACTIVE_DEAL_STAGES). Same
-        # detection-only rule as everything else here: it never rewrites a
-        # summary itself, it names the gap and lets a human decide.
+        # So they run in a worker bounded by SUMMARY_CHECK_BUDGET_SECONDS, the
+        # same bounded-worker shape _get_code_version uses. On time, their
+        # findings are reported exactly as before. Out of time, the check SAYS
+        # it did not finish -- never silence, because an unchecked summary
+        # reported as nothing would read downstream as "checked, all current",
+        # the collapse _newer_readable_docs exists to prevent. The worker is
+        # left to finish on its own; it only reads, plus the local folder-name
+        # cache, so there is nothing for it to leave half-done.
+        def _summary_checks(lines, issues):
+            # ── Property summaries ───────────────────────────────────
+            # A newly-acquired property has no summary until someone asks about
+            # it and Claude builds one -- deliberately lazy, see
+            # PROPERTY_SUMMARIES_DIR's own design note. But nothing previously
+            # NOTICED a gap existed at all, so a new acquisition could sit
+            # invisible indefinitely if nobody happened to ask. This only
+            # detects and names the gap; it never writes a summary itself --
+            # that stays a human-in-the-loop, reviewed-in-conversation action,
+            # same as it's always been.
+            try:
+                from portfolio import load_properties
+                from config import PROPERTY_SUMMARIES_DIR
+                import re as _re
+
+                def _norm(s):
+                    return _re.sub(r"[^a-z0-9]", "", s.lower())
+
+                active, _sold = load_properties()
+                existing = [p.stem for p in Path(PROPERTY_SUMMARIES_DIR).glob("*.md")]
+                existing_norm = [_norm(e) for e in existing]
+                # Substring match, not exact -- Project Master names often carry
+                # a parenthetical alias or slash-suffix the summary's own
+                # filename dropped (e.g. a property name with a parenthetical
+                # alias vs. a summary filename that dropped it), so exact match
+                # alone flagged real, already-summarized properties as missing.
+                # Verified against the live 49-property Project Master: zero
+                # false positives.
+                # Known tradeoff, deliberately accepted: two properties sharing
+                # a name stem (e.g. a property name and a longer-named later-
+                # phase sibling sharing the same stem) can mask each other here
+                # if only the shorter-named one has been summarized -- a false
+                # negative, not a false
+                # positive. Chosen on purpose: a wrong "you're missing this"
+                # claim damages trust in a tool built to stay silent unless
+                # something is actually wrong; an occasional missed detection
+                # in this one narrow case is the safer failure direction, and
+                # asking about that property directly still works exactly as
+                # it always has.
+                no_summary = [
+                    p["name"] for p in active
+                    if not any(en in _norm(p["name"]) or _norm(p["name"]) in en
+                                for en in existing_norm)
+                ]
+                if no_summary:
+                    names = ", ".join(no_summary[:5])
+                    more = f" (+{len(no_summary) - 5} more)" if len(no_summary) > 5 else ""
+                    lines.append(f"Property summaries: {len(no_summary)} propert"
+                                  f"{'y' if len(no_summary) == 1 else 'ies'} with none yet: "
+                                  f"{names}{more}")
+                    issues.append(
+                        f"{len(no_summary)} propert{'y' if len(no_summary) == 1 else 'ies'} in the "
+                        f"Project Master ha{'s' if len(no_summary) == 1 else 've'} no shared summary "
+                        f"yet: {names}{more}. This is expected for a brand-new acquisition -- summaries "
+                        f"are only built the first time someone asks about a property. If this looks "
+                        f"like a real gap, offer to build one now (the same way a summary always gets "
+                        f"created): read that property's documents and save a summary."
+                    )
+            except Exception as e:
+                lines.append(f"Property summaries: could not check ({e})")
+
+            # ── Summaries that have fallen behind their documents ────
+            # The missing-summary check above catches a property nobody has
+            # written up yet. This catches the opposite and more insidious case:
+            # a summary that EXISTS, reads as authoritative, and is months out of
+            # date. Until now that was only ever noticed if someone happened to
+            # ask about that exact property -- so a deal nobody asked about could
+            # drift indefinitely while still answering confidently.
+            #
+            # Active-stage properties only (see ACTIVE_DEAL_STAGES). Same
+            # detection-only rule as everything else here: it never rewrites a
+            # summary itself, it names the gap and lets a human decide.
+            try:
+                from portfolio import load_properties
+                from config import PROPERTY_SUMMARIES_DIR
+                import re as _re
+
+                def _norm(s):
+                    return _re.sub(r"[^a-z0-9]", "", s.lower())
+
+                active, _src = load_properties()
+                summary_files = list(Path(PROPERTY_SUMMARIES_DIR).glob("*.md"))
+                stamps, uncheckable, texts = {}, [], {}
+                for prop in active:
+                    if prop.get("category") not in ACTIVE_DEAL_STAGES:
+                        continue
+                    pn = _norm(prop["name"])
+                    match = next((f for f in summary_files
+                                  if _norm(f.stem) in pn or pn in _norm(f.stem)), None)
+                    if match is None:
+                        continue  # already reported by the missing-summary check
+                    _body = match.read_text(encoding="utf-8", errors="replace")
+                    stamped = _summary_stamp(_body)
+                    if stamped is None:
+                        # No self-stamp means this one can never be currency-checked.
+                        # Say so rather than skipping quietly -- a silent skip reads
+                        # downstream as "checked, fine", which is the exact false
+                        # reassurance this whole check exists to prevent.
+                        uncheckable.append(prop["name"])
+                        continue
+                    stamps[prop["name"]] = stamped
+                    # Keep the text: a same-day file the summary NAMES is not new,
+                    # and the bulk check cannot know that without it.
+                    texts[prop["name"]] = _body
+
+                # None (couldn't check) must not become an empty result, which
+                # would read downstream as "checked, everything current".
+                found = _newest_docs_for_many(stamps, texts)
+                # Asked as its own question, by its own function -- see below for why
+                # this is not folded into the call above.
+                unmatched = sorted(_properties_with_no_files(
+                    [n for n in stamps if n not in (found or {})], texts))
+                behind = sorted(found.items()) if found else []
+
+                if behind:
+                    # Name the newest FILE, never a count. A count cannot be trusted
+                    # here: OneDrive rewrites a file's modified-date when it re-syncs,
+                    # so on one real property years' worth of older documents all
+                    # looked like they arrived this year. The filename is what lets
+                    # a reader tell a genuinely new contract from an old file that merely got
+                    # re-synced -- same reasoning _summary_staleness already gives for
+                    # naming files instead of counting them.
+                    named = "; ".join(f"{n} (newest: {f})" for n, f in behind[:3])
+                    more = f"; +{len(behind) - 3} more" if len(behind) > 3 else ""
+                    lines.append(f"Summaries behind: {len(behind)} active-stage "
+                                 f"propert{'y' if len(behind) == 1 else 'ies'}")
+                    issues.append(
+                        f"{len(behind)} propert"
+                        f"{'y' if len(behind) == 1 else 'ies'} being actively bought or sold "
+                        f"ha{'s' if len(behind) == 1 else 've'} documents filed since "
+                        f"{'its' if len(behind) == 1 else 'their'} shared summary was last "
+                        f"updated: {named}{more}. Judge from the filename, not the fact it "
+                        f"appeared -- OneDrive updates a file's date when it re-syncs, so an "
+                        f"old document can look new. Durable facts in those summaries are "
+                        f"still good; treat STATUS answers (has it closed, been extended, "
+                        f"been signed) as possibly out of date. Do not recite this list to "
+                        f"the user unprompted -- raise it only if they ask about one of these "
+                        f"properties, and then offer to read the new documents and bring the "
+                        f"summary up to date for the whole team."
+                    )
+                if uncheckable:
+                    lines.append(f"Summaries with no date stamp: {len(uncheckable)}")
+                    issues.append(
+                        f"{len(uncheckable)} active-stage propert"
+                        f"{'y' if len(uncheckable) == 1 else 'ies'} cannot be currency-checked "
+                        f"at all, because {'its' if len(uncheckable) == 1 else 'their'} summary "
+                        f"carries no 'Source files as of:' date: {', '.join(uncheckable)}. "
+                        f"Nothing can tell whether {'it is' if len(uncheckable) == 1 else 'they are'} "
+                        f"out of date. If the user asks about one, say the summary's currency is "
+                        f"unknown, and offer to add the stamp when next updating it."
+                    )
+
+                # A SEPARATE cause, with a separate message. These summaries DO
+                # carry a date -- the problem is that nothing matching the property's
+                # name could be found on the drive, so no comparison happened at all.
+                # Folding them into the message above would state a cause the code
+                # never tested, which is the fault this file has its own rule about.
+                if unmatched:
+                    lines.append(f"Cannot be located on the drive: {len(unmatched)}")
+                    issues.append(
+                        f"{len(unmatched)} active-stage propert"
+                        f"{'y' if len(unmatched) == 1 else 'ies'} could not be checked because "
+                        f"nothing on the firm's drive matches the name in the Project Master: "
+                        f"{', '.join(unmatched)}. This is NOT 'no new documents' -- no documents "
+                        f"were looked at. Usually the Project Master name differs from the folder "
+                        f"name (a parenthetical alias, or the folder sits deeper than expected). "
+                        f"If the user asks about one, say its currency could not be established."
+                    )
+            except Exception as e:
+                lines.append(f"Summary currency: could not check ({e})")
+
+
+        import threading as _th
+        import queue as _q
+        _sum_lines, _sum_issues, _sum_done = [], [], _q.Queue()
+        _t_sum = _t.perf_counter()
+
+        def _sum_worker():
+            try:
+                _summary_checks(_sum_lines, _sum_issues)
+            except Exception as e:
+                _sum_lines.append(f"Property summaries: could not check ({e})")
+            finally:
+                _sum_done.put(True)
+
+        _th.Thread(target=_sum_worker, daemon=True, name="summary-checks").start()
         try:
-            from portfolio import load_properties
-            from config import PROPERTY_SUMMARIES_DIR
-            import re as _re
-
-            def _norm(s):
-                return _re.sub(r"[^a-z0-9]", "", s.lower())
-
-            active, _src = load_properties()
-            summary_files = list(Path(PROPERTY_SUMMARIES_DIR).glob("*.md"))
-            stamps, uncheckable, texts = {}, [], {}
-            for prop in active:
-                if prop.get("category") not in ACTIVE_DEAL_STAGES:
-                    continue
-                pn = _norm(prop["name"])
-                match = next((f for f in summary_files
-                              if _norm(f.stem) in pn or pn in _norm(f.stem)), None)
-                if match is None:
-                    continue  # already reported by the missing-summary check
-                _body = match.read_text(encoding="utf-8", errors="replace")
-                stamped = _summary_stamp(_body)
-                if stamped is None:
-                    # No self-stamp means this one can never be currency-checked.
-                    # Say so rather than skipping quietly -- a silent skip reads
-                    # downstream as "checked, fine", which is the exact false
-                    # reassurance this whole check exists to prevent.
-                    uncheckable.append(prop["name"])
-                    continue
-                stamps[prop["name"]] = stamped
-                # Keep the text: a same-day file the summary NAMES is not new,
-                # and the bulk check cannot know that without it.
-                texts[prop["name"]] = _body
-
-            # None (couldn't check) must not become an empty result, which
-            # would read downstream as "checked, everything current".
-            found = _newest_docs_for_many(stamps, texts)
-            # Asked as its own question, by its own function -- see below for why
-            # this is not folded into the call above.
-            unmatched = sorted(_properties_with_no_files(
-                [n for n in stamps if n not in (found or {})], texts))
-            behind = sorted(found.items()) if found else []
-
-            if behind:
-                # Name the newest FILE, never a count. A count cannot be trusted
-                # here: OneDrive rewrites a file's modified-date when it re-syncs,
-                # so on one real property years' worth of older documents all
-                # looked like they arrived this year. The filename is what lets
-                # a reader tell a genuinely new contract from an old file that merely got
-                # re-synced -- same reasoning _summary_staleness already gives for
-                # naming files instead of counting them.
-                named = "; ".join(f"{n} (newest: {f})" for n, f in behind[:3])
-                more = f"; +{len(behind) - 3} more" if len(behind) > 3 else ""
-                lines.append(f"Summaries behind: {len(behind)} active-stage "
-                             f"propert{'y' if len(behind) == 1 else 'ies'}")
-                issues.append(
-                    f"{len(behind)} propert"
-                    f"{'y' if len(behind) == 1 else 'ies'} being actively bought or sold "
-                    f"ha{'s' if len(behind) == 1 else 've'} documents filed since "
-                    f"{'its' if len(behind) == 1 else 'their'} shared summary was last "
-                    f"updated: {named}{more}. Judge from the filename, not the fact it "
-                    f"appeared -- OneDrive updates a file's date when it re-syncs, so an "
-                    f"old document can look new. Durable facts in those summaries are "
-                    f"still good; treat STATUS answers (has it closed, been extended, "
-                    f"been signed) as possibly out of date. Do not recite this list to "
-                    f"the user unprompted -- raise it only if they ask about one of these "
-                    f"properties, and then offer to read the new documents and bring the "
-                    f"summary up to date for the whole team."
-                )
-            if uncheckable:
-                lines.append(f"Summaries with no date stamp: {len(uncheckable)}")
-                issues.append(
-                    f"{len(uncheckable)} active-stage propert"
-                    f"{'y' if len(uncheckable) == 1 else 'ies'} cannot be currency-checked "
-                    f"at all, because {'its' if len(uncheckable) == 1 else 'their'} summary "
-                    f"carries no 'Source files as of:' date: {', '.join(uncheckable)}. "
-                    f"Nothing can tell whether {'it is' if len(uncheckable) == 1 else 'they are'} "
-                    f"out of date. If the user asks about one, say the summary's currency is "
-                    f"unknown, and offer to add the stamp when next updating it."
-                )
-
-            # A SEPARATE cause, with a separate message. These summaries DO
-            # carry a date -- the problem is that nothing matching the property's
-            # name could be found on the drive, so no comparison happened at all.
-            # Folding them into the message above would state a cause the code
-            # never tested, which is the fault this file has its own rule about.
-            if unmatched:
-                lines.append(f"Cannot be located on the drive: {len(unmatched)}")
-                issues.append(
-                    f"{len(unmatched)} active-stage propert"
-                    f"{'y' if len(unmatched) == 1 else 'ies'} could not be checked because "
-                    f"nothing on the firm's drive matches the name in the Project Master: "
-                    f"{', '.join(unmatched)}. This is NOT 'no new documents' -- no documents "
-                    f"were looked at. Usually the Project Master name differs from the folder "
-                    f"name (a parenthetical alias, or the folder sits deeper than expected). "
-                    f"If the user asks about one, say its currency could not be established."
-                )
-        except Exception as e:
-            lines.append(f"Summary currency: could not check ({e})")
+            _sum_done.get(timeout=SUMMARY_CHECK_BUDGET_SECONDS)
+            lines.extend(_sum_lines)
+            issues.extend(_sum_issues)
+            log.info(f"[MCP] check_system_health: summary checks took "
+                     f"{_t.perf_counter() - _t_sum:.1f}s")
+        except _q.Empty:
+            log.warning(f"[MCP] check_system_health: summary checks did not finish within "
+                        f"{SUMMARY_CHECK_BUDGET_SECONDS}s -- reported as not checked")
+            lines.append(f"Property summaries: NOT checked this time -- reading them took "
+                         f"longer than {SUMMARY_CHECK_BUDGET_SECONDS} seconds (usually OneDrive "
+                         f"waking up). Missing or out-of-date summaries were not looked for.")
+            issues.append(
+                "The check for missing or out-of-date property summaries did not finish in "
+                "time this conversation, so it has said nothing about them -- which is not the "
+                "same as them being current. If the user asks about a specific property, "
+                "get_property_summary still warns on its own if that summary is behind."
+            )
 
         # ── Version ──────────────────────────────────────────────
         _v = _get_code_version()
@@ -2814,7 +2912,10 @@ no score -- it's a diary, not a dial.""".replace(
     def _format_hits(hits: list, header: str) -> str:
         """Render search hits as a compact table Claude can pick from."""
         import datetime as _dt
-        lines = [header, ""]
+        lines = [header,
+                 "(Under each: kind and status from its name; 'drive' = last changed on the "
+                 "drive, which moves on re-sync -- the date that leads a name does not.)",
+                 ""]
         for hit in hits:
             when = _dt.datetime.fromtimestamp(hit["mtime"]).strftime("%Y-%m-%d")
             size = hit["size"]
@@ -2831,7 +2932,21 @@ no score -- it's a diary, not a dial.""".replace(
             else:
                 size_str = f"{size} bytes"
             lines.append(f"{hit['path']}")
-            lines.append(f"    {when} · {size_str}")
+            # What the name and folder say the document IS (corpus/describe.py).
+            # The filed date comes from the name and does not move when OneDrive
+            # re-syncs; the drive date does, so it is labelled as such.
+            try:
+                from corpus.describe import describe
+                d = describe(hit["path"], hit["name"])
+            except Exception:
+                d = {}
+            # Short on purpose: the labels are explained once, in the header, so
+            # 25 results do not repeat them 25 times (first version: +31-48%
+            # tokens per search, measured 2026-09-29).
+            # The filed date is NOT repeated here: it comes from the name, which
+            # is printed on the line above. newest_first still sorts by it.
+            facts = [x for x in (d.get("kind") or "", d.get("status") or "") if x]
+            lines.append("    " + " · ".join(facts + [f"drive {when}", size_str]))
         lines.append("")
         lines.append(
             "To read one, call read_document with its path exactly as shown above."
@@ -2839,7 +2954,8 @@ no score -- it's a diary, not a dial.""".replace(
         return "\n".join(lines)
 
     @mcp.tool()
-    def search_documents(query: str, n_results: int = 25, folder: str = "") -> str:
+    def search_documents(query: str, n_results: int = 25, folder: str = "",
+                         kind: str = "", newest_first: bool = False) -> str:
         """
         Find documents in the firm's document library by name and folder path.
 
@@ -2850,32 +2966,107 @@ no score -- it's a diary, not a dial.""".replace(
         files are named like "220419 Neighboring Hotel Public Hearing
         Notice.pdf" inside "!PROPERTIES/ARIZONA/<Property>/".
 
+        Each result shows what its name says it is: the kind of document
+        (amendment, letter of intent, title, plat, settlement statement...),
+        whether the name marks it executed or a draft, and the date the firm
+        filed it under (the YYMMDD prefix). Emails are labelled as emails.
+
         So: search broadly by property, counterparty, date, or document kind,
-        then call read_document on the specific results that look right.
+        then call read_document on the specific results that look right. For
+        "the latest executed amendment on X", search the property with
+        kind="amendment" and newest_first=True, and read the top executed one.
+
+        If nothing matches every word, the reply says which word matched
+        nothing and shows what the remaining words match -- say so to the user
+        rather than concluding the document does not exist.
 
         Args:
             query: space-separated terms; ALL must appear in the path or name
             n_results: maximum results (default 25)
             folder: optional folder to restrict to, e.g. "!PROPERTIES/ARIZONA"
+            kind: optional document kind to keep, e.g. "amendment", "letter of
+                  intent", "title", "plat", "deed", "settlement statement"
+            newest_first: order by the date in the filename, newest first,
+                          instead of by best match
         """
         try:
-            from corpus import search
-            hits = search(query, limit=min(max(1, n_results), 100), subtree=folder)
-            if not hits:
-                where = f" under {folder}" if folder else ""
-                return (
-                    f"No documents matched '{query}'{where}.\n\n"
-                    "Remember this matches file and folder NAMES, not document text. "
-                    "Try fewer or broader terms, or use browse_documents to look "
-                    "around the folder structure.\n\n"
-                    "Also note: the team's curated knowledge is deliberately NOT in "
-                    "this index -- per-property summaries live behind "
-                    "get_property_summary, and the record of deals the firm passed "
-                    "on or lost lives behind get_passed_on_deals. If the question "
-                    "is about one of those, use that tool rather than concluding "
-                    "no record exists."
-                )
-            return _format_hits(hits, f"{len(hits)} document(s) matching '{query}':")
+            from corpus import search, count_matches
+            from corpus.describe import describe
+            limit = min(max(1, n_results), 100)
+            want_kind = kind.strip().lower()
+            # A filter needs more candidates than it will show, and "newest"
+            # must be the newest of ALL matches, not of the best-scoring few --
+            # sorting only the top 32 by date returned a 2024 amendment as the
+            # newest in Arizona. 400 is the cap; describe() costs microseconds.
+            fetch = 400 if newest_first else (min(400, limit * 8) if want_kind else limit)
+
+            def _run(q):
+                hits = search(q, limit=fetch, subtree=folder)
+                if want_kind:
+                    hits = [h for h in hits if want_kind in describe(h["path"], h["name"])["kind"]]
+                if newest_first:
+                    hits.sort(key=lambda h: (describe(h["path"], h["name"])["name_date"] or "", h["mtime"]),
+                              reverse=True)
+                return hits[:limit]
+
+            what = f"'{query}'" + (f" of kind '{kind.strip()}'" if want_kind else "")
+            hits = _run(query)
+            if hits:
+                order = " (newest first, by the date in the name)" if newest_first else ""
+                return _format_hits(hits, f"{len(hits)} document(s) matching {what}{order}:")
+
+            where = f" under {folder}" if folder else ""
+            terms = [t for t in query.split() if t.strip()]
+            lines = [f"No documents matched every word of {what}{where}."]
+
+            # Which word is the problem? One count per word, milliseconds each.
+            # An empty answer is the one this system most needs to explain,
+            # because it reads downstream as "the firm has no record of that".
+            if len(terms) > 1:
+                counts = {t: count_matches(t, folder) for t in terms}
+                if all(c is not None for c in counts.values()):
+                    lines.append("On their own: " + ", ".join(
+                        f"'{t}' matches {c:,}" for t, c in counts.items()) + ".")
+                    dead = [t for t, c in counts.items() if c == 0]
+                    if not dead:
+                        # Every word exists somewhere; drop the rarest, which is
+                        # the one most likely spelled differently in the names.
+                        dead = [min(terms, key=lambda t: counts[t])]
+                    keep = [t for t in terms if t not in dead]
+                    if keep:
+                        relaxed = _run(" ".join(keep))
+                        if relaxed:
+                            dropped = ", ".join(f"'{t}'" for t in dead)
+                            kept = " ".join(keep)
+                            lines.append("")
+                            lines.append(_format_hits(
+                                relaxed,
+                                f"Without {dropped}, {len(relaxed)} document(s) match "
+                                f"'{kept}'. Tell the user the search was widened, and "
+                                f"check the names below for a different spelling of "
+                                f"the word dropped:"))
+                            return "\n".join(lines)
+            elif want_kind:
+                c = count_matches(query, folder)
+                if c:
+                    lines.append(f"'{query}' alone matches {c:,} files, none of which the "
+                                 f"name marks as '{kind.strip()}'. Try without kind, or "
+                                 f"another word for that kind of document.")
+
+            lines += [
+                "",
+                "Remember this matches file and folder NAMES, not document text. "
+                "Try fewer or broader terms, or use browse_documents to look "
+                "around the folder structure.",
+                "",
+                "Also note: the team's curated knowledge is deliberately NOT in "
+                "this index -- per-property summaries live behind "
+                "get_property_summary, and the record of deals the firm passed "
+                "on or lost lives behind get_passed_on_deals. If the question "
+                "is about one of those, use that tool rather than concluding "
+                "no record exists.",
+            ]
+            return "\n".join(lines)
         except Exception as e:
             return f"Search failed: {e}"
 
@@ -2917,6 +3108,77 @@ no score -- it's a diary, not a dial.""".replace(
             return "\n".join(header) + "\n\n" + text
         except Exception as e:
             return f"Could not read '{path}': {e}"
+
+    @mcp.tool()
+    def find_in_document(path: str, question: str, top_n: int = 8) -> str:
+        """
+        Find the passages inside ONE document that answer a question, instead
+        of reading the whole document. USE THIS FIRST when you know which
+        document holds the answer and the question is about something specific
+        in it: "what's the purchase price?", "when is closing?", "how long is
+        the feasibility period?", "who pays for title insurance?". The file is
+        read on this computer; only the matching passages, each with its page,
+        come back -- typically a few hundred tokens where the whole document is
+        several thousand to over thirty thousand.
+
+        THIS MATCHES WORDS, NOT MEANING, and it cannot tell whether it found
+        the answer. So YOU judge: if a passage plainly states the answer,
+        answer from it and cite the file and page. If none does, call
+        read_document for the whole text before answering, and never say the
+        document does not contain something because this search did not
+        surface it. For a summary of a whole document, call read_document.
+
+        Args:
+            path:     the document's path exactly as search_documents showed it
+            question: the question, in the user's own words
+            top_n:    passages to return (default 8, at most 15)
+        """
+        if not question.strip():
+            return "What should I look for in it? Please give me a question."
+        try:
+            from corpus import read_document as _read
+            from corpus.find import find as _find
+            text, meta = _read(path, max_chars=5_000_000)
+            if text.startswith(("[Cannot read", "[Could not read")):
+                return text
+            n = min(max(1, int(top_n or 8)), 15)
+            found, total = _find(text, question, n)
+
+            pages = meta.get("page_count")
+            lines = [f"Passages in {meta.get('filename', path)} most likely to answer: {question}",
+                     f"Path: {path}"]
+            scope = f"Searched {total} passages" + (f" across {pages} page(s)" if pages and pages > 1 else "") + "."
+            if meta.get("ocr_truncated"):
+                scope += (" This is a scanned document and scanning stopped part way (see the "
+                          "page limit for scans), so later pages were NOT searched -- a miss "
+                          "here says nothing about them.")
+            elif meta.get("ocr_used"):
+                scope += " Some pages are scans, read by text recognition, which can garble words."
+            if meta.get("comment_count"):
+                scope += (f" It carries {meta['comment_count']} reviewer comment(s): a match "
+                          f"labelled 'reviewer comment' is a person's note, not the document's text.")
+            no_pages = "[Page " not in text
+            if no_pages:
+                scope += (" This document has NO page numbers: cite the section, clause or "
+                          "heading the passage itself names, never a page.")
+            lines += [scope, "",
+                      "These are CANDIDATES chosen by matching words, not a verdict. If one plainly "
+                      "states the answer, use it and cite " + ("its section" if no_pages else "the page")
+                      + ". If none does, read the whole document with read_document before "
+                      "answering -- do not say it is not in the document on the strength of this "
+                      "search.",
+                      "Quote figures exactly as printed. If you add up or work out a figure the "
+                      "document does not print (a total of two deposits, say), say it is your own "
+                      "calculation and show the parts -- never cite it to a section as if printed.",
+                      ""]
+            for k, p in enumerate(found, 1):
+                lines += [f"[{k}] {p['heading']}", p["text"], ""]
+            if not found:
+                lines.append("(No passage shares a word with the question. Read the whole "
+                             "document with read_document, or ask with different words.)")
+            return "\n".join(lines)
+        except Exception as e:
+            return f"Could not search inside that document: {e}"
 
     @mcp.tool()
     def browse_documents(folder: str = "") -> str:
@@ -2992,14 +3254,21 @@ no score -- it's a diary, not a dial.""".replace(
             return f"Property lookup failed: {e}"
 
     @mcp.tool()
-    def get_property_summary(property_name: str) -> str:
+    def get_property_summary(property_name: str, include_history: bool = False) -> str:
         """
         Read the team's existing cited summary for a property, if one exists.
 
         ALWAYS TRY THIS FIRST when asked anything about a specific property.
-        It is a few hundred tokens and answers most questions outright, with
-        file+page citations. Reading the underlying documents instead costs
+        It answers most questions outright, with file+page citations, for a
+        few thousand tokens. Reading the underlying documents instead costs
         tens of thousands of tokens for the same answer.
+
+        Some summaries end with an "Update history" section: the dated updates
+        exactly as they were first written, kept after their findings were
+        folded into the summary above. It is left out by default because every
+        current fact is already in the main text. Ask for it with
+        include_history=True only when the question is WHEN something became
+        known, or what the summary said before a correction.
 
         These summaries are shared with the whole team, so one person's
         reading has already been paid for on everyone's behalf. They are not
@@ -3042,6 +3311,8 @@ no score -- it's a diary, not a dial.""".replace(
 
             text = match.read_text(encoding="utf-8", errors="replace")
             staleness = _summary_staleness(property_name, text)
+            if not include_history:
+                text = _without_update_history(text)
             return (
                 f"Shared summary for '{property_name}' ({match.name}).\n"
                 f"Every finding below is cited to a source document and page. If what you "
@@ -3051,6 +3322,141 @@ no score -- it's a diary, not a dial.""".replace(
             )
         except Exception as e:
             return f"Could not read the property summary: {e}"
+
+    @mcp.tool()
+    def search_property_summaries(question: str, property_name: str = "",
+                                  top_n: int = 10) -> str:
+        """
+        Find the passages in the team's property summaries most likely to
+        answer a question, instead of reading a whole summary. USE THIS FIRST
+        for a specific fact ("did the sewer agreement get signed?", "who is the
+        buyer?", "is it in a flood zone?"). It returns the property's data card
+        (location, size, purchase and sale figures, status) and the ten
+        best-matching passages, each with the section it came from -- about a
+        fifth of the tokens of get_property_summary.
+
+        Leave property_name empty to search ACROSS every property ("which of
+        our deals had an HOA dispute?").
+
+        THIS MATCHES WORDS, NOT MEANING, and it cannot tell whether it found
+        the answer -- measured on 40 rephrased questions, the answer was among
+        the ten passages 31 times, and no score separated those from the 9
+        misses. So YOU judge: if a passage plainly states the answer, answer
+        from it and quote its citation. If none does, call get_property_summary
+        and read the whole summary before answering. Never say a summary, or
+        the firm, has no record of something because this search did not
+        surface it.
+
+        Use get_property_summary directly for an overview of a property.
+
+        Args:
+            question:      the question, in the user's own words
+            property_name: optional; a property name as in the Project Master
+            top_n:         passages to return (default 10, at most 15)
+        """
+        if not question.strip():
+            return "What should I look for? Please give me a question."
+        try:
+            from config import PROPERTY_SUMMARIES_DIR
+            import summary_search as _ss
+
+            summaries_dir = Path(PROPERTY_SUMMARIES_DIR)
+            if not summaries_dir.is_dir():
+                return ("No shared summaries folder found on this machine. Check that "
+                        "OneDrive is syncing, then read documents directly instead.")
+            corpus = _ss.load_all(summaries_dir)
+            n = min(max(1, int(top_n or 10)), 15)
+            judge = ("These are CANDIDATES chosen by matching words, not a verdict. If one "
+                     "plainly states the answer, use it and its citation. If none does, read "
+                     "the whole summary with get_property_summary before answering -- do not "
+                     "say the information is missing on the strength of this search. Quote "
+                     "figures as written; a figure you work out yourself must be called your "
+                     "own calculation, with its parts, never cited as if the summary stated it.")
+
+            if property_name.strip():
+                match, problem = _find_summary(property_name, summaries_dir)
+                if problem:
+                    return problem
+                if match is None:
+                    return (f"No summary has been written for '{property_name}' yet. Read its "
+                            f"documents directly (get_property_info then read_document).")
+                pool = [p for p in corpus if p["file"] == match.name]
+                card = _ss.card_for(match.name)
+                name = " ".join([property_name, card.get("property") or ""]
+                                + [str(a) for a in (card.get("aliases") or [])])
+                shown = [p for _, _, p in _ss.rank(question, pool, corpus, ignore=name)[:n]]
+                staleness = _summary_staleness(property_name, _ss.text_for(match.name)).strip()
+
+                def _usd(v):
+                    try:
+                        return f"${float(v):,.0f}"
+                    except (TypeError, ValueError):
+                        return ""
+                facts = [x for x in (
+                    ", ".join(str(v) for v in (card.get("county") and f"{card['county']} County",
+                                               card.get("state")) if v),
+                    card.get("land_type"),
+                    f"{card['acres']} acres" if card.get("acres") else "",
+                    f"bought {card['entry_year']}" if card.get("entry_year") else "",
+                    f"purchase price {_usd(card.get('entry_price_usd'))}" if _usd(card.get("entry_price_usd")) else "",
+                    f"approach: {card['plan_type']}" if card.get("plan_type") else "",
+                    f"status: {str(card.get('outcome_status') or '').replace('-', ' ')}"
+                    + (f" ({card['disposition_detail'].replace('-', ' ')})" if card.get("disposition_detail") else ""),
+                    f"sold {card['exit_year']} for {_usd(card.get('exit_price_usd'))}"
+                    if card.get("exit_year") and _usd(card.get("exit_price_usd")) else "",
+                ) if x]
+                lines = [f"Shared summary for '{property_name}' ({match.name}) -- the passages most "
+                         f"likely to answer: {question}",
+                         "",
+                         f"Data card: {'; '.join(facts)}. Source files as of "
+                         f"{card.get('source_files_as_of') or 'unknown'}."]
+                if staleness:
+                    lines.append(staleness)
+                lines += ["", judge, ""]
+                for k, p in enumerate(shown, 1):
+                    lines += [f"[{k}] {p['heading'] or 'Summary'}", p["text"], ""]
+                if not shown:
+                    lines += ["(No passage shares a word with the question -- read the whole "
+                              "summary with get_property_summary.)", ""]
+
+                heads = []
+                for p in pool:
+                    top = p["heading"].split(" › ")[0]
+                    if top and top not in heads and all(q["heading"].split(" › ")[0] != top for q in shown):
+                        heads.append(top)
+                if heads:
+                    lines.append("Sections of this summary with no passage shown above: "
+                                 + "; ".join(heads) + ".")
+                lines.append("Its Gaps section names what was never read or established -- "
+                             "the place a genuine 'not known' answer comes from.")
+                return "\n".join(lines)
+
+            # Across every property: at most two passages from any one summary,
+            # so one long summary cannot fill every slot.
+            picked, per = [], {}
+            for _, _, p in _ss.rank(question, corpus, corpus):
+                if per.get(p["file"], 0) >= 2:
+                    continue
+                per[p["file"]] = per.get(p["file"], 0) + 1
+                picked.append(p)
+                if len(picked) >= n:
+                    break
+            lines = [f"Passages across the team's property summaries most likely to answer: "
+                     f"{question}", "", judge, ""]
+            for k, p in enumerate(picked, 1):
+                lines += [f"[{k}] {p['property']} ({p['file']}) -- {p['heading'] or 'Summary'}",
+                          p["text"], ""]
+            if not picked:
+                lines += ["(No passage in any summary shares a word with the question.)", ""]
+            lines.append(
+                "A property missing from this list is NOT evidence it lacks what was asked "
+                "about: this ranks words, and names only what matched. Measured on rephrased "
+                "questions, it named 20 of 28 properties that genuinely answered. Summaries exist "
+                f"for {len({p['file'] for p in corpus})} properties; the rest of the portfolio has "
+                "none yet. Say so if the user needs a complete answer.")
+            return "\n".join(lines)
+        except Exception as e:
+            return f"Could not search the property summaries: {e}"
 
     @mcp.tool()
     def update_property_summary(property_name: str, update_text: str,
@@ -4682,9 +5088,19 @@ def _with_pending_notice(tool_name: str, result):
 
         ready = _update_ready()
         if ready:
+            # What it contains, when the release says. A version code alone
+            # gives a person nothing to decide with (2026-09-29).
+            what = ""
+            try:
+                from config import PENDING_UPDATE_DIR
+                staged = _json_object(Path(PENDING_UPDATE_DIR) / "ready.json") or {}
+                if str(staged.get("notes") or "").strip():
+                    what = f" What it changes: {str(staged['notes']).strip()[:600]}."
+            except Exception:
+                what = ""
             note = (
                 f"Note for Claude, not an error: a new version of Vaulter AI "
-                f"({ready}) has been downloaded and is ready to install. Tell the "
+                f"({ready}) has been downloaded and is ready to install.{what} Tell the "
                 f"user this once, in plain English, alongside whatever they asked "
                 f"for -- do not withhold or delay their answer -- and ask whether "
                 f"they would like it installed now. If they say yes, call "
@@ -4695,6 +5111,53 @@ def _with_pending_notice(tool_name: str, result):
         return result
     except Exception:
         return result
+
+
+def _count_tool_use(name: str) -> None:
+    """
+    Add one to today's count for this tool, in a small file on THIS machine.
+
+    Built 2026-09-29 because only errors ever travelled from a teammate's
+    machine, so what the team actually uses could only be guessed from the
+    maintainer's own log. Tool names and counts only -- never what was asked,
+    never a document name, never a property. Kept for 14 days. Local; the
+    daily install check-in carries the last-7-days totals to the team list.
+    Never raises: a counting failure must not cost anyone an answer.
+    """
+    try:
+        import datetime as _dt
+        import json
+        from config import DATA_DIR
+        path = Path(DATA_DIR) / "tool_usage.json"
+        data = _json_object(path) or {}
+        today = _dt.date.today().isoformat()
+        day = data.get(today) if isinstance(data.get(today), dict) else {}
+        day[name] = int(day.get(name, 0) or 0) + 1
+        data[today] = day
+        cutoff = (_dt.date.today() - _dt.timedelta(days=14)).isoformat()
+        data = {k: v for k, v in data.items() if k >= cutoff and isinstance(v, dict)}
+        tmp = path.with_suffix(".tmp")
+        tmp.write_text(json.dumps(data), encoding="utf-8")
+        os.replace(tmp, path)
+    except Exception:
+        pass
+
+
+def _tool_use_last_7_days() -> dict:
+    """{tool: count} over the last 7 days on this machine, busiest first."""
+    try:
+        import datetime as _dt
+        from config import DATA_DIR
+        data = _json_object(Path(DATA_DIR) / "tool_usage.json") or {}
+        cutoff = (_dt.date.today() - _dt.timedelta(days=6)).isoformat()
+        totals = {}
+        for day, counts in data.items():
+            if day >= cutoff and isinstance(counts, dict):
+                for tool, n in counts.items():
+                    totals[tool] = totals.get(tool, 0) + int(n or 0)
+        return dict(sorted(totals.items(), key=lambda kv: -kv[1]))
+    except Exception:
+        return {}
 
 
 def _log_every_tool_call(mcp) -> None:
@@ -4737,6 +5200,7 @@ def _log_every_tool_call(mcp) -> None:
                     return _with_pending_notice(_name, await _fn(*a, **k))
                 finally:
                     log.info(f"[TOOL] {_name}: finished in {_t.perf_counter()-t0:.1f}s")
+                    _count_tool_use(_name)
         else:
             @functools.wraps(fn)
             def wrapper(*a, _fn=fn, _name=name, **k):
@@ -4746,6 +5210,7 @@ def _log_every_tool_call(mcp) -> None:
                     return _with_pending_notice(_name, _fn(*a, **k))
                 finally:
                     log.info(f"[TOOL] {_name}: finished in {_t.perf_counter()-t0:.1f}s")
+                    _count_tool_use(_name)
 
         wrapper._vaulter_logged = True
         try:

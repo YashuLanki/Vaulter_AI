@@ -29,6 +29,7 @@ from corpus.index import (  # noqa: F401
     CorpusUnavailable,
     OutsideCorpus,
     build_index,
+    count_matches,
     index_age,
     is_online_only,
     list_dir,
