@@ -15,14 +15,17 @@ not a refinement; on files like hers it is the only signal left.
 Four things are measured. Everything else she named stays where a judgement
 belongs, in the conversation and the jurisdiction dossiers.
 
-  * Freeway access -- miles to the nearest PRIMARY road (interstates and
+  * Freeway access -- miles to the nearest freeway EXIT (OpenStreetMap
+    "motorway_junction", added 2026-09-29), falling back to miles to the
+    nearest PRIMARY road (interstates and
     other limited-access highways) in the Census TIGER road layer. Reuses the
     road outlines the HTML report already fetches and caches per half-degree
     grid cell, so this adds NO network calls of its own to a screen. Reported
     honestly as "within the map extent": a listing whose nearest freeway lies
     outside the export's own bounding box reads as "over N miles", never as a
-    made-up number. Interchanges specifically are NOT measured -- TIGER does
-    not carry them as points -- and the basis text says so.
+    made-up number. The exit replaced the road line as the measure because
+    access is an exit: a parcel beside a freeway with no exit for miles is not
+    connected.
   * Airports -- miles to the nearest airport with scheduled passenger
     service, from a bundled public-domain table (OurAirports, filtered to the
     505 US large and medium airports with scheduled service). Local, offline.
@@ -68,6 +71,25 @@ log = logging.getLogger("vaulter.growth")
 last_status: dict = {"used": [], "unavailable": []}
 
 GROWTH_CACHE_DAYS = 180
+
+# How long one screen may spend DOWNLOADING growth data (2026-09-29). Cached
+# data is instant, so this only bites the first screen of a new market: six
+# new states measured 258 s cold, long enough for Claude Desktop to give up on
+# the call. Past the budget, remaining downloads are skipped and those signals
+# are reported as not available THIS time; they fill in on a later screen as
+# the cache warms. A judgement, set well under the connector's patience.
+GROWTH_FETCH_BUDGET_SECONDS = 60
+_deadline = [float("inf")]
+
+
+def _out_of_time() -> bool:
+    return time.monotonic() > _deadline[0]
+
+# Distances past these are reported as "over", never as a measured figure: the
+# exit search reaches ~16 mi beyond a listing's own map square, and the airport
+# table is the 505 US airports with scheduled flights (Rural Nevada measured
+# "188 mi to an exit" and Guam "3,405 mi to an airport" before these caps).
+AIRPORT_CAP_MI = 150.0
 _TIMEOUT = 30
 
 PEP_URL = ("https://www2.census.gov/programs-surveys/popest/datasets/2020-2024/"
@@ -276,6 +298,225 @@ def primary_road_points(bbox) -> tuple[list, str]:
     return _points_in(roads), ""
 
 
+QCEW_URL = "https://data.bls.gov/cew/data/api/{year}/a/industry/10.csv"
+FHFA_URL = "https://www.fhfa.gov/hpi/download/annual/hpi_at_county.csv"   # an Excel file, despite the name
+CHANGE_YEARS = 5
+_UA = {"User-Agent": "Mozilla/5.0 (Vaulter AI screener)"}   # BLS refuses requests with no browser name
+
+
+def _cached_bytes(name: str, url: str) -> tuple[bytes | None, str]:
+    """A binary download through the shared cache; same freshness rules as the text files."""
+    cache = _cache_dir()
+    path = cache / name if cache else None
+    stale = None
+    if path is not None and path.exists():
+        try:
+            data = path.read_bytes()
+            if (time.time() - path.stat().st_mtime) / 86400 <= GROWTH_CACHE_DAYS:
+                return data, ""
+            stale = data
+        except OSError:
+            pass
+    if _out_of_time():
+        return stale, ("from a cached copy more than %d days old" % GROWTH_CACHE_DAYS) if stale else "skipped, out of download time"
+    try:
+        import requests
+        r = requests.get(url, timeout=_TIMEOUT * 2, headers=_UA)
+        if r.status_code == 200 and r.content:
+            if path is not None:
+                try:
+                    path.write_bytes(r.content)
+                except OSError:
+                    pass
+            return r.content, ""
+    except Exception as e:
+        log.warning(f"Could not download {url}: {type(e).__name__}")
+    if stale is not None:
+        return stale, f"from a cached copy more than {GROWTH_CACHE_DAYS} days old"
+    return None, "unreachable and not cached"
+
+
+def county_jobs() -> tuple[dict, str, str]:
+    """
+    {(state fips, county fips): percent change in total jobs over CHANGE_YEARS},
+    the span, and a caveat. From the BLS Quarterly Census of Employment and
+    Wages annual averages -- every US county, keyless ("A key is not required
+    for the QCEW API", BLS's own page), public domain.
+    """
+    def year_file(y):
+        data, note = _cached_bytes(f"growth_qcew_{y}.csv", QCEW_URL.format(year=y))
+        if not data:
+            return None, note
+        out = {}
+        for row in csv.DictReader(io.StringIO(data.decode("latin-1"))):
+            a = row.get("area_fips", "")
+            if row.get("own_code") == "0" and len(a) == 5 and a.isdigit() and not a.endswith("000"):
+                try:
+                    out[(a[:2], a[2:])] = float(row["annual_avg_emplvl"])
+                except (KeyError, ValueError):
+                    pass
+        return (out or None), note
+    this_year = datetime.now().year
+    for latest in range(this_year - 1, this_year - 4, -1):
+        now, note = year_file(latest)
+        if now:
+            then, note2 = year_file(latest - CHANGE_YEARS)
+            if not then:
+                return {}, "", f"jobs {latest - CHANGE_YEARS}: {note2}"
+            chg = {k: round((v - then[k]) / then[k] * 100, 1) for k, v in now.items() if then.get(k)}
+            return chg, f"{latest - CHANGE_YEARS}-{latest}", note or note2
+    return {}, "", "no recent jobs file could be read"
+
+
+def county_prices() -> tuple[dict, str, str]:
+    """
+    {(state fips, county fips): percent change in the FHFA house price index
+    over CHANGE_YEARS}, the span, and a caveat. FHFA's annual county index
+    (all transactions); public domain. Counties with too few sales have no
+    index, and those abstain.
+    """
+    data, note = _cached_bytes("growth_fhfa_county.xlsx", FHFA_URL)
+    if not data:
+        return {}, "", note
+    try:
+        import openpyxl
+        ws = openpyxl.load_workbook(io.BytesIO(data), read_only=True).active
+        series = {}
+        for row in ws.iter_rows(values_only=True):
+            if not row or len(row) < 6 or not isinstance(row[3], (int, float)):
+                continue
+            f = str(row[2] or "").zfill(5)
+            if isinstance(row[5], (int, float)):
+                series.setdefault((f[:2], f[2:]), {})[int(row[3])] = float(row[5])
+    except Exception as e:
+        return {}, "", f"house price file unreadable ({type(e).__name__})"
+    if not series:
+        return {}, "", "house price file held no county rows"
+    latest = max(max(v) for v in series.values())
+    out = {k: round((v[latest] - v[latest - CHANGE_YEARS]) / v[latest - CHANGE_YEARS] * 100, 1)
+           for k, v in series.items() if latest in v and v.get(latest - CHANGE_YEARS)}
+    return out, f"{latest - CHANGE_YEARS}-{latest}", note
+
+
+SCHOOLS_URL = "https://educationdata.urban.org/api/v1/schools/ccd/directory/{year}/"
+SCHOOL_RADIUS_MI = 5.0
+SCHOOL_BASELINE_YEARS = 5
+SCHOOL_MIN_PUPILS = 300     # below this, a percentage change is noise, so it abstains
+
+
+def school_directory(state_fips: str, year: int) -> tuple[dict | None, str]:
+    """
+    {school id: (lat, lng, pupils)} for every public school in one state and
+    school year, from the federal Common Core of Data served keyless by the
+    Urban Institute's Education Data Portal (licence: attribution, commercial
+    use allowed). Sends only a state number. Cached in the shared geo cache for
+    GROWTH_CACHE_DAYS like the Census files; None when it cannot be had.
+    """
+    import json as _json
+    cache = _cache_dir()
+    path = cache / f"growth_schools_{state_fips}_{year}.json" if cache else None
+    if path is not None and path.exists():
+        try:
+            if (time.time() - path.stat().st_mtime) / 86400 <= GROWTH_CACHE_DAYS:
+                raw = _json.loads(path.read_text(encoding="utf-8"))
+                return {k: tuple(v) for k, v in raw.items()}, ""
+        except (OSError, ValueError):
+            pass
+    try:
+        import requests
+        url, params, out = SCHOOLS_URL.format(year=year), {"fips": int(state_fips)}, {}
+        while url:
+            r = requests.get(url, params=params, timeout=_TIMEOUT * 2)
+            if r.status_code != 200:
+                return None, f"school directory {year}: HTTP {r.status_code}"
+            j = r.json()
+            for x in j.get("results", []):
+                la, lo, n = x.get("latitude"), x.get("longitude"), x.get("enrollment")
+                if la is None or lo is None or n is None or n < 0 or x.get("school_status") not in (1, 3, 4, 5, 8):
+                    continue   # negative = "missing" codes; status 2 closed, 6 inactive, 7 future
+                out[str(x.get("ncessch"))] = (float(la), float(lo), int(n))
+            url, params = j.get("next"), None
+    except Exception as e:
+        return None, f"school directory {year}: {type(e).__name__}"
+    if not out:
+        return None, f"school directory {year}: no schools returned"
+    if path is not None:
+        try:
+            path.write_text(_json.dumps(out), encoding="utf-8")
+        except OSError:
+            pass
+    return out, ""
+
+
+def _schools_cached(state_fips: str) -> bool:
+    """True when this state's recent school years are already in the shared cache."""
+    cache = _cache_dir()
+    if cache is None:
+        return False
+    return len(list(cache.glob(f"growth_schools_{state_fips}_*.json"))) >= 2
+
+
+def school_years(state_fips: str) -> tuple[dict | None, dict | None, str]:
+    """(latest, baseline five years earlier, caveat) -- the newest year that answers."""
+    this_year = datetime.now().year
+    for latest in range(this_year - 1, this_year - 5, -1):
+        now, note = school_directory(state_fips, latest)
+        if now:
+            then, note2 = school_directory(state_fips, latest - SCHOOL_BASELINE_YEARS)
+            return now, then, (f"{latest - SCHOOL_BASELINE_YEARS}-{latest}" if then else note2)
+    return None, None, "no recent school year could be read"
+
+
+def interchange_points(lats, lngs) -> tuple[list, str, set]:
+    """
+    Every freeway exit (OpenStreetMap "motorway_junction") near the listings,
+    as (lat, lng, exit number), plus a caveat and the set of one-degree cells
+    that could NOT be fetched.
+
+    Added 2026-09-29 to close "major interchanges" in the teammate's growth
+    list: access is an exit, not a freeway line -- a parcel beside a freeway
+    with no exit for ten miles is not connected. National, keyless, and the
+    same Overpass mirrors proximity_tool already uses, with their coverage
+    checks and their 7-day shared cache.
+
+    Queried in one-degree cells (plus a quarter-degree margin), only for cells
+    that hold a listing, so a statewide export stays a handful of queries and
+    two exports over the same area share cached cells. A cell that cannot be
+    fetched is reported, and its listings fall back to the freeway line.
+    """
+    import math as _m
+    try:
+        from analysis.screening.geo_providers import _overpass, _overpass_cache_read
+    except Exception as e:
+        return [], f"exit data unavailable ({type(e).__name__})", set()
+    cells = {(_m.floor(la), _m.floor(lo)) for la, lo in zip(lats, lngs)
+             if la == la and lo == lo}
+    seen, pts, failed = set(), [], set()
+    for la, lo in sorted(cells):
+        q = (f'[out:json][timeout:60];node["highway"="motorway_junction"]'
+             f'({la - 0.25:.2f},{lo - 0.25:.2f},{la + 1.25:.2f},{lo + 1.25:.2f});out;')
+        hit = _overpass_cache_read(q)          # cached squares are free: never skipped
+        if hit is not None:
+            data = hit[0]
+        elif _out_of_time():
+            failed.add((la, lo))
+            continue
+        else:
+            data = _overpass(q, empty_is_suspect=False)
+        if data is None:
+            failed.add((la, lo))
+            continue
+        for el in data.get("elements", []):
+            if el.get("id") in seen or "lat" not in el:
+                continue
+            seen.add(el["id"])
+            pts.append((float(el["lat"]), float(el["lon"]), str((el.get("tags") or {}).get("ref", ""))))
+    note = ""
+    if failed:
+        note = f"exit data could not be fetched for {len(failed)} of {len(cells)} map square(s)"
+    return pts, note, failed
+
+
 # ─── Scoring ──────────────────────────────────────────────────────────────────
 
 def _pct(series: pd.Series, higher_is_better: bool = True) -> pd.Series:
@@ -317,6 +558,7 @@ def add_growth(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def _add_growth(df: pd.DataFrame, status: dict) -> pd.DataFrame:
+    _deadline[0] = time.monotonic() + GROWTH_FETCH_BUDGET_SECONDS
     n = len(df)
     idx = df.index
     lat = pd.to_numeric(df.get("Latitude", pd.Series([float("nan")] * n, index=idx)), errors="coerce")
@@ -333,7 +575,15 @@ def _add_growth(df: pd.DataFrame, status: dict) -> pd.DataFrame:
         pad = 0.3   # the same padding report.build_report uses, so both share one cache entry
         bbox = (float(lng[have_xy].min()) - pad, float(lat[have_xy].min()) - pad,
                 float(lng[have_xy].max()) + pad, float(lat[have_xy].max()) + pad)
-        pts, freeway_note = primary_road_points(bbox)
+        # One map for a file spanning several states is a request the Census
+        # road service retries for minutes and then refuses (measured: 191 s,
+        # then "unavailable", for six states). Past one region the exits,
+        # which are fetched square by square, carry freeway access alone.
+        if bbox[2] - bbox[0] > 3.0 or bbox[3] - bbox[1] > 3.0:
+            pts, freeway_note = [], ("this export spans more than one region, so the freeway line "
+                                     "was not fetched; freeway exits carry access")
+        else:
+            pts, freeway_note = primary_road_points(bbox)
         if pts:
             import numpy as np
             plng = np.array([p[0] for p in pts]); plat = np.array([p[1] for p in pts])
@@ -351,6 +601,36 @@ def _add_growth(df: pd.DataFrame, status: dict) -> pd.DataFrame:
     else:
         status["unavailable"].append(f"freeway distance: {freeway_note}")
 
+    # ── nearest freeway exit, from OpenStreetMap; the freeway line is the fallback ──
+    exit_mi = pd.Series([float("nan")] * n, index=idx, dtype=float)
+    exit_ref = pd.Series([""] * n, index=idx, dtype=object)
+    exit_cap = 0.25 * 69.0 * 0.9      # beyond the margin, the true nearest may be out of range
+    if have_xy.any():
+        import math as _m
+        import numpy as np
+        epts, enote, failed = interchange_points(lat[have_xy], lng[have_xy])
+        if epts:
+            elat = np.radians([p[0] for p in epts]); elng = np.radians([p[1] for p in epts])
+            for i in idx[have_xy]:
+                if (_m.floor(lat[i]), _m.floor(lng[i])) in failed:
+                    continue
+                la, lo = math.radians(lat[i]), math.radians(lng[i])
+                a = np.sin((elat - la) / 2) ** 2 + math.cos(la) * np.cos(elat) * np.sin((elng - lo) / 2) ** 2
+                k = int(a.argmin())
+                exit_mi[i] = min(float(2 * 3958.8 * np.arcsin(np.sqrt(a[k]))), exit_cap)
+                exit_ref[i] = epts[k][2] if exit_mi[i] < exit_cap else ""
+            status["used"].append(f"nearest freeway exit ({len(epts):,} exits, OpenStreetMap)"
+                                  + (f"; {enote}, those listings use the freeway line" if enote else ""))
+        else:
+            status["unavailable"].append(f"freeway exits: {enote or 'none found near these listings'}"
+                                         " -- the freeway line is used instead")
+    # Access = distance to the nearest exit where known, else to the freeway line.
+    # OpenStreetMap marks exits on expressways and state routes too, which the
+    # Census primary-road layer leaves out -- so the nearest exit is often
+    # CLOSER than the nearest "freeway" line (median 0.9 vs 2.0 mi on one real
+    # export). That is the better measure of access, and the label says so.
+    access = exit_mi.where(exit_mi.notna(), freeway)
+
     # ── airport distance, from the bundled table ──
     airport_mi = pd.Series([float("nan")] * n, index=idx, dtype=float)
     airport_name = pd.Series([""] * n, index=idx, dtype=object)
@@ -358,8 +638,8 @@ def _add_growth(df: pd.DataFrame, status: dict) -> pd.DataFrame:
     if table:
         for i in idx[have_xy]:
             best = min(table, key=lambda a: _miles(lat[i], lng[i], a["lat"], a["lng"]))
-            airport_mi[i] = _miles(lat[i], lng[i], best["lat"], best["lng"])
-            airport_name[i] = f"{best['name']} ({best['ident']})"
+            airport_mi[i] = min(_miles(lat[i], lng[i], best["lat"], best["lng"]), AIRPORT_CAP_MI)
+            airport_name[i] = f"{best['name']} ({best['ident']})" if airport_mi[i] < AIRPORT_CAP_MI else ""
         status["used"].append(f"airport distance ({len(table)} US airports with scheduled service)")
     else:
         status["unavailable"].append("airport distance: " + ("no coordinates in this export" if not have_xy.any() else "airport table missing"))
@@ -367,6 +647,7 @@ def _add_growth(df: pd.DataFrame, status: dict) -> pd.DataFrame:
     # ── county population growth and permits ──
     pop_growth = pd.Series([float("nan")] * n, index=idx, dtype=float)
     permits_1k = pd.Series([float("nan")] * n, index=idx, dtype=float)
+    fips = pd.Series([None] * n, index=idx, dtype=object)
     have_county = (state != "") & (county != "")
     pop_span = ""
     permit_year = 0
@@ -384,6 +665,7 @@ def _add_growth(df: pd.DataFrame, status: dict) -> pd.DataFrame:
             if cty is None:
                 continue
             matched += 1
+            fips[i] = (st, cty)
             name, p0, p1 = pops[(st, cty)]
             if p0 > 0:
                 pop_growth[i] = round((p1 - p0) / p0 * 100, 1)
@@ -403,37 +685,121 @@ def _add_growth(df: pd.DataFrame, status: dict) -> pd.DataFrame:
     else:
         status["unavailable"].append("county population and permits: no state or county in this export")
 
+    # ── county jobs and house prices, five-year change (national, by county) ──
+    jobs_chg = pd.Series([float("nan")] * n, index=idx, dtype=float)
+    price_chg = pd.Series([float("nan")] * n, index=idx, dtype=float)
+    jobs_span = price_span = ""
+    if fips.notna().any():
+        jobs, jobs_span, jnote = county_jobs()
+        prices, price_span, pnote = county_prices()
+        for i in idx[fips.notna()]:
+            if fips[i] in jobs:
+                jobs_chg[i] = jobs[fips[i]]
+            if fips[i] in prices:
+                price_chg[i] = prices[fips[i]]
+        (status["used"] if jobs else status["unavailable"]).append(
+            f"county jobs change {jobs_span} (BLS QCEW)" + (f", {jnote}" if jnote and jobs else "") if jobs
+            else f"county jobs: {jnote}")
+        (status["used"] if prices else status["unavailable"]).append(
+            f"county house-price change {price_span} (FHFA)" + (f", {pnote}" if pnote and prices else "") if prices
+            else f"county house prices: {pnote}")
+
+    # ── public-school enrolment within 5 miles, now against five years earlier ──
+    # A national stand-in for "is the area filling with families": no free,
+    # national, commercially-usable measure of school QUALITY exists (state
+    # grades differ state to state; the one national score forbids commercial
+    # use), but every public school's location and pupil count does. A school
+    # that opened in the window counts as growth -- schools follow homes.
+    school_n = pd.Series([float("nan")] * n, index=idx, dtype=float)
+    school_chg = pd.Series([float("nan")] * n, index=idx, dtype=float)
+    school_span = ""
+    if have_xy.any():
+        import numpy as np
+        dirs, notes = {}, []
+        for st in sorted({state[i] for i in idx[have_xy] if state[i]}):
+            if _out_of_time() and not _schools_cached(STATES[st][0]):
+                notes.append(f"{st}: skipped, out of download time this screen (fills in next time)")
+                continue
+            now, then, span = school_years(STATES[st][0])
+            if now and then:
+                dirs[st] = (now, then); school_span = span
+            else:
+                notes.append(f"{st}: {span}")
+        for i in idx[have_xy]:
+            if state[i] not in dirs:
+                continue
+            now, then = dirs[state[i]]
+            def within(d):
+                arr = np.array(list(d.values()), dtype=float)
+                la, lo = math.radians(lat[i]), math.radians(lng[i])
+                rl, rg = np.radians(arr[:, 0]), np.radians(arr[:, 1])
+                a = np.sin((rl - la) / 2) ** 2 + math.cos(la) * np.cos(rl) * np.sin((rg - lo) / 2) ** 2
+                near = 2 * 3958.8 * np.arcsin(np.sqrt(a)) <= SCHOOL_RADIUS_MI
+                return int(near.sum()), float(arr[near, 2].sum())
+            c1, p1 = within(now)
+            c0, p0 = within(then)
+            school_n[i] = c1
+            if p0 >= SCHOOL_MIN_PUPILS:
+                school_chg[i] = round((p1 - p0) / p0 * 100, 1)
+        if dirs:
+            status["used"].append(f"public-school pupils within {SCHOOL_RADIUS_MI:.0f} mi, {school_span} "
+                                  f"(federal Common Core of Data via the Urban Institute)"
+                                  + (f"; not available for {'; '.join(notes)}" if notes else ""))
+        else:
+            status["unavailable"].append("school enrolment: " + ("; ".join(notes) or "no state in this export"))
+
     # ── percentiles within the file, then the mean of what was available ──
     parts = pd.DataFrame({
-        "freeway": _pct(freeway, higher_is_better=False),
+        "access": _pct(access, higher_is_better=False),
         "airport": _pct(airport_mi, higher_is_better=False),
         "pop": _pct(pop_growth, True),
         "permits": _pct(permits_1k, True),
+        "schools": _pct(school_chg, True),
+        "jobs": _pct(jobs_chg, True),
+        "prices": _pct(price_chg, True),
     }, index=idx)
     score = parts.mean(axis=1, skipna=True).fillna(50.0).round(1)
 
     def basis(i) -> str:
         bits = []
-        if pd.notna(freeway[i]):
-            bits.append((f"over {over:.0f} mi" if over and freeway[i] > over else f"{freeway[i]:.1f} mi") + " to a freeway")
+        if pd.notna(exit_mi[i]):
+            ref = f" (exit {exit_ref[i]})" if exit_ref[i] else ""
+            bits.append((f"over {exit_cap:.0f} mi" if exit_mi[i] >= exit_cap else f"{exit_mi[i]:.1f} mi")
+                        + f" to a freeway or expressway exit{ref}")
+        elif pd.notna(freeway[i]):
+            bits.append((f"over {over:.0f} mi" if over and freeway[i] > over else f"{freeway[i]:.1f} mi")
+                        + " to a freeway (exit data unavailable)")
         if pd.notna(airport_mi[i]):
-            bits.append(f"{airport_mi[i]:.0f} mi to {airport_name[i]}")
+            bits.append(f"over {AIRPORT_CAP_MI:.0f} mi to an airport with scheduled flights"
+                        if airport_mi[i] >= AIRPORT_CAP_MI else f"{airport_mi[i]:.0f} mi to {airport_name[i]}")
         if pd.notna(pop_growth[i]):
             bits.append(f"county pop {pop_growth[i]:+.1f}% {pop_span}")
         if pd.notna(permits_1k[i]):
             bits.append(f"{permits_1k[i]:.1f} homes permitted per 1k residents ({permit_year})")
+        if pd.notna(jobs_chg[i]):
+            low = " from a pandemic low" if jobs_span.startswith("2020") else ""
+            bits.append(f"county jobs {jobs_chg[i]:+.0f}% {jobs_span}{low}")
+        if pd.notna(price_chg[i]):
+            bits.append(f"county house prices {price_chg[i]:+.0f}% {price_span}")
+        if pd.notna(school_chg[i]):
+            bits.append(f"public-school pupils within {SCHOOL_RADIUS_MI:.0f} mi {school_chg[i]:+.0f}% {school_span}")
+        elif pd.notna(school_n[i]):
+            bits.append(f"too few public-school pupils within {SCHOOL_RADIUS_MI:.0f} mi to measure a trend")
         if not bits:
             return "no growth signal available for this listing — scored neutral"
         missing = []
-        if pd.isna(freeway[i]): missing.append("freeway")
+        if pd.isna(access[i]): missing.append("freeway access")
         if pd.isna(pop_growth[i]) and have_county.get(i, False): missing.append("county not matched")
         return "; ".join(bits) + (f" (not measured: {', '.join(missing)})" if missing else "") + \
-            "; interchanges and school quality are not measured"
+            "; school quality (as opposed to enrolment) and proposed developments are not measured"
 
     out = pd.concat([df, pd.DataFrame({
+        "Freeway_Exit_Mi": exit_mi.round(1), "Freeway_Exit": exit_ref,
         "Freeway_Mi": freeway.round(1), "Airport_Mi": airport_mi.round(1),
         "Nearest_Airport": airport_name,
         "County_Pop_Growth_Pct": pop_growth, "County_Permits_Per_1k": permits_1k,
+        "Schools_5mi": school_n, "School_Pupils_Change_Pct": school_chg,
+        "County_Jobs_Change_Pct": jobs_chg, "County_House_Price_Change_Pct": price_chg,
         "Growth_Basis": [basis(i) for i in idx],
         "_growth_score": score,
     }, index=idx)], axis=1)

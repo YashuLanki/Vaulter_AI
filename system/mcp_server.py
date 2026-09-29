@@ -4135,14 +4135,16 @@ no score -- it's a diary, not a dial.""".replace(
                 "has not entered yet still produces a usable shortlist.",
                 "",
                 "FIVE FACTORS (four carry weight):",
-                f"  Growth    {WEIGHTS['growth']:>3}  is the place going anywhere. Four measured signals, each a",
-                "               percentile within this file: miles to a freeway (Census TIGER",
-                "               primary roads), miles to an airport with scheduled service, the",
-                "               county's population change (Census estimates), and homes",
-                "               permitted per 1,000 residents (Census permits survey). Added",
+                f"  Growth    {WEIGHTS['growth']:>3}  is the place going anywhere. Seven measured signals, each a",
+                "               percentile within this file, all national: miles to the nearest",
+                "               freeway or expressway exit (OpenStreetMap), miles to an airport",
+                "               with scheduled service, the county's population change (Census),",
+                "               homes permitted per 1,000 residents (Census), county jobs change",
+                "               (BLS), county house-price change (FHFA), and public-school pupils",
+                "               within 5 miles, now against five years ago (federal school data). Added",
                 "               2026-09-29 on a teammate's feedback; the weight is proximity's",
                 "               old slot, a placeholder until a partner signs it off. NOT",
-                "               measured: interchanges, proposed developments, school quality --",
+                "               measured: proposed developments, school quality --",
                 "               weigh those in the conversation and the jurisdiction dossiers.",
                 f"  Proximity {WEIGHTS['proximity']:>3}  distance to land the firm already owns. Shown as context, NOT",
                 "               scored: on 2026-09-28 the team said closeness to existing sites is",
@@ -4435,7 +4437,7 @@ no score -- it's a diary, not a dial.""".replace(
                 warn += ["", "GROWTH SIGNALS (each a percentile within this file)"]
                 warn += [f"  · {u}" for u in gs.get("used", [])]
                 warn += [f"  · NOT available — {u}" for u in gs.get("unavailable", [])]
-                warn.append("  Never measured here: interchanges, proposed developments, school "
+                warn.append("  Never measured here: proposed developments, school "
                             "quality — weigh those in the conversation.")
 
             # Whether this file can be MAPPED is a property of the file, known

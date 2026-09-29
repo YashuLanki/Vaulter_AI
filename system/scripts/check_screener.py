@@ -968,10 +968,14 @@ def main() -> int:
             # those still for this comparison, so the only thing that can
             # differ between the two runs is the caution being tested.
             import analysis.screening.growth as _gr
-            _keep = (_gr.county_population, _gr.county_permits)
+            _keep = (_gr.county_population, _gr.county_permits, _gr.school_years,
+                     _gr.county_jobs, _gr.county_prices)
             try:
+                _gr.county_jobs = lambda: ({}, "", "off for this check")
+                _gr.county_prices = lambda: ({}, "", "off for this check")
                 _gr.county_population = lambda: ({}, "", "off for this check")
                 _gr.county_permits = lambda: ({}, 0, "off for this check")
+                _gr.school_years = lambda fips: (None, None, "off for this check")
                 az = _run(big, full, tmp, "bigask_az")["dataframe"]
                 other = big.copy()
                 for sc in ("State", "State Name"):
@@ -979,7 +983,8 @@ def main() -> int:
                         other[sc] = "TX"
                 tx = _run(other, full, tmp, "bigask_tx")["dataframe"]
             finally:
-                (_gr.county_population, _gr.county_permits) = _keep
+                (_gr.county_population, _gr.county_permits, _gr.school_years,
+                 _gr.county_jobs, _gr.county_prices) = _keep
             check("Fit_Score is identical whichever market the reference came from",
                   tx["Fit_Score"].equals(az["Fit_Score"]),
                   "the reference is context, never arithmetic")
@@ -1236,7 +1241,7 @@ def main() -> int:
     d = base["dataframe"]
     check("every listing carries a growth basis sentence", d["Growth_Basis"].astype(str).str.len().gt(0).all())
     check("  ...which admits what is never measured",
-          d["Growth_Basis"].astype(str).str.contains("interchanges and school quality are not measured").all())
+          d["Growth_Basis"].astype(str).str.contains("proposed developments are not measured").all())
     check("Score_Growth stays inside 0-100", d["Score_Growth"].between(0, 100).all())
     # percentiles: a constant abstains at 50, NaN survives, direction is honoured
     pct = _g._pct(pd.Series([5.1, 5.1, 5.1, float("nan")]))
@@ -1246,7 +1251,14 @@ def main() -> int:
     check("a nearer freeway ranks higher", near[0] > near[1] > near[2], str(list(near)))
     # every source unreachable: neutral, said out loud, no exception, no row lost
     saved = (_g.county_population, _g.county_permits, _g.airports, _g.primary_road_points)
+    saved_exits = _g.interchange_points
+    saved_schools = _g.school_years
+    saved_county = (_g.county_jobs, _g.county_prices)
     try:
+        _g.county_jobs = lambda: ({}, "", "unreachable")
+        _g.county_prices = lambda: ({}, "", "unreachable")
+        _g.interchange_points = lambda la, lo: ([], "unreachable", set())
+        _g.school_years = lambda fips: (None, None, "unreachable")
         _g.county_population = lambda: ({}, "", "unreachable and not cached")
         _g.county_permits = lambda: ({}, 0, "unreachable and not cached")
         _g.airports = lambda: []
@@ -1264,6 +1276,29 @@ def main() -> int:
               and not dark.get("growth_status", {}).get("used"))
     finally:
         (_g.county_population, _g.county_permits, _g.airports, _g.primary_road_points) = saved
+        _g.interchange_points = saved_exits
+        _g.school_years = saved_schools
+        (_g.county_jobs, _g.county_prices) = saved_county
+    # A synthetic exit: the listing sitting on it must be nearest, and a map square
+    # that could not be fetched must fall back to the freeway line, never to zero.
+    if "Latitude" in src.columns and src["Latitude"].notna().sum() >= 2:
+        try:
+            xy0 = src[["Latitude", "Longitude"]].dropna().astype(float).iloc[0]
+            _g.interchange_points = lambda la, lo: ([(float(xy0["Latitude"]), float(xy0["Longitude"]), "99")], "", set())
+            ex = _run(src, full, tmp, "growth_one_exit")["dataframe"]
+            on = ex.loc[(ex["Latitude"].astype(float) == xy0["Latitude"]) & (ex["Longitude"].astype(float) == xy0["Longitude"])]
+            check("the listing sitting on the only exit is nearest to an exit",
+                  len(on) >= 1 and float(on["Freeway_Exit_Mi"].iloc[0]) == float(ex["Freeway_Exit_Mi"].min()))
+            import math as _mm
+            cell = (_mm.floor(float(xy0["Latitude"])), _mm.floor(float(xy0["Longitude"])))
+            _g.interchange_points = lambda la, lo: ([(0.0, 0.0, "1")], "exit data could not be fetched for 1 map square", {cell})
+            ex2 = _run(src, full, tmp, "growth_exit_fail")["dataframe"]
+            inside = ex2.apply(lambda r: (_mm.floor(float(r["Latitude"])), _mm.floor(float(r["Longitude"]))) == cell, axis=1)
+            check("  ...and where exit data could not be fetched, the freeway line stands in",
+                  ex2.loc[inside, "Freeway_Exit_Mi"].isna().all()
+                  and ex2.loc[inside, "Growth_Basis"].astype(str).str.contains("exit data unavailable").all())
+        finally:
+            _g.interchange_points = saved_exits
     # a synthetic freeway: the listing nearest to it must get the higher freeway percentile
     if "Latitude" in src.columns and src["Latitude"].notna().sum() >= 2:
         try:
@@ -1280,6 +1315,23 @@ def main() -> int:
             (_g.county_population, _g.county_permits, _g.airports, _g.primary_road_points) = saved
     else:
         skip("the listing on the only freeway scores highest", "no coordinates in this export")
+
+    # ── 26. The land type is read per ROW (2026-09-29) ─────────────────────────
+    # A back-test with the firm's own stuck properties found none of them got
+    # the stuck-deal caution: every export HAS a Proposed Land Use column, so a
+    # row where it was blank got no land type, whatever Secondary Type said.
+    print("\n26. A blank Proposed Land Use falls back to Secondary Type on that row")
+    if "Proposed Land Use" in src.columns and "Secondary Type" in src.columns:
+        t = src.copy()
+        t["Proposed Land Use"] = t["Proposed Land Use"].astype(object)
+        t.loc[:, "Proposed Land Use"] = None
+        blank = _run(t, full, tmp, "plu_blank")["dataframe"]
+        base_c = base["dataframe"]["Cautions"].astype(str).str.contains("could not sell").sum()
+        now_c = blank["Cautions"].astype(str).str.contains("could not sell").sum()
+        check("with Proposed Land Use blanked, Secondary Type still drives the stuck-deal caution",
+              now_c > 0, f"{now_c} rows (with the column filled: {base_c})")
+    else:
+        skip("per-row land type fallback", "export lacks one of the two columns")
 
     passed = sum(1 for _, ok, _ in RESULTS if ok)
     print(f"\n{passed}/{len(RESULTS)} checks passed")

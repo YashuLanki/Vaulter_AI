@@ -1316,7 +1316,15 @@ def add_cautions(df: pd.DataFrame) -> pd.DataFrame:
     # Same column preference the comparison wiring already uses: on a land
     # export "Property Type" is the constant "Land" and says nothing, so the
     # proposed-use column is read first.
-    use_text = _text(_col(df, "Proposed Land Use", "Secondary Type", default=""))
+    # Row by row, not column by column (fixed 2026-09-29). _col picks the first
+    # column that EXISTS, and every CoStar land export has a Proposed Land Use
+    # column -- so a row where it is blank got no land type at all, even with
+    # Secondary Type saying Residential, and could never receive the stuck-deal
+    # caution. 28 of 216 rows on the real Phoenix export. Found by back-testing
+    # the firm's own stuck properties: all three came back with no caution.
+    _plu = _text(_col(df, "Proposed Land Use", default=""))
+    _sec = _text(_col(df, "Secondary Type", default=""))
+    use_text = _plu.where(_plu.str.strip() != "", _sec)
 
     out = []
     for ac, fa, fr, sf, st, pr, sta, co, use in zip(acres, flood_area, flood_risk, in_sfha,

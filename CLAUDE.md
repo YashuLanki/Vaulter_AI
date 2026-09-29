@@ -49,7 +49,7 @@ python system/main.py stats                     # what this instance has availab
 python system/scripts/pull_project_master.py  # (maintainer's machine only) refresh the portfolio from Smartsheet
 
 # Checks -- run the one that matches what you touched (see "Three regression suites" below)
-python system/scripts/check_screener.py             # 132 checks on the screener's arithmetic
+python system/scripts/check_screener.py             # 135 checks on the screener's arithmetic
 python system/scripts/check_portfolio_comparison.py # 137 checks on the comparison index
 python system/scripts/check_answers.py              # 20 checks on the knowledge answers come from
 python system/scripts/check_retrieval.py            # does summary search find the right passage
@@ -1171,8 +1171,50 @@ Four rules that must survive any edit:
   `Growth_Basis` says so; nothing here can raise out of the screen. Measured on the 216-row export:
   all four signals on every row, 0.5s, scores 20-88. On the teammate's 88-row file it is the only
   factor with any spread, and it turned 87 Unranked rows back into a shortlist. **Not measured, and
-  the basis text says so on every row:** interchanges (TIGER has no point layer for them), proposed
-  developments and school quality, which stay in the conversation and the jurisdiction dossiers.
+  the basis text says so on every row:** proposed developments and school quality, which stay in
+  the conversation and the jurisdiction dossiers. **Interchanges became measured the same day:**
+  the nearest freeway or expressway exit (OpenStreetMap `motorway_junction`, one Overpass query per
+  one-degree square holding a listing, on the shared 7-day cache) replaced the freeway line as the
+  access signal, with the line as the fallback for any square that cannot be fetched -- said on the
+  row. The nearest exit is often CLOSER than the nearest Census "primary road" (median 0.9 vs 2.0
+  mi on one export) because OSM marks expressway and state-route exits the primary layer omits;
+  that is the better measure of access. Measured: every row on both real exports, 18s for a cold
+  first run of the 216-row file while squares are fetched, cached after. The standing rule for any
+  new source (2026-09-29): **it must cover every US market the same way**; a state-only source may
+  only be a labelled extra that abstains elsewhere, never part of the score.
+
+  **Three more national signals the same day**, making seven: county jobs change (BLS QCEW annual
+  files, keyless -- BLS refuses a request with no browser name, so one is sent), county house-price
+  change (FHFA's annual county index, published as an Excel file under a `.csv` name), and
+  public-school pupils within 5 miles against five years earlier (federal Common Core of Data via
+  the Urban Institute portal, one request per state per year, pages of 10,000; a school that opened
+  counts as growth; under 300 pupils abstains). No free, national, commercially-usable school
+  QUALITY measure exists, so enrolment is the stand-in and each row says quality is not measured.
+  The jobs baseline year is currently 2020, a pandemic low; rows say so, and ranking within a file
+  is unaffected. Tested on made-up listings in seven states: Dallas and Pinal lead, rural Nevada and
+  Tulsa trail. **A cold first screen of a new market is bounded by `GROWTH_FETCH_BUDGET_SECONDS`
+  (60)**: six new states once took 258 s, past Claude Desktop's patience; now cached data is always
+  used, only new downloads wait for time, skipped signals are named, and they fill in next time.
+  Two traps found testing across states: a whole-country map request to the Census road service
+  retried for minutes then failed (the freeway line is now fetched only for a file within one
+  region), and far distances printed as measurements ("188 mi to an exit" when the search reaches
+  ~16) -- exits and airports are now capped and said as "over".
+
+  **Back-tested against the firm's own record (2026-09-29).** The 19 Arizona properties with a
+  card and verified coordinates were added to a COPY of the 216-row Phoenix export -- once with no
+  price, once with the purchase price brought forward by the county FHFA index -- and screened.
+  They ranked in the top third (median percentile 35 without price, 28 with): the screener agrees
+  with the kind of land the firm buys. **It does not tell a good outcome from a bad one**: with
+  prices, two properties marketed for 12+ years without a sale ranked in the top 6%, level with the
+  ~13x exit, while the ~2.9x exit ranked 72nd percentile on weak growth. That is expected -- a CoStar
+  row describes a site, not the basis, seller, timing or execution that decided those outcomes --
+  and it is why the stuck-deal record stays a caution, never a score. Sample: two Arizona exits.
+  **The back-test found a real bug:** none of the three stuck properties got the stuck-deal caution,
+  because `add_cautions` picked its land-type column by which EXISTS (`_col`), and every land
+  export has a Proposed Land Use column -- so a row with it blank had no land type whatever
+  Secondary Type said (28 of 216 real rows). Now per row; the caution reaches 25 real listings,
+  not 23, and all three stuck properties. It also lands on one of the two sold properties, same
+  county and type -- the caution is a prompt to ask, not a verdict. `check_screener.py` §26.
   The weight of 35 was inherited, not chosen, because inheriting invents nothing; it still needs a
   partner's sign-off. `check_screener.py` §25 asserts the score abstains to neutral when every
   source is unreachable, that a closer freeway ranks higher, that a constant county signal moves
@@ -1275,7 +1317,7 @@ ranks or weights selection factors. They need a senior partner's judgment, not a
 (Real names and figures behind every genericized citation in this file live in
 `docs/EVIDENCE_APPENDIX.md`, local-only — this repo is deliberately public.)
 
-`system/scripts/check_screener.py` runs **132 checks** across deformed market shapes. Run it after
+`system/scripts/check_screener.py` runs **135 checks** across deformed market shapes. Run it after
 any change to `fit_screen.py`. Note it covers the screener only — **`geo_providers.py` has no
 automated coverage at all**, and that is where the worst measured bug of 2026-07-29 lived (see
 the proximity note below). It is one of three suites: `check_portfolio_comparison.py` (137 checks)
@@ -1848,7 +1890,7 @@ one particular name, OCR installed and Python already working. Every teammate bu
 
 ## Three regression suites, and the third one checks answers (2026-08-14)
 
-`check_screener.py` (**132 checks**) and `check_portfolio_comparison.py` (**137**) both test
+`check_screener.py` (**135 checks**) and `check_portfolio_comparison.py` (**137**) both test
 deterministic Python, and both pass while the answer a person actually receives is still wrong —
 because the wrongness lives in the knowledge the answer was built from, not in the arithmetic.
 `system/scripts/check_answers.py` (**20 checks**) is the third suite, and that knowledge is what it
