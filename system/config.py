@@ -980,6 +980,15 @@ PROPERTY_SUMMARIES_DIR.mkdir(parents=True, exist_ok=True)
 SMARTSHEET_PORTFOLIO_DIR = SHARED_DIR / "Smartsheet Portfolio"
 SMARTSHEET_PORTFOLIO_DIR.mkdir(parents=True, exist_ok=True)
 
+# The Project Master's filename in that folder. Excel, not CSV, on purpose: the
+# Smartsheet marks a sold deal by striking through its name, and only an .xlsx
+# can carry that. The CSV export that sat here until 2026-09-28 listed every
+# sold deal as still owned (portfolio.py saw "49 active, 0 sold"), and the
+# screener scored a listing's closeness to a sold property as closeness to a
+# holding. scripts/pull_project_master.py writes this file once a month from
+# Smartsheet itself; portfolio.py reads it like any other export.
+PROJECT_MASTER_FILENAME = "Vaulter_Project_Master.xlsx"
+
 # Where CoStar exports and broker spreadsheets get dropped for screening.
 #
 # SHARED as of 2026-08-03, and for a measured reason. The local drop folder
@@ -1071,6 +1080,22 @@ INSTALLS_DIR.mkdir(parents=True, exist_ok=True)
 VAULTER_UPDATE_CHANNEL = os.getenv("VAULTER_UPDATE_CHANNEL", "general").strip().lower()
 if VAULTER_UPDATE_CHANNEL not in ("general", "canary"):
     VAULTER_UPDATE_CHANNEL = "general"
+
+# ─── Smartsheet (ONE designated machine only) ────────────────────────────
+# The one exception to "there are no API keys", and a deliberate one
+# (2026-09-28). The token costs nothing -- it comes with the firm's existing
+# Smartsheet subscription -- but it is a secret, so it lives in ONE machine's
+# own confidentials/.env, the machine whose monthly scheduled task pulls the
+# Project Master into the team folder (scripts/pull_project_master.py).
+# Teammates' installs never hold it and never need it: they read the result
+# from the shared folder exactly as before. Read-only use only; nothing this
+# project does ever writes to Smartsheet.
+SMARTSHEET_ACCESS_TOKEN = os.getenv("SMARTSHEET_ACCESS_TOKEN", "").strip()
+# The sheet's numeric id, pinned so a same-named copy (there are two on the
+# maintainer's account alone) can never be pulled by mistake. When blank the
+# pull script resolves the name below, but only if exactly one sheet matches.
+SMARTSHEET_PROJECT_MASTER_ID = os.getenv("SMARTSHEET_PROJECT_MASTER_ID", "").strip()
+SMARTSHEET_PROJECT_MASTER_NAME = os.getenv("SMARTSHEET_PROJECT_MASTER_NAME", "Vaulter Project Master").strip()
 
 # ─── OCR Settings ─────────────────────────────────────────────────
 # Auto-detected rather than hardcoded to one exact install location --

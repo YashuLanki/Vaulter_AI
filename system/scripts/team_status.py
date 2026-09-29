@@ -179,6 +179,30 @@ def _connector_check():
     return {"ran": True, "passed": r.returncode == 0, "problems": problems}
 
 
+def _portfolio_age():
+    """
+    How old the Project Master in the team folder is, and whether it is the
+    Excel file that can show sold deals. Read from the file's own date, never
+    from whether the monthly pull reported success -- the same rule as the
+    file list below, for the same reason. The pull is monthly, so anything past
+    45 days means it has missed a month.
+    """
+    from config import SMARTSHEET_PORTFOLIO_DIR, PROJECT_MASTER_FILENAME
+    folder = Path(SMARTSHEET_PORTFOLIO_DIR)
+    for name in (PROJECT_MASTER_FILENAME, "Vaulter_Project_Master.csv"):
+        p = folder / name
+        try:
+            if not p.exists():
+                continue
+            days = _days_since(datetime.fromtimestamp(p.stat().st_mtime).isoformat())
+        except OSError:
+            return {"present": False}
+        return {"present": True, "file": name, "days_old": days,
+                "stale": days is None or days > 45,
+                "shows_sold": name.lower().endswith(".xlsx")}
+    return {"present": False}
+
+
 def _file_list_age():
     """
     How old the list of the firm's documents is, and how many files it holds.
@@ -285,6 +309,7 @@ def collect() -> dict:
         "installed_but_never_opened": never_seen,
         "error_reports": _error_reports(),
         "file_lists": _file_list_age(),
+        "portfolio_file": _portfolio_age(),
         "answers_check": _answers_check(),
         "connector_check": connector,
     }
@@ -347,6 +372,18 @@ def as_text(data: dict) -> str:
         count = f"{fl['files']:,} files" if fl["files"] is not None else "could not be counted"
         flag = "  <-- TOO OLD, answers about what documents exist may be wrong" if fl["stale"] else ""
         lines.append(f"File list ({fl['where']}): {count}, refreshed {age}{flag}")
+
+    pf = data.get("portfolio_file") or {}
+    if not pf.get("present"):
+        lines.append("Project Master in the team folder: MISSING -- every machine reads "
+                     "the portfolio from there")
+    else:
+        age = ("today" if pf["days_old"] == 0
+               else f"{pf['days_old']} days old" if pf["days_old"] is not None
+               else "age unknown")
+        flag = "  <-- the monthly pull has missed a month; run pull_project_master.py" if pf["stale"] else ""
+        sold = "" if pf["shows_sold"] else "  <-- a CSV, so sold deals read as still owned"
+        lines.append(f"Project Master in the team folder: {pf['file']}, pulled {age}{flag}{sold}")
 
     a = data["answers_check"]
     lines.append("")

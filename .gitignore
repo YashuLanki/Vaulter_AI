@@ -86,6 +86,9 @@ system/data/last_error_report.txt
 # clone would then start life believing it had already checked in today.
 system/data/last_checkin.txt
 system/data/last_update_check.txt
+# What the monthly Smartsheet pull last did (row and sold counts, and the team-folder
+# path it wrote to, which names the firm's library). Local to the one machine that pulls.
+system/data/last_project_master_pull.json
 system/data/corpus_index.db-journal
 system/data/corpus_index.db-wal
 

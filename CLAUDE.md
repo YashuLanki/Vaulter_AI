@@ -46,10 +46,11 @@ python system/main.py screen CostarExport.xlsx  # rank a CoStar export by portfo
 python system/main.py screen export.xlsx 2.5    # ...at a 2.5x MOIC target instead of the 3x default
 python system/main.py properties                # list the portfolio from the Project Master
 python system/main.py stats                     # what this instance has available
+python system/scripts/pull_project_master.py  # (maintainer's machine only) refresh the portfolio from Smartsheet
 
 # Checks -- run the one that matches what you touched (see "Three regression suites" below)
 python system/scripts/check_screener.py             # 111 checks on the screener's arithmetic
-python system/scripts/check_portfolio_comparison.py # 106 checks on the comparison index
+python system/scripts/check_portfolio_comparison.py # 121 checks on the comparison index
 python system/scripts/check_answers.py              # 20 checks on the knowledge answers come from
 ```
 
@@ -379,6 +380,33 @@ file silently beating a fresh team one is the obvious way this goes wrong. The s
 local-then-shared lookup covers `property_coordinates.csv` and `builtin_properties.json` —
 but `coords_path()` returns the *local* path when neither exists, so a caller writing a new
 table never writes into the folder the whole team reads.
+
+**The team copy is pulled from Smartsheet itself, once a month, by one machine
+(`scripts/pull_project_master.py`, 2026-09-28).** Until then it was a hand-made CSV export, and
+two things were wrong with it that nobody could see. A CSV cannot carry strikethrough, which is
+how the Smartsheet marks a sold deal, so every machine read **"49 active, 0 sold"** and the
+screener scored a listing's closeness to a sold property as closeness to a holding. And it was
+two months behind the sheet: **three properties had changed stage, two of them into
+Disposition**, one of the two stages the health check watches for stale summaries, so every
+machine was watching the wrong list. The person who checked said the sheet "looked the same";
+the API showed otherwise. **Verify against the source, not against the copy.**
+
+The pull is the one exception to "there are no API keys", and a deliberate one: the token
+costs nothing (it comes with the firm's Smartsheet subscription) but it is a secret, so it lives
+in **one** machine's own `confidentials/.env` and is never packaged; `SMARTSHEET_ACCESS_TOKEN`
+stays blank on every teammate's machine and they read the result from the shared folder exactly
+as before. Read-only, always. The sheet is pinned by numeric id (`SMARTSHEET_PROJECT_MASTER_ID`)
+because the maintainer's own account sees two same-named copies. The file is validated, written
+under a hidden temporary name and swapped in, and the stale CSV is retired (a dated copy kept
+under `system/data/backups/`) only AFTER the Excel file is in place, because `find_project_file()`
+takes the CSV when both exist. The Excel export through the API keeps the strikethrough, measured,
+so `portfolio.py` reads it with no change. `check_portfolio_comparison.py` §8 holds the shape: a
+failed or wrong-shaped download leaves the previous file untouched, and the reader sees the sold
+row. Monthly rather than nightly, by the owner's choice; the morning round reports the file's own
+age and flags a missed month, since **the only trustworthy evidence about a scheduled job is the
+artifact**. One thing the pull cannot fix: only one of the four deals in `_sold-deals.md` is
+actually struck through in the sheet, so the other three still read as owned until someone
+strikes them in Smartsheet.
 
 `find_project_file()` explicitly skips `property_coordinates.csv` **and**
 `builtin_properties.json` — both live alongside the Project Master and neither is one. The
@@ -1058,7 +1086,7 @@ ranks or weights selection factors. They need a senior partner's judgment, not a
 `system/scripts/check_screener.py` runs **111 checks** across deformed market shapes. Run it after
 any change to `fit_screen.py`. Note it covers the screener only — **`geo_providers.py` has no
 automated coverage at all**, and that is where the worst measured bug of 2026-07-29 lived (see
-the proximity note below). It is one of three suites: `check_portfolio_comparison.py` (106 checks)
+the proximity note below). It is one of three suites: `check_portfolio_comparison.py` (121 checks)
 covers the comparison index, and `check_answers.py` (20) covers the shared knowledge answers are
 built from — see "Three regression suites" below for what each one can and cannot catch.
 
@@ -1628,7 +1656,7 @@ one particular name, OCR installed and Python already working. Every teammate bu
 
 ## Three regression suites, and the third one checks answers (2026-08-14)
 
-`check_screener.py` (**111 checks**) and `check_portfolio_comparison.py` (**106**) both test
+`check_screener.py` (**111 checks**) and `check_portfolio_comparison.py` (**121**) both test
 deterministic Python, and both pass while the answer a person actually receives is still wrong —
 because the wrongness lives in the knowledge the answer was built from, not in the arithmetic.
 `system/scripts/check_answers.py` (**20 checks**) is the third suite, and that knowledge is what it

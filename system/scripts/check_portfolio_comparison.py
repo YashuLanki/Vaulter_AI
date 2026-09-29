@@ -1147,6 +1147,90 @@ def main() -> int:
     except Exception as e:
         check("install-list registration checks ran", False, f"{type(e).__name__}: {e}")
 
+    # ── §8: the monthly Project Master pull never leaves the team folder worse
+    # than it found it. The pull runs on one machine and writes the file every
+    # other install reads, so "a failed pull leaves the old file untouched" is
+    # the property that matters. Run with a fake fetch, never Smartsheet.
+    print("\n§8 Project Master pull (scripts/pull_project_master.py)")
+    try:
+        import io as _io
+        import tempfile as _tf
+        import shutil as _sh
+        import openpyxl as _ox
+        import scripts.pull_project_master as _pm
+        import portfolio as _pf
+
+        def _xlsx(names, struck=(), headings=("Project Name", "Project Category", "State")):
+            wb = _ox.Workbook(); ws = wb.active
+            ws.append(list(headings))
+            for n in names:
+                ws.append([n, "Pre-Plat", "AZ"])
+                if n in struck:
+                    ws.cell(row=ws.max_row, column=1).font = _ox.styles.Font(strike=True)
+            buf = _io.BytesIO(); wb.save(buf); return buf.getvalue()
+
+        _d = Path(_tf.mkdtemp(prefix="vlt_pull_"))
+        _dest = _d / "Smartsheet Portfolio"; _dest.mkdir()
+        _bak = _d / "backups"
+        _csv = _dest / _pm.STALE_CSV_NAME
+        _csv.write_text("Project Name,Project Category,State\nOld One,Pre-Plat,AZ\n", encoding="utf-8")
+        _final = _dest / _pm.config.PROJECT_MASTER_FILENAME
+        try:
+            def _boom():
+                raise _pm.PullError("no network")
+            _raised = False
+            try:
+                _pm.pull(_dest, _bak, fetch=_boom)
+            except _pm.PullError:
+                _raised = True
+            check("a failed download raises and leaves the old CSV in place",
+                  _raised and _csv.exists() and not _final.exists())
+            _raised = False
+            try:
+                _pm.pull(_dest, _bak, fetch=lambda: _xlsx(["X"], headings=("Name", "Stage", "State")))
+            except _pm.PullError as e:
+                _raised = "missing the column" in str(e)
+            check("a download without the Project Master's columns is refused",
+                  _raised and _csv.exists() and not _final.exists())
+            _raised = False
+            try:
+                _pm.pull(_dest, _bak, fetch=lambda: b"not an excel file at all")
+            except _pm.PullError:
+                _raised = True
+            check("a download that is not an Excel file is refused",
+                  _raised and _csv.exists() and not _final.exists())
+            check("no temporary file is left behind by a refused pull",
+                  not any(q.name.startswith(".") for q in _dest.iterdir()))
+            _rec = _pm.pull(_dest, _bak, fetch=lambda: _xlsx(["Kept A", "Sold B", "Kept C"], struck=("Sold B",)))
+            check("a good download is installed under the expected name",
+                  _final.exists() and _rec["rows"] == 3)
+            check("the stale CSV is retired only after the Excel file is in place, and a dated copy kept",
+                  _final.exists() and not _csv.exists() and _rec["csv_retired"]
+                  and Path(_rec["csv_retired"]).exists())
+            check("the struck-through name is counted as sold", _rec["sold"] == 1)
+            _saved = _pf._portfolio_dirs
+            try:
+                _pf._portfolio_dirs = lambda: [_dest]
+                _got = _pf.find_project_file()
+                check("find_project_file() picks the pulled Excel file",
+                      _got is not None and _got.name == _final.name)
+                _props, _sold = _pf.parse_excel(_got)
+                check("portfolio.py reads it as 2 active and 1 sold, with no code change",
+                      len(_props) == 2 and len(_sold) == 1, f"{len(_props)} active, {len(_sold)} sold")
+            finally:
+                _pf._portfolio_dirs = _saved
+            _before = _final.read_bytes()
+            try:
+                _pm.pull(_dest, _bak, fetch=_boom)
+            except _pm.PullError:
+                pass
+            check("a failed pull after a good one leaves the good file untouched",
+                  _final.read_bytes() == _before)
+        finally:
+            _sh.rmtree(_d, ignore_errors=True)
+    except Exception as e:
+        check("Project Master pull checks ran", False, f"{type(e).__name__}: {e}")
+
     passed = sum(1 for _, ok, _ in RESULTS if ok)
     print(f"\n{passed}/{len(RESULTS)} checks passed")
     return 0 if passed == len(RESULTS) else 1
