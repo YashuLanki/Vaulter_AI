@@ -1339,6 +1339,58 @@ def main() -> int:
     except Exception as e:
         check("find-inside-a-document checks ran", False, f"{type(e).__name__}: {e}")
 
+    # -- Finding a property's coordinate when its name changes -------
+    # The Project Master's names are not stable. The Smartsheet pull
+    # (2026-09-28) replaced a hand-made export with the real sheet, and one
+    # property's name gained a parenthetical alias. The coordinate lookup
+    # matched only a SHORTER typed name inside a LONGER stored key, so a name
+    # that got LONGER failed every branch -- and run_proximity_for_property
+    # then refused with "no verified coordinate" for a property whose
+    # coordinate was sitting in the file. That refusal is meant to be
+    # respected, so the wrong cause would send someone to re-derive a
+    # coordinate from deeds that was never missing. Found 2026-10-01.
+    print()
+    print("Finding a coordinate when the property's name changes")
+    try:
+        import tempfile as _tfc
+        import shutil as _shc
+        sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+        from pipeline import property_coordinates as _pcoord
+
+        _d = Path(_tfc.mkdtemp())
+        try:
+            _pcoord.save_coordinate(_d, "Cedar Flat 12", "CA", 34.5, -117.2,
+                                    precision="section")
+            _pcoord.save_coordinate(_d, "Juniper Mesa 10", "AZ", 33.0, -111.4,
+                                    precision="parcel")
+            _pcoord.save_coordinate(_d, "Juniper Mesa 50", "AZ", 33.1, -111.5,
+                                    precision="parcel")
+
+            check("a name that GAINED a parenthetical still finds its coordinate",
+                  _pcoord.lookup(_d, "Cedar Flat 12 (Wren & Draper)") is not None)
+            check("...and finds the SAME row the plain name does",
+                  _pcoord.lookup(_d, "Cedar Flat 12 (Wren & Draper)")
+                  == _pcoord.lookup(_d, "Cedar Flat 12"))
+            check("the plain name still works, unchanged",
+                  _pcoord.lookup(_d, "Cedar Flat 12") is not None)
+
+            # The refusal this function exists for must survive: stripping a
+            # parenthetical must never make two similar parcels collide, and a
+            # name nobody has a coordinate for must still come back empty.
+            check("an ambiguous stem is still refused rather than guessed",
+                  _pcoord.lookup(_d, "Juniper Mesa") is None,
+                  "two parcels sharing a stem")
+            check("a parenthetical on an ambiguous stem is refused too",
+                  _pcoord.lookup(_d, "Juniper Mesa (either one)") is None)
+            check("a property with no coordinate still returns nothing",
+                  _pcoord.lookup(_d, "Nowhere Ranch 7 (Fake)") is None)
+            check("...and so does a plain unknown name",
+                  _pcoord.lookup(_d, "Totally Invented Parcel") is None)
+        finally:
+            _shc.rmtree(_d, ignore_errors=True)
+    except Exception as e:
+        check("coordinate-lookup checks ran", False, f"{type(e).__name__}: {e}")
+
     passed = sum(1 for _, ok, _ in RESULTS if ok)
     print(f"\n{passed}/{len(RESULTS)} checks passed")
     return 0 if passed == len(RESULTS) else 1

@@ -125,15 +125,44 @@ def load_coordinates(data_dir: Path) -> dict:
 
 def lookup(data_dir: Path, property_name: str) -> dict | None:
     """Exact match first, then a single unambiguous case-insensitive
-    substring match. Deliberately refuses to guess when several properties
-    match -- picking one arbitrarily would put the search miles away with no
-    visible sign anything went wrong."""
+    substring match, then the typed name without its trailing parenthetical.
+    Deliberately refuses to guess when several properties match -- picking one
+    arbitrarily would put the search miles away with no visible sign anything
+    went wrong.
+
+    The parenthetical step exists because the Project Master's names are not
+    stable. Measured 2026-10-01: the Smartsheet pull (2026-09-28) replaced a
+    hand-made export, and the real sheet calls one property
+    "<name> (<alias>)" where the old export -- and this coordinates table --
+    said "<name>". The substring step above only matches a SHORTER typed name
+    inside a LONGER stored key, so a name that got LONGER fails every branch,
+    and `run_proximity_for_property` then refuses with "no verified
+    coordinate" for a property whose coordinate is sitting in the file. That
+    refusal is meant to be respected rather than worked around, so a confident
+    wrong cause here sends someone to re-derive a coordinate from deeds that
+    was never missing.
+
+    Narrow on purpose: the stripped name must match a stored key EXACTLY. It
+    does not loosen the substring rule, so it cannot newly confuse two
+    similarly-named parcels -- the failure this function's refusal exists to
+    prevent.
+    """
     coords = load_coordinates(data_dir)
     if property_name in coords:
         return coords[property_name]
 
     hits = [v for k, v in coords.items() if property_name.lower() in k.lower()]
-    return hits[0] if len(hits) == 1 else None
+    if len(hits) == 1:
+        return hits[0]
+
+    base = property_name.split("(")[0].strip()
+    if base and base != property_name:
+        for key, value in coords.items():
+            if key.strip().lower() == base.lower():
+                log.info(f"Coordinate for {property_name!r} found under {key!r} "
+                         f"(the name gained a parenthetical since the table was built)")
+                return value
+    return None
 
 
 def save_coordinate(data_dir: Path, property_name: str, state: str,
