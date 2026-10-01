@@ -309,6 +309,38 @@ footer{margin-top:60px;padding-top:18px;border-top:1px solid var(--rule);
   .cand{grid-template-columns:1fr}
   .cand .rk{display:none}
 }
+/* weights panel, decision marks, explanations (2026-10-01) */
+.tune{background:var(--panel);border:1px solid var(--rule);border-radius:8px;padding:16px 18px;display:grid;gap:12px}
+.tune-row{display:grid;grid-template-columns:minmax(150px,220px) 1fr 44px;gap:14px;align-items:center}
+.tune-row label{font-weight:600;font-size:14px;color:var(--ink)}
+.tune-row label small{display:block;font-weight:400;color:var(--ink-3);font-size:12px;margin-top:1px}
+.tune-row input[type=range]{width:100%;accent-color:var(--accent)}
+.tune-row output{font-family:var(--mono);font-size:14px;text-align:right;color:var(--ink)}
+.tune-foot{display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:space-between}
+.tune-foot .say{font-size:13.5px;color:var(--ink-2)}
+.btn{font-family:var(--sans);font-size:13px;padding:7px 12px;border:1px solid var(--rule-2);
+  background:var(--panel);color:var(--ink);border-radius:5px;cursor:pointer}
+.btn:hover{background:var(--sunk)}
+.btn:focus-visible,.tune-row input:focus-visible,.dec textarea:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.btn.on{background:var(--accent);color:var(--paper);border-color:var(--accent)}
+.dec{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:6px 0 4px}
+.dec textarea,.copybox{width:100%;min-height:58px;font-family:var(--sans);font-size:13px;padding:8px 10px;
+  border:1px solid var(--rule-2);border-radius:5px;background:var(--panel);color:var(--ink);box-sizing:border-box}
+.mark{font-family:var(--mono);font-size:10.5px;padding:1px 6px;border-radius:3px;margin-left:6px;white-space:nowrap}
+.mark.pursue{background:var(--good-bg);color:var(--good)}
+.mark.maybe{background:var(--warn-bg);color:var(--warn)}
+.mark.pass{background:var(--crit-bg);color:var(--crit)}
+.moved{font-family:var(--mono);font-size:11px;color:var(--ink-3);margin-left:6px;white-space:nowrap}
+.gsig{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:5px 16px;font-size:13.5px;margin:4px 0 6px}
+.gsig span{color:var(--ink-2)} .gsig b{font-family:var(--mono);font-weight:500;color:var(--ink);text-align:right}
+.gsig b.na{color:var(--ink-3);font-weight:400}
+.tip{text-decoration:underline dotted var(--ink-3);text-underline-offset:3px;cursor:help}
+.declist{display:grid;gap:6px}
+.declist button{all:unset;cursor:pointer;display:grid;grid-template-columns:auto 1fr;gap:4px 10px;
+  padding:6px 4px;border-bottom:1px solid var(--rule)}
+.declist button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.declist .who{font-size:14px;color:var(--ink)} .declist .why{grid-column:2;font-size:12.5px;color:var(--ink-3)}
+@media (max-width:560px){.tune-row{grid-template-columns:1fr 44px}.tune-row input[type=range]{grid-column:1/-1}}
 </style>
 
 </head>
@@ -410,17 +442,39 @@ footer{margin-top:60px;padding-top:18px;border-top:1px solid var(--rule);
 </section>
 
 <!-- ─────────────── SHORTLIST ─────────────── -->
+<section id="tune">
+  <div class="shead">
+    <h2>Try your own weights</h2>
+    <p>Move a factor and the shortlist, table and map re-rank at once</p>
+  </div>
+  <div class="tune" id="tune-rows"></div>
+  <div class="tune-foot" style="margin-top:10px">
+    <span class="say" id="tune-sum"></span>
+    <span style="display:flex;gap:8px;flex-wrap:wrap">
+      <button class="btn" id="tune-reset" type="button">Back to the screen's weights</button>
+      <button class="btn" id="tune-copy" type="button">Copy these weights</button>
+    </span>
+  </div>
+  <textarea class="copybox" id="tune-box" readonly hidden aria-label="Weights to copy"></textarea>
+  <p style="font-size:13px;color:var(--ink-3);margin:10px 0 0;max-width:72ch">The screen's own weights are
+  placeholders until a partner signs them off. Settings that make the top of the list look right to someone who
+  knows the deals are exactly the answer that sign-off needs: copy them and send them on. The headline figures
+  at the top of the page always use the screen's own weights.</p>
+</section>
+
 <section id="shortlist">
   <div class="shead">
     <h2>The shortlist</h2>
     <p>Click any card for the full detail</p>
   </div>
   <div class="cards" id="cards"></div>
-  <figcaption style="margin-top:14px">Each bar scores 0&ndash;100.
-  <b>Location</b> &mdash; how close it is to land the firm already owns.
-  <b>Price</b> &mdash; how far the asking price sits below what the exit has to fetch.
+  <figcaption style="margin-top:14px">Each bar scores 0&ndash;100, against the other listings in this file.
+  <b>Growth</b> &mdash; is the area going anywhere: freeway exits, airports, the county's population, permits,
+  jobs and house prices, and nearby school enrolment.
+  <b>Price</b> &mdash; whether the market pays enough for the split-up land to reach the target multiple.
   <b>Seller</b> &mdash; time on market, lender ownership, price against what the seller paid.
-  <b>Size</b> &mdash; whether the acreage fits how the firm buys.</figcaption>
+  <b>Size</b> &mdash; whether the acreage fits how the firm buys.
+  <b>Location</b> &mdash; closeness to land the firm owns; shown, not scored unless you weight it above.</figcaption>
 </section>
 
 <!-- ─────────────── VERIFIED ─────────────── -->
@@ -460,15 +514,39 @@ footer{margin-top:60px;padding-top:18px;border-top:1px solid var(--rule);
         <th data-k="type">Type</th><th data-k="acres" class="n">Acres</th>
         <th data-k="price" class="n">Price</th><th data-k="askPerAcre" class="n">$/acre</th>
         <th data-k="reqExit" class="n">Exit must fetch</th>
-        <th data-k="headroom" class="n">Headroom</th>
+        <th data-k="headroom" class="n"><span class="tip" title="What the market asks for the smaller parcels this land would be split into, divided by what it must sell for to return the target multiple. Above 1 means the target is reachable at this asking price.">Headroom</span></th>
         <th data-k="dist" class="n">Miles to owned land</th>
         <th data-k="dom" class="n">Days listed</th>
-        <th data-k="score" class="n">Score</th><th data-k="tier">Tier</th>
+        <th data-k="score" class="n"><span class="tip" title="0-100. The weighted average of the five bars, using the weights set above.">Score</span></th><th data-k="tier">Tier</th>
+        <th data-k="complete" class="n"><span class="tip" title="How many of six key facts the file gives for this listing: price, size, location, county, land type and time on market. A missing fact scores neutral, so a thin listing can look better than it is.">Data</span></th>
       </tr></thead>
       <tbody></tbody>
     </table>
   </div>
   <figcaption style="margin-top:11px">Click any row for the full detail on that site.</figcaption>
+</section>
+
+<section id="decisions">
+  <div class="shead">
+    <h2>Your decisions</h2>
+    <p>Mark any listing from its detail view &mdash; kept in this browser</p>
+  </div>
+  <div class="tune">
+    <p id="dec-empty" style="margin:0;color:var(--ink-2);font-size:14px">No listings marked yet. Open any listing
+    and choose Pursue, Maybe or Pass, with a sentence on why.</p>
+    <div class="declist" id="dec-list"></div>
+  </div>
+  <div class="tune-foot" style="margin-top:10px">
+    <span class="say" id="dec-sum"></span>
+    <span style="display:flex;gap:8px;flex-wrap:wrap">
+      <button class="btn" id="dec-copy" type="button">Copy for Claude</button>
+      <button class="btn" id="dec-clear" type="button">Clear my marks</button>
+    </span>
+  </div>
+  <textarea class="copybox" id="dec-box" readonly hidden aria-label="Decisions to copy"></textarea>
+  <p style="font-size:13px;color:var(--ink-3);margin:10px 0 0;max-width:72ch">&ldquo;Copy for Claude&rdquo; puts
+  your marks on the clipboard as a request to save them in the team's screening-decisions record. Paste it into
+  a Claude conversation. Nothing leaves this page any other way, and marks stay only in this browser until then.</p>
 </section>
 
 <!-- ─────────────── METHOD ─────────────── -->
@@ -582,6 +660,15 @@ footer{margin-top:60px;padding-top:18px;border-top:1px solid var(--rule);
 (function(){
 "use strict";
 const L = DATA.listings, H = DATA.holdings;
+/* Set up before anything draws: the table, cards and top three are first
+   drawn during load and read each listing's current position and the
+   decision marks. Each listing keeps its original rank as its identity. */
+L.forEach(x=>{ x.now = x.rank; });
+const DKEY = "vaulter-decisions:" + DATA.source;
+let DEC = {};
+try { DEC = JSON.parse(localStorage.getItem(DKEY) || "{}") || {}; } catch(e) { DEC = {}; }
+const DLAB = {pursue:"Pursue", maybe:"Maybe", pass:"Pass"};
+let CURW = Object.assign({}, DATA.weights || {});     // the weights the bars are drawn against
 const V = DATA.verified || {};
 const IMGS = (typeof IMG!=="undefined") ? IMG : {};
 const TIER = {"1":"var(--t1)","2":"var(--t2)","3":"var(--t3)","4":"var(--t4)"};
@@ -639,9 +726,17 @@ const andList = a => a.length<2 ? (a[0]||"") : a.slice(0,-1).join(", ")+" and "+
    required work rather than decoration. */
 const band = v => v>=75 ? "var(--good)" : v>=50 ? "var(--warn)" : "var(--crit)";
 const FACT = [["Growth","growth"],["Price","pricing"],["Seller","distress"],["Size","size"],["Location","proximity"]];
+const FACT_TIP = {growth:"Is the area going anywhere: exits, airports, county population, permits, jobs, house prices, school enrolment",
+  pricing:"Whether the market pays enough for the split-up land to reach the target multiple",
+  distress:"Time on market, a lender or bank owner, an ask below what the seller paid",
+  size:"20-200 acres is the core band; over 200 is the pattern behind past losses; under 20 is neutral",
+  proximity:"Closeness to land the firm owns"};
 const bars = x => FACT.map(([lab,key])=>{
   const v = x.comp[key] ?? 0;
-  return `<span class="bar"><span>${lab}</span>
+  // A factor carrying no weight is drawn faded and says so: a full-colour bar
+  // read as if it counted, which for "Location" at the screen's weights it does not.
+  const off = (+CURW[key==="size"?"size_fit":key]||0) === 0;
+  return `<span class="bar" title="${esc(FACT_TIP[key]||"")}${off?" (not scored at these weights)":""}"${off?' style="opacity:.45"':""}><span>${lab}${off?" <small>(not scored)</small>":""}</span>
     <span class="track"><span class="fill" style="width:${v}%;background:${band(v)}"></span></span>
     <span class="n">${Math.round(v)}</span></span>`;
 }).join("");
@@ -810,8 +905,7 @@ function ledger(x){
 
   // The cost basis is the sentence that says the required exit above is
   // understated. It must sit next to the number, not in a footnote.
-  const gb = !x.growthBasis ? ""
-    : `<p class="d-p" style="margin-top:8px;color:var(--ink-3)">Growth: ${esc(x.growthBasis)}.</p>`;
+  const gb = "";
   const cb = !x.costBasis ? ""
     : /understated/.test(x.costBasis)
       ? `<p class="d-p" style="margin-top:8px"><span class="tag warn">Cost basis</span> ${esc(x.costBasis)}.</p>`
@@ -855,7 +949,8 @@ function detailHTML(x){
   }
   return `<div class="d-head">
       <div><h3>${esc(x.addr)}</h3>
-        <div class="d-sup">Ranked ${x.rank} of ${DATA.screened} &middot; ${esc(x.city)}</div></div>
+        <div class="d-sup">Ranked ${x.now} of ${DATA.screened}${x.now!==x.rank?` (${x.rank} under the screen's own weights)`:""} &middot; ${esc(x.city)}
+          &middot; <span class="tip" title="Price, size, location, county, land type and time on market. Missing facts score neutral.">data ${esc(x.complete||"—")}</span>${x.missing?` &middot; missing ${esc(x.missing)}`:""}</div></div>
       <span class="pill" style="background:${tcol(x.tier)}">${tname(x.tier)}</span>
     </div>
     <div class="d-grid">
@@ -870,6 +965,8 @@ function detailHTML(x){
           <em>${x.lat==null||x.lng==null ? "not in this export" : "opens a map in a new tab"}</em></div>
       </div>
     </div>
+    ${decisionHTML(x)}
+    ${growthHTML(x)}
     ${x.read ? `<h4 class="d-sub">What this is, for a predevelopment investor</h4>
                 <p class="d-p">${esc(x.read)}</p>`:""}
     ${ledger(x)}
@@ -877,7 +974,9 @@ function detailHTML(x){
     ${x.distress && x.distress!=="none evident" ? `<h4 class="d-sub">Seller signals</h4><p class="d-p">${esc(x.distress)}</p>`:""}
     ${x.cautions ? `<h4 class="d-sub">Worth checking</h4><p class="d-p">${esc(x.cautions)}</p>`:""}
     ${x.history ? `<h4 class="d-sub">Similar to the firm's own history</h4>
-                    <p class="d-p">${esc(x.history)} — characteristics only, not a price comparison.</p>`:""}`;
+                    <p class="d-p">${esc(x.history)} — characteristics only, not a price comparison.</p>
+                    ${/\[(verified|unconfirmed)\]/.test(x.history)?`<p class="d-p" style="font-size:12.5px;color:var(--ink-3)">[verified] means how that deal was done was confirmed against its own documents; [unconfirmed] means it rests on an unrecorded note.</p>`:""}`:""}
+    ${x.jurisdiction ? `<h4 class="d-sub">City notes</h4><p class="d-p">${esc(x.jurisdiction)}</p>`:""}`;
 }
 function openDetail(rank, from){
   const x = L.find(v=>v.rank===rank); if(!x) return;
@@ -896,7 +995,8 @@ dlg.addEventListener("click", e=>{ if(e.target===dlg) closeDetail(); });
 document.addEventListener("keydown", e=>{ if(e.key==="Escape" && !dlg.hidden) closeDetail(); });
 
 /* ── the three ────────────────────────────────────────────── */
-document.getElementById("top3").innerHTML = top3.map(x=>{
+function renderTop3(){
+document.getElementById("top3").innerHTML = L.slice(0,3).map(x=>{
   const v = V[x.addr] || {}, tags = [];
   if (v.place && v.place.indexOf("city")>-1) tags.push(["ok","In "+v.place]);
   else if (v.place) tags.push(["warn","Outside city limits"]);
@@ -913,7 +1013,7 @@ document.getElementById("top3").innerHTML = top3.map(x=>{
   } else tags.push(["warn","Exit headroom untestable — no price or no comparable exit product"]);
   if (x.costBasis && /understated/.test(x.costBasis)) tags.push(["warn","No entitlement cost on record — required exit understated"]);
   return `<button class="cand" data-rank="${x.rank}" type="button">
-    <span class="rk" style="background:${tcol(x.tier)}">${x.rank}</span>
+    <span class="rk" style="background:${tcol(x.tier)}">${x.now}</span>
     <span class="cand-b">
       <span class="cand-h">${esc(x.addr)}</span>
       <span class="sub">${acres(x.acres)} acres &middot; ${esc(x.type)} &middot; ${money(x.price)} &middot; ${esc(x.city)}</span>
@@ -921,15 +1021,18 @@ document.getElementById("top3").innerHTML = top3.map(x=>{
       <span class="tags">${tags.map(([c,t])=>`<span class="tag ${c}">${esc(t)}</span>`).join("")}</span>
     </span></button>`;
 }).join("");
+}
+renderTop3();
 
 /* ── shortlist cards ──────────────────────────────────────── */
+function renderCards(){
 document.getElementById("cards").innerHTML = L.slice(0,8).map(x=>{
   const im = IMGS[String(x.rank)];
   return `<button class="card" data-rank="${x.rank}" type="button"
       style="border-left-color:${band(x.comp.pricing??0)}">
     ${im?`<img class="card-img" src="${im.src}" alt="">`:""}
     <span class="card-b">
-      <span class="top"><span class="card-h">${esc(x.addr)}</span><span class="sc">${x.score.toFixed(0)}</span></span>
+      <span class="top"><span class="card-h">${esc(x.addr)}${markTag(x)}</span><span class="sc">${x.score.toFixed(0)}</span></span>
       <span class="ln">${acres(x.acres)} ac &middot; ${money(x.price)} &middot; ${usd(x.askPerAcre)}/acre</span>
       <span class="ln" style="color:${hrc(x.headroom)}">${x.headroom!=null
         ? "exit headroom "+x.headroom.toFixed(2)+"&times;"+(x.conf==="low"&&x.compN?" &middot; low confidence":"")
@@ -937,6 +1040,8 @@ document.getElementById("cards").innerHTML = L.slice(0,8).map(x=>{
       <span class="bars">${bars(x)}</span>
     </span></button>`;
 }).join("");
+}
+renderCards();
 
 /* ── site checks ──────────────────────────────────────────────────────
    Only rendered when geo_federal actually ran. The section used to draw its
@@ -974,15 +1079,16 @@ function render(){
     (!fC.value||x.county===fC.value)&&
     (!q||x.addr.toLowerCase().includes(q)||(x.city||"").toLowerCase().includes(q)));
   rows.sort((a,b)=>{
-    let u=a[sortK],v=b[sortK];
+    const kk = sortK==="rank" ? "now" : sortK;
+    let u=a[kk],v=b[kk];
     if(u==null)return 1; if(v==null)return -1;
     if(typeof u==="string")return sortAsc?u.localeCompare(v):v.localeCompare(u);
     return sortAsc?u-v:v-u;
   });
   cnt.textContent=rows.length+" of "+L.length+" shown";
   tb.innerHTML=rows.map(x=>{
-    return `<tr data-rank="${x.rank}" tabindex="0"><td class="n">${x.rank}</td>
-      <td>${esc(x.addr)}</td><td>${esc(x.city)}</td><td>${esc(x.type)}</td>
+    return `<tr data-rank="${x.rank}" tabindex="0"><td class="n">${x.now}${x.now!==x.rank?`<span class="moved" title="Rank under the screen's own weights">was ${x.rank}</span>`:""}</td>
+      <td>${esc(x.addr)}${markTag(x)}</td><td>${esc(x.city)}</td><td>${esc(x.type)}</td>
       <td class="n">${acres(x.acres)}</td><td class="n">${money(x.price)}</td>
       <td class="n">${usd(x.askPerAcre)}</td>
       <td class="n">${usd(x.reqExit)}</td>
@@ -990,7 +1096,8 @@ function render(){
       <td class="n">${x.dist!=null?x.dist.toFixed(1):"—"}</td>
       <td class="n">${x.dom!=null?Math.round(x.dom).toLocaleString():"—"}</td>
       <td class="n">${x.score.toFixed(0)}</td>
-      <td><span class="pill" style="background:${tcol(x.tier)}">${tname(x.tier)}</span></td></tr>`;
+      <td><span class="pill" style="background:${tcol(x.tier)}">${tname(x.tier)}</span></td>
+      <td class="n" title="${esc(x.missing?'missing: '+x.missing:'nothing missing')}">${esc(x.complete||"—")}</td></tr>`;
   }).join("");
 }
 document.querySelectorAll("#tbl th").forEach(th=>{
@@ -1210,6 +1317,176 @@ if(EV.length){
 } else {
   document.getElementById("evid-d").hidden = true;
 }
+
+/* ── your own weights (2026-10-01) ────────────────────────────
+   Re-scores in the page with the same arithmetic the screener uses: the
+   weighted mean of the five part-scores, then tiers by percentile rank within
+   the file with ties counted generously (pandas' method="max"), and a tied
+   block covering half the file labelled Unranked. A listing keeps its original
+   rank as its identity -- every click target uses it -- and shows its new
+   position beside it. */
+const KEYS = [["growth","Growth","is the area going anywhere"],["pricing","Price","can it reach the target multiple"],
+  ["distress","Seller","is the seller likely to be motivated"],["size_fit","Size","a size the firm handles well"],
+  ["proximity","Distance to our land","closeness to land the firm owns"]];
+const COMPKEY = {growth:"growth",pricing:"pricing",distress:"distress",size_fit:"size",proximity:"proximity"};
+const W0 = Object.assign({growth:0,pricing:0,distress:0,size_fit:0,proximity:0}, DATA.weights||{});
+const BYRANK = {}; L.forEach(x=>{ BYRANK[x.rank] = x; });
+const TOP0 = new Set(L.slice(0,10).map(x=>x.rank));
+let WNOW = Object.assign({}, W0);
+const UNR = "Unranked — nothing in this file separates them";
+function tierOf(sc){
+  const n = sc.length, cnt = {};
+  sc.forEach(v=>cnt[v]=(cnt[v]||0)+1);
+  if(Object.keys(cnt).length<=1) return sc.map(()=>UNR);
+  const [topV, topN] = Object.entries(cnt).sort((a,b)=>b[1]-a[1])[0];
+  const sorted = sc.slice().sort((a,b)=>b-a);
+  return sc.map(v=>{
+    if(topN/n>=0.5 && +topV===v) return UNR;
+    let k=0; while(k<n && sorted[k]>=v) k++;
+    const p = k/n;
+    return p<=0.10?"1 — Pursue":p<=0.35?"2 — Investigate":p<=0.65?"3 — Watch":"4 — Low fit";
+  });
+}
+function rescore(w){
+  WNOW = w; CURW = w;
+  const tot = KEYS.reduce((t,[k])=>t+(+w[k]||0),0);
+  if(tot>0){
+    L.forEach(x=>{ x.score = Math.round(KEYS.reduce((t,[k])=>t+(x.comp[COMPKEY[k]]??50)*(+w[k]||0),0)/tot*10)/10; });
+    const t = tierOf(L.map(x=>x.score)); L.forEach((x,i)=>x.tier=t[i]);
+  }
+  L.sort((a,b)=>b.score-a.score || a.rank-b.rank);
+  L.forEach((x,i)=>x.now=i+1);
+  renderTop3(); renderCards(); render(); repaintPins(); tuneSay();
+}
+function repaintPins(){
+  document.querySelectorAll("#svgmap circle.pin").forEach(c=>{
+    const x = BYRANK[c.dataset.rank]; if(!x) return;
+    const k = tk(x.tier);
+    c.setAttribute("class","pin t"+k); c.setAttribute("r", k==="1"?7:k==="2"?5.5:4.5);
+    c.setAttribute("aria-label", `${x.addr}, ${tname(x.tier)}`);
+  });
+}
+const wText = w => KEYS.map(([k,lab])=>`${lab} ${+w[k]||0}`).join(" · ");
+function tuneSay(){
+  const same = KEYS.every(([k])=>(+WNOW[k]||0)===(+W0[k]||0));
+  const moved = L.slice(0,10).filter(x=>!TOP0.has(x.rank)).length;
+  const tot = KEYS.reduce((t,[k])=>t+(+WNOW[k]||0),0);
+  document.getElementById("tune-sum").textContent = tot===0
+    ? "Every weight is zero, so nothing can be ranked. Raise at least one."
+    : same ? "These are the screen's own weights."
+           : `${moved} of the top ten changed from the screen's own ranking.`;
+}
+document.getElementById("tune-rows").innerHTML = KEYS.map(([k,lab,why])=>`
+  <div class="tune-row">
+    <label for="w_${k}">${lab}<small>${why}</small></label>
+    <input type="range" id="w_${k}" min="0" max="60" step="5" value="${+W0[k]||0}">
+    <output id="o_${k}" for="w_${k}">${+W0[k]||0}</output>
+  </div>`).join("");
+const readW = () => Object.fromEntries(KEYS.map(([k])=>[k, +document.getElementById("w_"+k).value]));
+KEYS.forEach(([k])=>document.getElementById("w_"+k).addEventListener("input", e=>{
+  document.getElementById("o_"+k).textContent = e.target.value; rescore(readW());
+}));
+document.getElementById("tune-reset").onclick = ()=>{
+  KEYS.forEach(([k])=>{ document.getElementById("w_"+k).value = +W0[k]||0; document.getElementById("o_"+k).textContent = +W0[k]||0; });
+  rescore(Object.assign({}, W0));
+};
+function copyOut(text, boxId, btn){
+  // The text is ALWAYS shown, selected, below the button. The clipboard is a
+  // bonus: a page opened from a file may be refused it, or the request may
+  // simply never answer (measured in headless Edge), and a copy button that
+  // silently does nothing is worse than one that shows its text.
+  const box = document.getElementById(boxId);
+  box.value = text; box.hidden = false; box.focus(); box.select();
+  btn.textContent = "Shown below — copy it if it isn't already";
+  try{
+    navigator.clipboard.writeText(text).then(()=>{ btn.textContent = "Copied, and shown below"; }, ()=>{});
+  }catch(e){}
+  setTimeout(()=>btn.textContent = btn.dataset.label, 4000);
+}
+const tcopy = document.getElementById("tune-copy"); tcopy.dataset.label = tcopy.textContent;
+tcopy.onclick = ()=>copyOut(
+  `Screening weights tried on ${DATA.source} (${DATA.generated}): ${wText(WNOW)}.\n`
+  + `With these, the top ten are:\n` + L.slice(0,10).map(x=>`${x.now}. ${x.addr}${x.city?", "+x.city:""} — score ${x.score.toFixed(0)}`).join("\n"),
+  "tune-box", tcopy);
+tuneSay();
+
+/* ── your decisions ─────────────────────────────────────────── */
+function markTag(x){ const d = DEC[x.rank]; return d && d.v ? `<span class="mark ${d.v}">${DLAB[d.v]}</span>` : ""; }
+function decisionHTML(x){
+  const d = DEC[x.rank] || {};
+  return `<h4 class="d-sub">Your decision</h4>
+    <div class="dec" data-dec="${x.rank}">
+      ${Object.keys(DLAB).map(k=>`<button type="button" class="btn${d.v===k?" on":""}" data-v="${k}" aria-pressed="${d.v===k}">${DLAB[k]}</button>`).join("")}
+      <textarea id="dnote" placeholder="Why? One sentence helps the next person, and the screen's owner." aria-label="Reason for your decision">${esc(d.note||"")}</textarea>
+    </div>`;
+}
+function growthHTML(x){
+  const pc = v => v==null ? null : (v>0?"+":"")+v.toFixed(0)+"%";
+  const rows = [
+    ["Nearest freeway or expressway exit", x.exitMi!=null ? (x.exitMi>=15.5?"over 15 mi":x.exitMi.toFixed(1)+" mi")+(x.exitRef?" · exit "+esc(x.exitRef):"") : (x.freewayMi!=null? x.freewayMi.toFixed(1)+" mi to a freeway":null)],
+    ["Nearest airport with scheduled flights", x.airportMi!=null ? (x.airportMi>=150?"over 150 mi":Math.round(x.airportMi)+" mi"+(x.airport?" · "+esc(x.airport):"")) : null],
+    ["County population change", pc(x.popGrowth)],
+    ["Homes permitted per 1,000 residents", x.permits1k!=null ? x.permits1k.toFixed(1) : null],
+    ["County jobs change", pc(x.jobsChg)],
+    ["County house-price change", pc(x.priceChg)],
+    ["Public-school pupils within 5 mi", pc(x.pupilsChg)],
+  ];
+  if(rows.every(r=>r[1]==null)) return "";
+  return `<h4 class="d-sub">Growth signals</h4>
+    <div class="gsig">${rows.map(([k,v])=>`<span>${k}</span><b class="${v==null?"na":""}">${v==null?"not measured":v}</b>`).join("")}</div>
+    <p class="d-p" style="font-size:12.5px;color:var(--ink-3);margin-top:2px">Each is ranked against the other listings in this file; changes are over five years. School quality and proposed developments are not measured.</p>`;
+}
+function saveDec(){
+  try { localStorage.setItem(DKEY, JSON.stringify(DEC)); } catch(e) {}
+  renderDecisions(); render(); renderCards(); renderTop3();
+}
+dbody.addEventListener("click", e=>{
+  const b = e.target.closest(".dec button"); if(!b) return;
+  const r = +b.closest(".dec").dataset.dec, x = BYRANK[r];
+  const cur = DEC[r] || {};
+  const note = (document.getElementById("dnote")||{}).value || cur.note || "";
+  DEC[r] = {v: cur.v===b.dataset.v ? "" : b.dataset.v, note, addr: x.addr, city: x.city||"", when: new Date().toISOString().slice(0,10)};
+  if(!DEC[r].v && !DEC[r].note) delete DEC[r];
+  saveDec();
+  dbody.querySelectorAll(".dec button").forEach(o=>{ const on = DEC[r] && DEC[r].v===o.dataset.v;
+    o.classList.toggle("on", on); o.setAttribute("aria-pressed", on); });
+});
+dbody.addEventListener("input", e=>{
+  if(e.target.id!=="dnote") return;
+  const r = +e.target.closest(".dec").dataset.dec, x = BYRANK[r];
+  DEC[r] = Object.assign({v:"", addr:x.addr, city:x.city||""}, DEC[r]||{}, {note:e.target.value, when:new Date().toISOString().slice(0,10)});
+  if(!DEC[r].v && !DEC[r].note) delete DEC[r];
+  try { localStorage.setItem(DKEY, JSON.stringify(DEC)); } catch(err) {}
+  renderDecisions();
+});
+function renderDecisions(){
+  const marked = Object.entries(DEC).filter(([,d])=>d.v||d.note).sort((a,b)=>(BYRANK[a[0]]?.now||0)-(BYRANK[b[0]]?.now||0));
+  document.getElementById("dec-empty").hidden = marked.length>0;
+  document.getElementById("dec-list").innerHTML = marked.map(([r,d])=>`
+    <button type="button" data-rank="${r}"><span class="mark ${d.v||""}">${d.v?DLAB[d.v]:"Note"}</span>
+      <span class="who">${esc(d.addr)}${d.city?", "+esc(d.city):""}</span>
+      <span class="why">${esc(d.note||"no reason given")}</span></button>`).join("");
+  const n = k => marked.filter(([,d])=>d.v===k).length;
+  document.getElementById("dec-sum").textContent = marked.length
+    ? `${n("pursue")} pursue · ${n("maybe")} maybe · ${n("pass")} pass` : "";
+}
+const dcopy = document.getElementById("dec-copy"); dcopy.dataset.label = dcopy.textContent;
+dcopy.onclick = ()=>{
+  const marked = Object.entries(DEC).filter(([,d])=>d.v);
+  if(!marked.length){ document.getElementById("dec-sum").textContent = "Nothing marked yet."; return; }
+  copyOut(`Please save these screening decisions with record_screening_decision for the file "${DATA.source}" `
+    + `(decided by: ____):\n` + marked.map(([r,d])=>`- ${DLAB[d.v]}: ${d.addr}${d.city?", "+d.city:""} `
+    + `(ranked ${r} by the screen) — ${d.note||"no reason given"}`).join("\n"), "dec-box", dcopy);
+};
+const dclear = document.getElementById("dec-clear");
+dclear.onclick = ()=>{
+  if(dclear.dataset.armed!=="1"){ dclear.dataset.armed="1"; dclear.textContent = "Click again to clear every mark";
+    setTimeout(()=>{ dclear.dataset.armed=""; dclear.textContent="Clear my marks"; }, 4000); return; }
+  DEC = {}; dclear.dataset.armed=""; dclear.textContent="Clear my marks"; saveDec();
+};
+renderDecisions(); render(); renderCards(); renderTop3();
+// A handle for the automated page test (scripts/check_report_page.py); changes nothing for a reader.
+window.__vaulterReport = {L, W0, rescore, openDetail, closeDetail, tk, dec: () => DEC};
 
 /* ── footer ───────────────────────────────────────────────── */
 document.getElementById("foot").innerHTML =

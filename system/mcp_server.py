@@ -1906,6 +1906,15 @@ def _summary_staleness(property_name: str, summary_text: str) -> str:
 # Screening Source Resolver
 # ══════════════════════════════════════════════════════════════════
 
+def _no_file_msg(source_file: str) -> str:
+    """What to say when no listing file resolves -- by name, or because the folder is empty."""
+    if not source_file.strip():
+        return ("There is no listing file in the CoStar Drop folder yet. Any export works -- "
+                "CoStar, Crexi, LoopNet or a broker's spreadsheet (.xlsx, .xls or .csv). "
+                "Call open_costar_folder to open the folder")
+    return f"Could not find a listing file matching '{source_file}'"
+
+
 def _resolve_costar_source(source_file: str, property_name: str = "", file_content_b64: str = "") -> "Path | None":
     """
     Resolves a CoStar export / broker spreadsheet to an on-disk path, in
@@ -1935,14 +1944,36 @@ def _resolve_costar_source(source_file: str, property_name: str = "", file_conte
             # Pasted content lands in the LOCAL folder deliberately: one
             # person's paste shouldn't appear in the team's shared folder.
             DROP_DIR.mkdir(parents=True, exist_ok=True)
-            dest = DROP_DIR / source_file
+            dest = DROP_DIR / (source_file.strip() or "pasted_export.xlsx")
             dest.write_bytes(base64.b64decode(file_content_b64))
             return dest
         except Exception as e:
             log.warning(f"[MCP] Could not decode/write uploaded file content: {e}")
             return None
 
+    # No name given: the NEWEST listing file in the team's drop folder, then the
+    # local one (2026-09-29). The goal is "drop any export in the folder, ask
+    # Claude to screen it" -- and every screening tool used to default to the
+    # literal name CostarExport.xlsx, so a Crexi or broker file dropped there was
+    # invisible unless someone typed its name. Which file was chosen is logged
+    # and shown to the user by the tools.
+    _OK = (".xlsx", ".xls", ".xlsm", ".csv")
+    if not source_file.strip():
+        for drop in (COSTAR_DROP_DIR, DROP_DIR):
+            try:
+                files = [f for f in drop.iterdir()
+                         if f.is_file() and f.suffix.lower() in _OK and not f.name.startswith(("~$", "."))]
+            except OSError:
+                continue
+            if files:
+                newest = max(files, key=lambda f: f.stat().st_mtime)
+                log.info(f"[MCP] No file named -- using the newest in {drop.name}: {newest.name}")
+                return newest
+        return None
+
     target_lower = source_file.lower()
+    # A name typed without its extension ("the Crexi export") still matches.
+    target_stem = target_lower.rsplit(".", 1)[0] if target_lower.endswith(_OK) else target_lower
 
     # The team's shared "CoStar Drop" FIRST -- it is the folder people can
     # actually find, the one open_costar_folder opens, and the one a colleague
@@ -1958,7 +1989,8 @@ def _resolve_costar_source(source_file: str, property_name: str = "", file_conte
             if not drop.exists():
                 continue
             for candidate in drop.rglob("*"):
-                if candidate.is_file() and candidate.name.lower() == target_lower:
+                if candidate.is_file() and (candidate.name.lower() == target_lower or (
+                        candidate.suffix.lower() in _OK and candidate.stem.lower() == target_stem)):
                     where = "shared CoStar Drop" if drop == COSTAR_DROP_DIR else "local data/drop"
                     log.info(f"[MCP] CoStar source resolved from the {where}: {candidate}")
                     return candidate
@@ -2162,19 +2194,21 @@ If a search comes back empty, that means no file NAME matched — not that the
 firm has nothing on the subject. Try broader terms or browse the property folder.
 Never tell the user the firm has no records on something based on an empty search.
 
-For screening inbound listings from a CoStar export or broker spreadsheet,
-use screen_listings. It RANKS every listing by fit against the firm's existing
-portfolio and eliminates nothing — there is no pass/fail, and a weak listing
-sinks to the bottom with a stated reason rather than disappearing. It makes no
-API calls and costs nothing. There are three ways to give it a CoStar file,
-and they are NOT equally cheap — prefer them in this order:
+For screening inbound listings -- a CoStar, Crexi or LoopNet export or a
+broker's spreadsheet -- use screen_listings. It RANKS every listing and
+eliminates nothing: there is no pass/fail, and a weak listing sinks to the
+bottom with a stated reason rather than disappearing. It costs nothing. There
+are three ways to give it a file, and they are NOT equally cheap -- prefer
+them in this order:
 
-(1) BY FILENAME, strongly preferred. The file is already in the CoStar drop
-folder or the document library; just pass source_file (plus property_name to
-narrow a library search). Costs nothing — the file never travels through the
+(1) FROM THE DROP FOLDER, strongly preferred. If the user just says "screen
+it" or "screen the new export", call screen_listings with NO source_file: it
+screens the newest file in the team's CoStar Drop folder and says which file
+that was -- tell the user. If they name a file, pass source_file (the
+extension is optional). Costs nothing -- the file never travels through the
 conversation. If the user has the file but hasn't put it anywhere, call
-open_costar_folder, which opens the drop folder for them, and ask them to
-drop it in and tell you the name. That short exchange is far cheaper than (2).
+open_costar_folder, which opens the drop folder for them, and ask them to drop
+it in. That short exchange is far cheaper than (2).
 
 (2) BY PASTED CONTENT, only when (1) genuinely isn't available — e.g. the user
 attached the file here and has no easy way to save it. Base64 content passed
@@ -4111,7 +4145,7 @@ no score -- it's a diary, not a dial.""".replace(
     # ── LISTING SCREENER (fit ranking; the 4-phase pipeline is gone) ──
 
     @mcp.tool()
-    def get_screening_rules(source_file: str = "CostarExport.xlsx", property_name: str = "") -> str:
+    def get_screening_rules(source_file: str = "", property_name: str = "") -> str:
         """
         Explain how listings are ranked, and check a CoStar file has the columns
         the ranking needs.
@@ -4191,7 +4225,7 @@ no score -- it's a diary, not a dial.""".replace(
             source_path = _resolve_costar_source(source_file=source_file,
                                                  property_name=property_name)
             if source_path is None:
-                lines += ["", f"No file matching '{source_file}' to check columns against."]
+                lines += ["", _no_file_msg(source_file) + " -- nothing to check columns against."]
                 return "\n".join(lines)
 
             df = (pd.read_excel(source_path) if source_path.suffix.lower() in (".xlsx", ".xls")
@@ -4216,7 +4250,7 @@ no score -- it's a diary, not a dial.""".replace(
             return f"Could not read the rules: {e}"
 
     @mcp.tool()
-    def test_screener(source_file: str = "CostarExport.xlsx", property_name: str = "",
+    def test_screener(source_file: str = "", property_name: str = "",
                       num_listings: int = 10) -> str:
         """
         Show WHY listings score as they do — a diagnostic, not a decision.
@@ -4240,7 +4274,7 @@ no score -- it's a diary, not a dial.""".replace(
             source_path = _resolve_costar_source(source_file=source_file,
                                                  property_name=property_name)
             if source_path is None:
-                return (f"Could not find a CoStar file matching '{source_file}'. "
+                return (f"{_no_file_msg(source_file)}. "
                         f"Call open_costar_folder to see the drop folder.")
 
             r = screen(source_path, write_workbook=False)
@@ -4282,56 +4316,72 @@ no score -- it's a diary, not a dial.""".replace(
 
     @mcp.tool()
     def screen_listings(
-        source_file: str = "CostarExport.xlsx",
+        source_file: str = "",
         property_name: str = "",
         file_content_b64: str = "",
         moic_target: float = 3.0,
         show_top: int = 15,
     ) -> str:
         """
-        Screen a CoStar export or broker spreadsheet by FIT against Vaulter's
-        existing portfolio, and return a ranked shortlist.
+        Screen a listing export -- CoStar, Crexi, LoopNet or a broker's
+        spreadsheet (.xlsx, .xls or .csv) -- and return a ranked shortlist of
+        what Vaulter should pursue.
 
-        Free and instant — no API calls, no per-listing cost, works on any
-        market (AZ, TX, CO, UT, ...). Every market-relative number is computed
-        from peers inside the export itself, so it self-calibrates.
+        HOW TO CALL IT: when the user says "screen it" or "screen the new
+        export" without naming a file, call this with NO source_file -- it
+        screens the newest file in the team's CoStar Drop folder and names the
+        file it used. Pass source_file only when the user names one.
 
-        IMPORTANT — nothing is eliminated. Every listing is ranked and
-        explained. Vaulter's documented rejection history is thin, so hard
-        filters would silently destroy deal flow. Low-fit listings sink to the
-        bottom with a stated reason rather than disappearing.
+        Free, and the same method in every US market: every market-relative
+        figure is computed from the listings inside the file itself. Columns
+        are found by name and by what their values look like, numbers written
+        as text (dollar signs, commas, "M" for millions, "12.5 AC") are read, and missing coordinates or
+        county are filled in where an address allows. The completeness section
+        of the reply says what was recovered and what is missing -- repeat the
+        important parts to the user.
 
-        What it scores, all derived from docs/COMPANY_PROFILE.md:
-          - Proximity to existing holdings (heaviest weight — clustering is the
-            firm's strongest revealed preference and is exactly checkable)
-          - Size judged IN CONTEXT (large + standalone in an unfamiliar market
-            is the documented failure mode; large near holdings is the
-            assemblage pattern; small inside a cluster is normal)
-          - Pricing from a predevelopment value-add perspective — NOT user or
-            spec-developer comps. Reports the exit each listing must achieve to
-            return `moic_target` on invested capital, expressed as a multiple
-            of same-type peers in the same submarket.
-          - Distress as a POSITIVE (long days on market, lender/REO owner,
-            asking at or below prior basis) — a distressed basis was the
-            stated #1 rationale on one of the firm's best acquisitions.
-          - Cautions surfaced, never eliminating: a high flood-risk flag as a
-            question about NET developable acreage (never a dealbreaker — the
-            firm has bought through it), structures as possible income rather
-            than demolition cost, and an ask far above the firm's average.
+        IMPORTANT -- nothing is eliminated. Every listing is ranked and keeps a
+        stated reason. The firm's documented rejection history is thin, so a
+        hard filter would silently destroy deal flow.
+
+        What it scores (weights are placeholders until a partner signs off):
+          - Growth 35: is the area going anywhere -- nearest freeway exit,
+            nearest airport, and the county's population, permits, jobs and
+            house prices, plus public-school pupils nearby over five years.
+          - Pricing 30: what the entitled land must sell for to return
+            moic_target (asking price + entitlement cost + property tax over
+            the hold, times the multiple), against what the market asks for
+            the smaller parcels it would be split into.
+          - Seller 20: long time on market, a lender or bank owner, an ask
+            below the seller's own purchase price -- counted as favourable.
+          - Size 15: 20-200 acres is the core band; 200+ is the documented
+            failure mode; under 20 is neutral.
+          - Distance to land the firm owns: shown, not scored.
+        Cautions (flood, structures, a large ask for the state, patterns from
+        passed-on deals, resemblance to deals the firm could not sell), similar
+        past deals and city notes are shown beside each listing and never
+        change its score.
+
+        What it cannot see, so say so when it matters: proposed developments,
+        school quality, and the things that decided the firm's past outcomes --
+        the basis, the seller's situation, timing and execution. Tested on the
+        firm's own Arizona properties it ranked them in the top third but could
+        not tell a long-stuck deal from the best exit.
 
         After this returns, do the qualitative work yourself in this
-        conversation on the top candidates — read them, weigh entitlement
+        conversation on the top candidates -- read them, weigh entitlement
         risk, and give a view. Do NOT call a separate Claude API for that;
         this tool deliberately costs nothing.
 
         Args:
-            source_file:      Filename of the CoStar export (default: CostarExport.xlsx)
+            source_file:      The file's name, if the user named one. Leave EMPTY to
+                               screen the newest file in the CoStar Drop folder.
             property_name:    Optional name to narrow the file search
-            file_content_b64: Base64 file content — LAST RESORT, not the default for an
+            file_content_b64: Base64 file content -- LAST RESORT, not the default for an
                                attached file. Measured ~43,000 tokens to pass one real
                                216-row export this way, versus zero by filename. Put the
-                               file in the drop folder (open_costar_folder) and pass
-                               source_file instead whenever that's at all possible.
+                               file in the drop folder (open_costar_folder) instead
+                               whenever that's at all possible.
             moic_target:      Target multiple on invested capital (default 3.0; the
                                firm targets 2.5-3x on predevelopment value-add)
             show_top:         How many ranked listings to list back (default 15)
@@ -4358,7 +4408,7 @@ no score -- it's a diary, not a dial.""".replace(
             if source_path is None:
                 property_clause = f' for property "{property_name}"' if property_name else ""
                 return (
-                    f"Could not find a CoStar file matching '{source_file}'{property_clause}.\n\n"
+                    f"{_no_file_msg(source_file)}{property_clause}.\n\n"
                     f"Two ways to give me one:\n"
                     f"  1. Drop it into the CoStar folder (call open_costar_folder to open it), "
                     f"then tell me the filename.\n"
@@ -4620,7 +4670,7 @@ no score -- it's a diary, not a dial.""".replace(
 
     @mcp.tool()
     def verify_listings(
-        source_file: str = "CostarExport.xlsx",
+        source_file: str = "",
         property_name: str = "",
         top_n: int = 6,
     ) -> str:
@@ -4660,7 +4710,7 @@ no score -- it's a diary, not a dial.""".replace(
             source_path = _resolve_costar_source(source_file=source_file,
                                                  property_name=property_name)
             if source_path is None:
-                return (f"Could not find a CoStar file matching '{source_file}'. "
+                return (f"{_no_file_msg(source_file)}. "
                         f"Call open_costar_folder to see the drop folder.")
 
             df = screen(source_path, write_workbook=False)["dataframe"].head(top_n)
@@ -4745,7 +4795,7 @@ no score -- it's a diary, not a dial.""".replace(
     @mcp.tool()
     def run_proximity_for_listing(
         rank: int,
-        source_file: str = "CostarExport.xlsx",
+        source_file: str = "",
         property_name: str = "",
         radius_miles: float = 5.0,
     ) -> str:
@@ -4776,7 +4826,7 @@ no score -- it's a diary, not a dial.""".replace(
             source_path = _resolve_costar_source(source_file=source_file,
                                                  property_name=property_name)
             if source_path is None:
-                return (f"Could not find a CoStar file matching '{source_file}'. "
+                return (f"{_no_file_msg(source_file)}. "
                         f"Call open_costar_folder to see the drop folder.")
 
             df = screen(source_path, write_workbook=False)["dataframe"]
@@ -4850,7 +4900,7 @@ no score -- it's a diary, not a dial.""".replace(
     def compare_proximity_to_portfolio(
         property_names: list[str],
         rank: int = 0,
-        source_file: str = "CostarExport.xlsx",
+        source_file: str = "",
         listing_property_name: str = "",
         radius_miles: float = 5.0,
     ) -> str:
@@ -4886,7 +4936,7 @@ no score -- it's a diary, not a dial.""".replace(
                 source_path = _resolve_costar_source(source_file=source_file,
                                                      property_name=listing_property_name)
                 if source_path is None:
-                    return (f"Could not find a CoStar file matching '{source_file}'. "
+                    return (f"{_no_file_msg(source_file)}. "
                             f"Call open_costar_folder to see the drop folder.")
                 df = screen(source_path, write_workbook=False)["dataframe"]
                 hit = df[df["Rank"] == rank]

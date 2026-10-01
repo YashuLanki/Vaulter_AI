@@ -211,7 +211,11 @@ def _listing(row) -> dict:
         # it rendered as a listing addressed "nan".
         "rank": int(g("Rank")), "tier": _str(g("Fit_Tier")),
         "score": _num(g("Fit_Score")),
-        "addr": _str(g("Property Address")) or "(no address)",
+        # A listing with no street address still has something to call it: its
+        # listing name, else its city. "(no address)" on the screen's own number
+        # 2 told a reader nothing (2026-10-01; CoStar left one address blank).
+        "addr": (_str(g("Property Address")) or _str(g("Property Name"))
+                 or (f"Unaddressed listing near {_str(g('City')).title()}" if _str(g("City")) else "(no address)")),
         "city": _str(g("City")), "county": _str(g("County Name")),
         "state": _str(g("State")),
         "acres": _num(g("Land Area (AC)")), "price": _num(g("For Sale Price")),
@@ -252,6 +256,13 @@ def _listing(row) -> dict:
         "freewayMi": _num(g("Freeway_Mi")), "airportMi": _num(g("Airport_Mi")),
         "airport": _str(g("Nearest_Airport")),
         "popGrowth": _num(g("County_Pop_Growth_Pct")), "permits1k": _num(g("County_Permits_Per_1k")),
+        # The rest of the growth signals and the completeness figure, so the
+        # detail view can show each signal rather than one long sentence.
+        "exitMi": _num(g("Freeway_Exit_Mi")), "exitRef": _str(g("Freeway_Exit")),
+        "jobsChg": _num(g("County_Jobs_Change_Pct")), "priceChg": _num(g("County_House_Price_Change_Pct")),
+        "pupilsChg": _num(g("School_Pupils_Change_Pct")),
+        "complete": _str(g("Data_Completeness")), "missing": _str(g("Data_Missing")),
+        "jurisdiction": _str(g("Jurisdiction_Note")),
 
         "comp": {"growth": _num(g("Score_Growth")),
                  "proximity": _num(g("Score_Proximity")), "pricing": _num(g("Score_Pricing")),

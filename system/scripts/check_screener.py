@@ -713,10 +713,19 @@ def main() -> int:
     sf_unmarked["Lot Size"] = (pads["Land Area (AC)"] * 43560.0).round(0)
     su = _run(sf_unmarked, full, tmp, "sfunmarked")
     got = {c["field"]: c for c in su["column_sources"]}["Land Area (AC)"]
-    check("square feet under a name with no SF marker is refused, not read as acres",
-          got["source"] != "Lot Size",
-          f"median {sf_unmarked['Lot Size'].median():,.0f} -> acreage slot "
-          f"'{got['source'] or 'nothing (correct — the rows abstain)'}'")
+    # Since 2026-09-29 "Lot Size" is a recognised name (Crexi and LoopNet use
+    # it), and a plain-number size column whose typical value is far beyond any
+    # acreage is CONVERTED from square feet (intake.py) rather than refused.
+    # What this check protects was always the outcome -- never 28,000 "acres" --
+    # so it now asserts the acreage itself: either correctly converted, or left
+    # out. The old form asserted the column was refused, which would have failed
+    # the better behaviour.
+    got_ac = su["dataframe"]["Land Area (AC)"] if "Land Area (AC)" in su["dataframe"].columns else pd.Series(dtype=float)
+    true_med = float(pads["Land Area (AC)"].median())
+    check("square feet under a name with no SF marker is never read as acres",
+          got_ac.dropna().empty or abs(float(got_ac.median()) - true_med) < 0.01,
+          f"median {sf_unmarked['Lot Size'].median():,.0f} sq ft -> "
+          + (f"{float(got_ac.median()):.2f} acres (true {true_med:.2f})" if not got_ac.dropna().empty else "left out"))
 
     # ...and the ceiling must not be so tight that real acreage is refused.
     ac_named = pads.drop(columns=["Land Area (AC)"]).copy()
@@ -1332,6 +1341,73 @@ def main() -> int:
               now_c > 0, f"{now_c} rows (with the column filled: {base_c})")
     else:
         skip("per-row land type fallback", "export lacks one of the two columns")
+
+    # ── 27. Any export, not just CoStar (2026-09-29) ─────────────────────────
+    # The goal: drop a Crexi, LoopNet or broker file in the folder and get the
+    # same ranking the same listings would get as a CoStar export. Measured on
+    # the real 216-row file re-shaped three ways: agreement 0.99 / 0.95 / 0.96.
+    print("\n27. Any export: numbers as text, other column names, other spellings")
+    import analysis.screening.intake as _in
+    check("prices written as text are read",
+          [_in.money(v.replace("D", chr(36))) for v in ("D1,250,000", "1.25M", "D950K", "D 3,100,000.00")]
+          == [1250000.0, 1250000.0, 950000.0, 3100000.0])   # chr(36) is the dollar sign, built at run time
+    check("  ...and 'Call for pricing' or 'Unpriced' stays blank, never zero",
+          all(pd.isna(_in.money(v)) for v in ("Call for pricing", "Unpriced", "TBD", "Submit offer")))
+    check("sizes are read with their units",
+          round(_in.acres("12.5 AC"), 2) == 12.5 and round(_in.acres("544,500 SF"), 2) == 12.5
+          and round(_in.acres("1,200.5 Acres"), 1) == 1200.5)
+    # pandas 3 keeps text in its own type; the first version tested for the old
+    # one and silently repaired nothing.
+    check("a text column is recognised whichever way pandas stores text",
+          _in._is_text(pd.Series([chr(36) + "1,000", chr(36) + "2,000"], dtype="string"))
+          and _in._is_text(pd.Series([chr(36) + "1,000", chr(36) + "2,000"], dtype=object))
+          and not _in._is_text(pd.Series([1000.0, 2000.0])))
+    shaped = src.copy()
+    if "For Sale Price" in shaped.columns and "Land Area (AC)" in shaped.columns and "Secondary Type" in shaped.columns:
+        shaped = shaped.rename(columns={"For Sale Price": "Asking Price", "Land Area (AC)": "Lot Size",
+                                        "Secondary Type": "Subtype"})
+        shaped["Asking Price"] = shaped["Asking Price"].map(lambda v: "Unpriced" if pd.isna(v) else f"${v:,.0f}")
+        shaped["Lot Size"] = shaped["Lot Size"].map(lambda a: "" if pd.isna(a) else f"{a:,.2f} AC")
+        shaped["Subtype"] = shaped["Subtype"].astype(str) + " Land"
+        # A Crexi file carries none of CoStar's own land-use or square-foot columns.
+        for c in ("Land Area (SF)", "Proposed Land Use"):
+            if c in shaped.columns:
+                shaped = shaped.drop(columns=[c])
+        sd = _run(shaped, full, tmp, "crexi_shaped")["dataframe"]
+        a = base["dataframe"].sort_values("Rank")["Fit_Score"].reset_index(drop=True)
+        b = sd.sort_values("Rank")["Fit_Score"].reset_index(drop=True)
+        check("a Crexi-shaped copy of the export is priced and sized",
+              sd["For Sale Price"].notna().sum() == base["dataframe"]["For Sale Price"].notna().sum()
+              and sd["Land Area (AC)"].notna().sum() == base["dataframe"]["Land Area (AC)"].notna().sum())
+        check("  ...its land types lose the word 'Land'",
+              not sd["Secondary Type"].astype(str).str.contains(r"\bLand\b").any())
+        top_a = set(base["dataframe"].sort_values("Rank").head(20)["Property Address"].astype(str))
+        top_b = set(sd.sort_values("Rank").head(20)["Property Address"].astype(str))
+        check("  ...and it ranks like the CoStar original (top 20 nearly the same)",
+              len(top_a & top_b) >= 17, f"{len(top_a & top_b)} of 20 shared")
+    else:
+        skip("Crexi-shaped copy ranks like the original", "export lacks price, size or type")
+    t = pd.DataFrame({"County Name": ["Pinal County", "Maricopa", None], "Secondary Type": ["x", "y", "z"]})
+    out = _in._county_names(t.copy(), [])
+    check("one spelling per county, as CoStar writes it",
+          list(out["County Name"][:2]) == ["Pinal", "Maricopa"] and pd.isna(out["County Name"][2]))
+    d = base["dataframe"]
+    check("every listing says how complete its data is",
+          d["Data_Completeness"].astype(str).str.fullmatch(r"[0-6] of 6").all())
+    # Grouping: the county's four signals must not outvote the listing's own
+    # surroundings. A listing that is best on connectivity AND schools must
+    # beat one that is best only on the four county figures.
+    import analysis.screening.growth as _gg
+    parts = pd.DataFrame({"access": [100, 0], "airport": [100, 0], "pop": [0, 100], "permits": [0, 100],
+                          "jobs": [0, 100], "prices": [0, 100], "schools": [100, 0]}, dtype=float)
+    src_g = open(_gg.__file__, encoding="utf-8").read()
+    check("growth averages within groups first, so the county gets one voice not four",
+          '"county momentum": parts[["pop", "permits", "jobs", "prices"]]' in src_g)
+    grouped = pd.DataFrame({"c": parts[["access", "airport"]].mean(axis=1),
+                            "m": parts[["pop", "permits", "jobs", "prices"]].mean(axis=1),
+                            "l": parts["schools"]}).mean(axis=1)
+    check("  ...a listing strong locally beats one strong only on county figures",
+          grouped[0] > grouped[1], f"{grouped[0]:.0f} vs {grouped[1]:.0f} (a plain average gave {parts.iloc[0].mean():.0f} vs {parts.iloc[1].mean():.0f})")
 
     passed = sum(1 for _, ok, _ in RESULTS if ok)
     print(f"\n{passed}/{len(RESULTS)} checks passed")

@@ -54,6 +54,7 @@ python system/scripts/check_portfolio_comparison.py # 137 checks on the comparis
 python system/scripts/check_answers.py              # 20 checks on the knowledge answers come from
 python system/scripts/check_retrieval.py            # does summary search find the right passage
 python system/scripts/check_find.py                 # does find-in-document find the right passage
+python system/scripts/check_report_page.py          # does the screening report page work in a browser
 ```
 
 There is no lint/test framework configured (no pytest, no linter config) — the three
@@ -1219,6 +1220,35 @@ Four rules that must survive any edit:
   partner's sign-off. `check_screener.py` §25 asserts the score abstains to neutral when every
   source is unreachable, that a closer freeway ranks higher, that a constant county signal moves
   nothing, and that nothing is eliminated.
+- **Any listing export, not just CoStar (`intake.py`, 2026-09-29).** The goal: drop a CoStar,
+  Crexi or LoopNet export or a broker's spreadsheet in the CoStar Drop folder, say "screen it", get
+  the ranking. Neither Crexi nor LoopNet has a standard export -- people get files through third-
+  party scrapers or by hand -- so column names are never predictable, and the repair runs after
+  `normalise_columns()`: numbers written as text (a dollar sign and an M suffix, "12.5 AC", "544,500 SF"; "Call for
+  pricing" stays blank), days on market from a listing date, city/state/ZIP split from one address
+  line, coordinates from the Census batch address lookup (keyless; sends only the PUBLIC listing
+  addresses), county from coordinates via the cached report county outlines, then from the ZIP via
+  the Census ZIP-to-county file, "Land" dropped from type labels ("Residential Land"), one spelling
+  per county. Every repair is reported in the completeness section. Measured by re-shaping the real
+  216-row export three ways: ranking agreement with the CoStar screen **0.99 Crexi-shaped, 0.96
+  broker CSV, 0.95 LoopNet-shaped** (only 91 of 215 land addresses could be placed -- intersections
+  -- and those rows' distances abstain). A control with only the columns a Crexi file carries
+  scored 0.99, so CoStar's submarket columns were never the cause. **Two bugs found only by
+  measuring:** the text-number check tested for pandas' old `object` dtype and pandas 3 stores text
+  as its own type, so every repair silently did nothing (agreement 0.49 until fixed); and an edit
+  wrote invisible control characters where `` word boundaries belonged. With no file named,
+  every screening tool now uses the NEWEST file in the drop folder and says which; the tool
+  descriptions Claude reads were rewritten (they still said proximity was the heaviest weight).
+  CSVs are opened in UTF-8, then the Windows code page, then Latin-1.
+
+- **Growth averages within groups, and every row states its completeness (2026-09-29).** Four of
+  seven growth signals are county-level and move together, so a plain mean gave the county four
+  votes to local schools' one; now connectivity, county momentum and local each get one voice
+  (real export: 17 of the top 20 unchanged). `Data_Completeness` ("4 of 6") and `Data_Missing`
+  lead every row: price, size, location, county, type, time on market. Ava's file reads 3 of 6 on
+  most rows. `check_screener.py` §27; the old "square feet under an unmarked name is refused"
+  check now asserts the acreage comes out right, since such a column is converted, not refused.
+
 - **No two CoStar exports have the same columns, and the header is not always row 1.** Every
   export is shaped by whoever built the report, so **nothing indexes a raw column name** —
   `normalise_columns()` resolves each concept by alias, then by *pattern plus a value check*, then
@@ -1343,6 +1373,34 @@ reasons: it read Phase1/Phase2/Phase3/Phase4 sheet names the current screener no
 writes, so it displayed nothing at all; and it ran an HTTP server on a background daemon
 thread, the last one in the codebase. A file with its data inlined needs neither, and a
 colleague can open it straight from OneDrive.
+
+**The report is interactive since 2026-10-01, and still a single file.** Three additions, chosen
+because they feed the two open questions -- the unratified weights, and whether the ranking matches
+the firm's judgement:
+
+* **Weight sliders.** Growth, Price, Seller, Size and Distance-to-our-land, 0-60; the cards, top
+  three, table and map re-rank in the page with the screener's own arithmetic (weighted mean of the
+  part scores, percentile tiers counting ties generously, a half-file tie Unranked). At the screen's
+  own weights it reproduces the screener's scores within 0.1 and every tier. Each listing keeps its
+  ORIGINAL rank as its identity -- every click target opens by it -- and shows its new position
+  beside it. "Copy these weights" hands the settings and resulting top ten to whoever signs off.
+  A bar whose factor carries no weight is drawn faded and labelled "not scored".
+* **Pursue / Maybe / Pass with a reason** in every detail view, kept in that browser
+  (localStorage, keyed by export name), listed under "Your decisions", tagged in the table and
+  cards. "Copy for Claude" writes a request for `record_screening_decision`. The text is ALWAYS shown
+  in a box below the button: in headless Edge the clipboard request never answered, and a copy
+  button that silently does nothing is worse than one that shows its text.
+* **Explanations where the numbers are**: hover text on Headroom, Score and every bar; a Data
+  column ("4 of 6") with what is missing; all seven growth signals as a grid in the detail view;
+  a line saying what [verified] and [unconfirmed] mean (flagged by a report review in August,
+  never fixed until now); city notes where a dossier exists. The shortlist caption had still
+  described the first bar as distance to our land.
+
+The report holds real deal data, so it stays a file in the team folder and is never published as a
+web page. `scripts/check_report_page.py` opens it in headless Microsoft Edge and drives it -- 11
+checks; skips on a machine without Edge. It exists because this JavaScript is run by nothing else,
+and two faults were found only by opening the page: a load-order mistake that would have stopped
+the whole page at its first draw, and the silent copy button.
 
 The report layers for three readers — the decision (three candidates, the money, the county
 concentration), then the map and shortlist, then every listing and every assumption. Clicking

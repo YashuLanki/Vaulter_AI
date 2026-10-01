@@ -758,7 +758,18 @@ def _add_growth(df: pd.DataFrame, status: dict) -> pd.DataFrame:
         "jobs": _pct(jobs_chg, True),
         "prices": _pct(price_chg, True),
     }, index=idx)
-    score = parts.mean(axis=1, skipna=True).fillna(50.0).round(1)
+    # One voice per KIND of evidence, not per signal (2026-09-29). Four of the
+    # seven signals are county-level and move together -- a hot county's
+    # population, permits, jobs and prices all rise at once -- so a plain mean
+    # gave the county four votes to the local schools' one, and a listing's
+    # own surroundings barely registered. Average within each group, then
+    # across the groups that have anything to say.
+    groups = pd.DataFrame({
+        "connectivity": parts[["access", "airport"]].mean(axis=1, skipna=True),
+        "county momentum": parts[["pop", "permits", "jobs", "prices"]].mean(axis=1, skipna=True),
+        "local": parts["schools"],
+    }, index=idx)
+    score = groups.mean(axis=1, skipna=True).fillna(50.0).round(1)
 
     def basis(i) -> str:
         bits = []

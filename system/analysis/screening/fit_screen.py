@@ -438,15 +438,21 @@ def _num(series: pd.Series) -> pd.Series:
 _FIELD_ALIASES = {
     "Land Area (AC)":  ["Land Area (AC)", "Land Area (Acres)", "Land Area AC",
                         "Acres", "Acreage", "Lot Size (AC)", "Lot Size Acres",
-                        "Total Land Area (AC)", "Size (Acres)", "Land (AC)"],
+                        "Total Land Area (AC)", "Size (Acres)", "Land (AC)",
+                        # Crexi / LoopNet / broker spellings (2026-09-29). Units in
+                        # the VALUES ("12.5 AC", "40,000 SF") are read by intake.py.
+                        "Total Acres", "Gross Acres", "Lot Size", "Land Size", "Lot Area",
+                        "Size"],
     "For Sale Price":  ["For Sale Price", "Asking Price", "Sale Price",
-                        "List Price", "Listing Price", "Price"],
+                        "List Price", "Listing Price", "Price", "Asking", "Price (USD)",
+                        "Ask Price", "Offering Price"],
     # "Property Type" is deliberately NOT here. On a land export it is the
     # constant "Land" -- as an alias it would win outright and mask a real
     # land-use column. Dynamic matching can still reach it, where the
     # prefer-a-column-that-varies rule keeps it in its place.
     "Secondary Type":  ["Secondary Type", "Proposed Land Use", "Property Subtype",
-                        "Sub Type", "Land Use"],
+                        "Sub Type", "Land Use", "Subtype", "Property Sub Type", "Zoning Type",
+                        "Land Type"],
     "Latitude":        ["Latitude", "Lat"],
     "Longitude":       ["Longitude", "Long", "Lng", "Lon"],
     "Days On Market":  ["Days On Market", "Days on Market", "DOM", "Days Listed"],
@@ -454,7 +460,8 @@ _FIELD_ALIASES = {
     "Market Name":     ["Market Name", "Market"],
     "Submarket Name":  ["Submarket Name", "Submarket"],
     "County Name":     ["County Name", "County"],
-    "Property Address": ["Property Address", "Address", "Street Address"],
+    "Property Address": ["Property Address", "Address", "Street Address", "Full Address",
+                         "Location", "Property Location"],
     "City":            ["City", "City Name"],
     "State":           ["State", "State Name", "St"],
 }
@@ -1868,9 +1875,18 @@ def screen(source_path: Path, moic: float = None, write_workbook: bool = True) -
     # skiprows, not header=: on a CSV, header=3 still makes pandas parse lines
     # 1-3 and fix the column count from the first of them, which then throws on
     # the real header row. Skipping drops them before parsing begins.
-    df = (pd.read_excel(source_path, header=hdr)
-          if source_path.suffix.lower() in (".xlsx", ".xls", ".xlsm")
-          else pd.read_csv(source_path, skiprows=hdr))
+    if source_path.suffix.lower() in (".xlsx", ".xls", ".xlsm"):
+        df = pd.read_excel(source_path, header=hdr)
+    else:
+        # A scraped or hand-saved CSV is often not UTF-8 (Excel on Windows
+        # writes the local code page), and pandas refuses the whole file on the
+        # first unusual character. Try the common encodings before giving up.
+        for enc in ("utf-8-sig", "cp1252", "latin-1"):
+            try:
+                df = pd.read_csv(source_path, skiprows=hdr, encoding=enc)
+                break
+            except UnicodeDecodeError:
+                continue
     df = df.loc[:, [not str(c).startswith("Unnamed:") for c in df.columns]]
     log.info(f"Screening {len(df)} listings from {source_path.name} at {moic:g}x MOIC")
 
@@ -1878,6 +1894,25 @@ def screen(source_path: Path, moic: float = None, write_workbook: bool = True) -
     # screener reads from whatever this file happens to provide, before anything
     # else touches it.
     df, column_sources = normalise_columns(df)
+    # Crexi, LoopNet and broker files write numbers as text, give a listing
+    # date instead of days on market, and often carry an address but no
+    # coordinates or county. intake.repair fixes what it can and reports it;
+    # on a clean CoStar export it changes nothing.
+    from analysis.screening.intake import repair as _repair
+    df = _repair(df, column_sources)
+
+    # How much each listing actually says. Missing facts score neutral, so a
+    # row with almost nothing can sit beside one with real but middling
+    # figures; this makes the difference visible on every row (2026-09-29).
+    _facts = {"price": _num(_col(df, "For Sale Price")), "size": _num(_col(df, "Land Area (AC)")),
+              "location": _num(_col(df, "Latitude")), "county": _text(_col(df, "County Name", default="")),
+              "type": _text(_col(df, "Secondary Type", default="")),
+              "time on market": _num(_col(df, "Days On Market"))}
+    _have = pd.DataFrame({k: (v.notna() if v.dtype != object and not pd.api.types.is_string_dtype(v)
+                              else v.str.strip().ne("") & v.str.lower().ne("unknown"))
+                          for k, v in _facts.items()}, index=df.index)
+    df = _attach(df, {"Data_Completeness": _have.sum(axis=1).astype(int).astype(str) + " of 6",
+                      "Data_Missing": _have.apply(lambda r: ", ".join(k for k, ok in r.items() if not ok), axis=1)})
     for c in column_sources:
         if c["note"]:
             log.info(f"  {c['field']}: {c['note']} ({c['rows']} rows)")
@@ -1932,7 +1967,7 @@ def screen(source_path: Path, moic: float = None, write_workbook: bool = True) -
     df = df.sort_values("Fit_Score", ascending=False).reset_index(drop=True).copy()
     df.insert(0, "Rank", range(1, len(df) + 1))
 
-    front = ["Rank", "Fit_Tier", "Fit_Score",
+    front = ["Rank", "Fit_Tier", "Fit_Score", "Data_Completeness", "Data_Missing",
              "Score_Growth", "Score_Pricing", "Score_Distress", "Score_Size", "Score_Proximity",
              "Property Address", "City", "State",
              "Secondary Type", "Land Area (AC)", "For Sale Price", "Ask_Per_Acre",
