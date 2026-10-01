@@ -185,10 +185,6 @@ Vaulter AI Shared/
   Smartsheet Portfolio/    easy to find and drop files into
   property_summaries/    long-lived team knowledge, not run output
   jurisdictions/         researched city dossiers, read by jurisdiction_notes.py
-  duplicates/            find_duplicates.py's report — machine-made, but a work
-                           list a person fills in, so NOT under output/
-  Claude outputs/        people's own work. Named by whoever made it; the
-                           program never writes here (see below)
   output/                what a RUN produces, regenerated each time
     proximity/  screening/  screening_decisions/
   system/                machinery; nobody should need to open this
@@ -196,23 +192,30 @@ Vaulter AI Shared/
     daily_status/  installs/  error_reports/  setup_logs/
 ```
 
-**This map was wrong in four places until 2026-10-01, and the way it was found is
-the point.** An audit walked the actual folder instead of reading this section:
-`jurisdictions/` and `duplicates/` exist at the top level, `system/` has four more
-subfolders than listed, and 211 files sat in a tree this file described with eight
-entries. None of it was drift in the folder — **the folder was right and the map was
-stale.** Checking a description against the thing it describes is the same discipline
-`_file_list_age()` applies to the file list and `pull_project_master.py` to the
-portfolio: **verify against the source, not against the copy.**
+**This map was wrong until 2026-10-01, and the way it was found is the point.** An
+audit walked the actual folder instead of reading this section: `jurisdictions/`
+existed at the top level unlisted, `system/` had four more subfolders than shown, and
+211 files sat in a tree this file described with eight entries. None of it was drift
+in the folder — **the folder was right and the map was stale.** Checking a description
+against the thing it describes is the same discipline `_file_list_age()` applies to
+the file list and `pull_project_master.py` to the portfolio: **verify against the
+source, not against the copy.**
 
-**`Claude outputs/` is the interesting one, because it is not untidiness.** Nothing in
-this repo creates, writes to or mentions it; a person made it to save eight
-acquisition-candidate spreadsheets. They had to invent it, because the structure
-offered only `output/` — which means "disposable" — and the top level. **A structure
-with no slot for a thing someone needs to save will grow one**, so the fix is naming
-the slot, not tidying the symptom. Its name is misleading (the program never writes
-there) and worth changing with the team's agreement; do not move or delete the
-contents, which cannot be regenerated.
+**Six top-level folders, and that is deliberate (2026-10-01).** Two others existed that
+day and the owner removed both: a `duplicates/` report folder
+(`scripts/find_duplicates.py`'s output — **note it recreates the folder on the next
+run**, so if the simple shape matters, that script needs a home under `output/` or a
+decision not to run it), and a folder of one person's own acquisition-candidate
+spreadsheets.
+
+The second is worth recording because the reasoning ran both ways. Nothing in this repo
+created or mentioned it; somebody made it because the structure offered only `output/`,
+which means "disposable", and the top level. The first instinct — the one taken and then
+reversed within the hour — was that **a structure with no slot for a thing someone needs
+to save will grow one**, so name the slot. The owner's call was the opposite and simpler:
+**this folder is what the whole team reads, and personal working files belong somewhere
+personal.** Keeping it to six things is the rule; there is no general-purpose folder here
+by design, and one should not be added back without asking.
 
 **A person-facing note now sits in the folder itself.** These rules only ever lived
 here, in a file written for Claude that is never shipped to the shared folder — so no

@@ -365,9 +365,76 @@ def _renamed_summary():
 
 # --- Spreadsheet -------------------------------------------------------------
 
-def _write_workbook(out_dir, buckets, meta):
-    import pandas as pd
+# Columns a PERSON fills in, never the script. Carried forward across re-runs.
+CHECK_COLUMNS = ["Read and confirmed?", "Confirmed by", "Date confirmed", "Notes"]
+CHECK_CHOICES = ["Yes - confirmed duplicate", "NO - not a duplicate", "Keep - copy of record"]
+PATH_KEY = "Path in library"
 
+
+def _link_base(out_dir, root):
+    """How a link in the workbook reaches the library.
+
+    RELATIVE when the workbook sits inside the library -- which it does on every
+    machine whose team folder is in its proper place, since `Vaulter AI Shared`
+    lives inside the library -- so the same link works on every teammate's
+    computer, not only the one that built the report. Absolute otherwise.
+    """
+    from urllib.parse import quote
+    try:
+        rel = os.path.relpath(root, out_dir)
+    except ValueError:          # different drives
+        return None
+    return quote(rel.replace(os.sep, "/"), safe="/")
+
+
+def _library_link(base, root, rel_path):
+    """A link Excel will actually open.
+
+    Measured in real Excel (2026-09-24): a plain relative link is cut off at the
+    first '#', and 1,355 of the confirmed-duplicate paths contain one ("DVD #1").
+    Percent-encoding every reserved character fixes it -- the encoded link opened
+    a file whose path held '#', '&', '%', ';', '+', commas, brackets and spaces.
+    """
+    from urllib.parse import quote
+    if base is None:
+        return "file:///" + quote(os.path.join(root, rel_path).replace(os.sep, "/"), safe="/:")
+    return base + "/" + quote(rel_path, safe="/")
+
+
+def _previous_checks(path):
+    """What people have already written in the check columns of the workbook
+    being replaced, keyed by the file's path in the library.
+
+    The report is regenerated whole, and a person's own verification is the one
+    thing in it that cannot be regenerated -- so it is read back out first and
+    put back on the same rows. Keyed by the in-library path, which is the same
+    on every machine, never by the full local path.
+    """
+    if not path.exists():
+        return {}
+    try:
+        import openpyxl
+        wb = openpyxl.load_workbook(path, read_only=True)
+        ws = wb.worksheets[0]
+        rows = ws.iter_rows(values_only=True)
+        header = [str(h) if h is not None else "" for h in next(rows, [])]
+    except Exception:
+        return {}
+    if PATH_KEY not in header or any(c not in header for c in CHECK_COLUMNS):
+        return {}
+    key_i = header.index(PATH_KEY)
+    idx = [header.index(c) for c in CHECK_COLUMNS]
+    kept = {}
+    for row in rows:
+        if key_i >= len(row) or not row[key_i]:
+            continue
+        vals = [row[i] if i < len(row) else None for i in idx]
+        if any(v not in (None, "") for v in vals):
+            kept[str(row[key_i])] = vals
+    return kept
+
+
+def _write_workbook(out_dir, buckets, meta):
     """One sheet, holding every confirmed duplicate and nothing else.
 
     Asked for directly (2026-09-24): the workbook is the list somebody works
@@ -376,44 +443,80 @@ def _write_workbook(out_dir, buckets, meta):
     names -- and no sheet of things that are NOT duplicates. The disproved and
     unverified same-name groups, the program files and the front page are
     dropped from the workbook; the README beside it carries the caveats.
+
+    Also asked for the same day: nothing is deleted until a PERSON has opened
+    the copies and read them. So every row links to its file and its folder,
+    and four columns are left for that person to record the check. Those
+    columns survive a re-run.
     """
+    import pandas as pd
+    from openpyxl.worksheet.datavalidation import DataValidation
+
     path = out_dir / "duplicate_files.xlsx"
-    rows = []
+    previous = _previous_checks(path)
+    base = _link_base(out_dir, meta["root"])
+
+    rows, links = [], []
     for n, g in enumerate(_confirmed_groups(buckets), 1):
         renamed = len(g["names"]) > 1
         spread = "across different deals" if len(g["folders"]) > 1 else "same deal folder"
         for p in g["paths"]:
-            rows.append({
+            folder = p.rsplit("/", 1)[0] if "/" in p else ""
+            checks = previous.get(p, [None] * len(CHECK_COLUMNS))
+            row = {
                 "Group": n,
                 "File name": p.rsplit("/", 1)[-1],
+                "Open file": "open file",
+                "Open folder": "open folder",
+                "Suggestion": "KEEP (suggestion)" if p == g["keeper"] else "duplicate",
+            }
+            row.update(dict(zip(CHECK_COLUMNS, checks)))
+            row.update({
                 "Matched by": "different names, same contents" if renamed else "same name",
                 "Other names for this same file": ", ".join(g["names"])[:300] if renamed else "",
                 "Copies": g["copies"],
                 "Size of each": _human_bytes(g["size"]),
                 "Space wasted by this group": _human_bytes(g["wasted"]),
                 "Contents actually compared?": g["proof"],
-                "Suggestion": "KEEP (suggestion)" if p == g["keeper"] else "duplicate",
-                "Folder it is in": p.rsplit("/", 1)[0] if "/" in p else "(top of the library)",
-                "Full path on this computer": os.path.join(meta["root"], p.replace("/", os.sep)),
                 "Copies sit": spread,
+                "Folder it is in": folder or "(top of the library)",
+                "Full path on this computer": os.path.join(meta["root"], p.replace("/", os.sep)),
+                PATH_KEY: p,
                 "Size in bytes": g["size"],
                 "Wasted in bytes": g["wasted"],
             })
-    columns = ["Group", "File name", "Matched by", "Other names for this same file", "Copies",
-               "Size of each", "Space wasted by this group", "Contents actually compared?",
-               "Suggestion", "Folder it is in", "Full path on this computer", "Copies sit",
-               "Size in bytes", "Wasted in bytes"]
+            rows.append(row)
+            links.append((_library_link(base, meta["root"], p),
+                          _library_link(base, meta["root"], folder) if folder else base or ""))
+
+    columns = (["Group", "File name", "Open file", "Open folder", "Suggestion"] + CHECK_COLUMNS
+               + ["Matched by", "Other names for this same file", "Copies", "Size of each",
+                  "Space wasted by this group", "Contents actually compared?", "Copies sit",
+                  "Folder it is in", "Full path on this computer", PATH_KEY,
+                  "Size in bytes", "Wasted in bytes"])
     frame = pd.DataFrame(rows, columns=columns)
 
     with pd.ExcelWriter(path, engine="openpyxl") as xl:
         frame.to_excel(xl, sheet_name="Confirmed duplicates", index=False)
-        widths = {"A": 8, "B": 62, "C": 30, "D": 60, "E": 8, "F": 12, "G": 16,
-                  "H": 50, "I": 18, "J": 95, "K": 115, "L": 22}
-        for sheet in xl.book.worksheets:
-            for col, w in widths.items():
-                sheet.column_dimensions[col].width = w
-            sheet.freeze_panes = "A2"
-    return path, len(rows), frame["Group"].nunique() if rows else 0
+        ws = xl.book.worksheets[0]
+        file_col = columns.index("Open file") + 1
+        folder_col = columns.index("Open folder") + 1
+        for r, (file_link, folder_link) in enumerate(links, 2):
+            c = ws.cell(r, file_col); c.hyperlink = file_link; c.style = "Hyperlink"
+            c = ws.cell(r, folder_col); c.hyperlink = folder_link; c.style = "Hyperlink"
+        if rows:
+            col = chr(ord("A") + columns.index(CHECK_COLUMNS[0]))
+            dv = DataValidation(type="list", formula1='"{}"'.format(",".join(CHECK_CHOICES)),
+                                allow_blank=True, showErrorMessage=False)
+            ws.add_data_validation(dv)
+            dv.add("{0}2:{0}{1}".format(col, len(rows) + 1))
+        widths = {"A": 8, "B": 62, "C": 10, "D": 12, "E": 18, "F": 26, "G": 16, "H": 14,
+                  "I": 40, "J": 30, "K": 60, "L": 8, "M": 12, "N": 16, "O": 44, "P": 22,
+                  "Q": 95, "R": 115, "S": 95}
+        for col, w in widths.items():
+            ws.column_dimensions[col].width = w
+        ws.freeze_panes = "C2"
+    return path, len(rows), frame["Group"].nunique() if rows else 0, len(previous)
 
 
 # --- Web page ----------------------------------------------------------------
@@ -588,8 +691,28 @@ and nothing else. Every file it describes is still exactly where it was.
   rows, one row per copy. Every copy in every group was read in full and
   compared byte for byte -- nothing in this sheet was matched on name alone.
   Both kinds are there, told apart by the "Matched by" column -- the same file
-  under the same name, and the same file filed under different names. Filter
-  "Suggestion" to "duplicate" for the copies that could go.
+  under the same name, and the same file filed under different names.
+
+## How to work through it -- nothing is deleted until a person has read the copies
+
+The computer's byte-for-byte comparison is the reason a file is on the list. It
+is not the reason to delete it. That is a person's call, made by opening the
+copies and reading them:
+
+1. Click **open file** on each row of a group to read that copy. Click **open
+   folder** to see where it sits, and to delete it from there if you decide to.
+2. In **Read and confirmed?**, pick from the dropdown: "Yes - confirmed
+   duplicate", "NO - not a duplicate", or "Keep - copy of record". Put your name
+   in **Confirmed by** and the date in **Date confirmed**. **Notes** is yours.
+3. Delete a copy only after its row says "Yes - confirmed duplicate" in your
+   own hand, and one copy in the group is marked "Keep".
+
+What you write in those four columns is kept when this report is re-run --
+they are read out of the old workbook and put back on the same rows. Close the
+workbook before re-running, or the re-run cannot write it and stops.
+
+The links are relative to where the workbook sits in the library, so they work
+on every teammate's computer that has the team folder in its usual place.
 
 ## What is deliberately NOT in the workbook
 
@@ -699,7 +822,7 @@ def main():
     out_dir.mkdir(parents=True, exist_ok=True)
 
     page = _write_page(out_dir, buckets, meta)
-    book, conf_rows, conf_groups = _write_workbook(out_dir, buckets, meta)
+    book, conf_rows, conf_groups, carried = _write_workbook(out_dir, buckets, meta)
     meta["conf_rows"], meta["conf_groups"] = conf_rows, conf_groups
     readme = _write_readme(out_dir, buckets, meta)
 
@@ -710,6 +833,7 @@ def main():
     print("  {} of space they take up".format(_human_bytes(sum(r["wasted"] for r in docs))))
     print("  {:,} groups confirmed as duplicates in the workbook ({:,} rows)".format(
         conf_groups, conf_rows))
+    print("  {:,} rows already checked by a person, carried forward from the last run".format(carried))
     print("  {:,} groups of program files (web page only)".format(len(buckets["program"])))
     print("  {:,} groups of emails left out on purpose".format(len(buckets["excluded"])))
     print()
