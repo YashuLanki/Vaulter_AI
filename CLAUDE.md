@@ -186,7 +186,8 @@ Vaulter AI Shared/
   property_summaries/    long-lived team knowledge, not run output
   jurisdictions/         researched city dossiers, read by jurisdiction_notes.py
   output/                what a RUN produces, regenerated each time
-    proximity/  screening/  screening_decisions/
+    proximity/  screening/  screening_decisions/ (only once one is recorded)
+    duplicates/ (only once find_duplicates.py is run)
   system/                machinery; nobody should need to open this
     geo_cache/  org_settings/  updates/
     daily_status/  installs/  error_reports/  setup_logs/
@@ -200,6 +201,20 @@ in the folder — **the folder was right and the map was stale.** Checking a des
 against the thing it describes is the same discipline `_file_list_age()` applies to
 the file list and `pull_project_master.py` to the portfolio: **verify against the
 source, not against the copy.**
+
+**Two folders are now created on DEMAND, not at import (2026-10-01).** `config.py`
+runs on every machine at the start of every conversation, and it was `mkdir`-ing
+`screening_decisions/` there — so an unused feature put an empty folder in the team's
+shared folder and kept putting it back. It had stood empty since 10 August, and
+deleting it by hand was futile while that line existed. `record_screening_decision`
+now makes the folder on the first real decision, which is also the first moment it has
+anything to hold; the feature is otherwise untouched. `find_duplicates.py` likewise
+writes to `output/duplicates/` rather than the top level — it is machine-made and
+rebuildable, which is exactly what `output/` means.
+
+The general rule worth carrying: **do not create a folder in a shared space until
+there is something to put in it.** An empty folder that reappears every conversation
+reads as clutter and cannot be tidied away by the person looking at it.
 
 **Six top-level folders, and that is deliberate (2026-10-01).** Two others existed that
 day and the owner removed both: a `duplicates/` report folder

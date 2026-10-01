@@ -3778,6 +3778,9 @@ no score -- it's a diary, not a dial.""".replace(
                     f"screener's ranking matches what it actually chose to do. If a pattern\n"
                     f"shows up here, a person decides what to do about it.\n"
                 )
+                # The folder is no longer made at import, so make it here --
+                # this is the first moment it genuinely has something to hold.
+                path.parent.mkdir(parents=True, exist_ok=True)
                 path.write_text(header, encoding="utf-8")
 
             today = _dt.date.today().isoformat()

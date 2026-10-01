@@ -41,7 +41,11 @@ sys.path.insert(0, str(PROJECT_ROOT))
 import config  # noqa: E402
 
 INDEX_DB = PROJECT_ROOT / "data" / "corpus_index.db"
-OUT_DIRNAME = "duplicates"
+# Under output/, not the top level: this report is machine-made and can be
+# rebuilt by re-running this script, which is exactly what output/ means. It
+# sat at the top level until 2026-10-01, where it read as one of the handful of
+# folders the team is meant to open.
+OUT_DIRNAME = "output/duplicates"
 
 # Archived Outlook email. Excluded by decision, not by oversight -- see the
 # module docstring. Counted so the report can say how much was set aside.

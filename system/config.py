@@ -932,7 +932,11 @@ SCREENING_DECISIONS_DIR = SHARED_OUTPUT_DIR / "screening_decisions"
 
 PROXIMITY_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 SCREENING_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-SCREENING_DECISIONS_DIR.mkdir(parents=True, exist_ok=True)
+# Deliberately NOT created here (2026-10-01). Every machine imports this file at
+# the start of every conversation, so an unused feature was putting an empty
+# folder in the team's shared folder and keeping it there -- it had stood empty
+# since 10 August, and deleting it by hand was futile while this line existed.
+# record_screening_decision creates it on the first real decision instead.
 
 # Basemap tiles and Overpass/federal lookups, cached per rounded bounding box
 # so two properties in the same area don't re-fetch the same data. Was
