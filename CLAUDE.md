@@ -2292,8 +2292,8 @@ pattern without a name for it at the time. Generic version of this framework cal
 one defines the objective, which tools or subagents to use, the expected output, and how to
 handle edge cases, in plain language — the same way you'd brief a colleague. `screening-run`,
 `vaulter-screening-pipeline`, `proximity-mapping`, `document-research`, `answer-eval`, `commit_git`,
-`cleanup`, `recap`, `publish-release`, `summary-refresh`, `asking-this-codebase`,
-`mcp-health-check`, and `full-sweep` are all Layer 1. This is this project's
+`cleanup`, `recap`, `publish-release`, `summary-refresh`, `citation-repair`,
+`asking-this-codebase`, `mcp-health-check`, and `full-sweep` are all Layer 1. This is this project's
 "workflows/" — there is no separate directory by that name, and one should not be created; the
 skill *is* the workflow doc.
 
@@ -2325,7 +2325,7 @@ asking.
 | Proximity mapping | `proximity-mapping` | onedrive-auditor (output hygiene), fact-checker (memo-bound claims) | `proximity_tool.py`, `geo_providers.py`, `geo_federal.py` |
 | Connector health | `mcp-health-check` (+ auto-dispatch from the server's own MCP instructions) | connection-doctor | `check_mcp_health.py` |
 | Install & onboarding | `publish-release` | setup-tester | `setup_wizard.py`, `release.py`/`apply_update.py` |
-| Documents & research | `document-research`, `answer-eval`, `summary-refresh` | document-reader, city-researcher, fact-checker | `system/corpus/`, `check_answers.py` |
+| Documents & research | `document-research`, `answer-eval`, `summary-refresh`, `citation-repair` | document-reader, city-researcher, fact-checker | `system/corpus/`, `check_answers.py` |
 | OneDrive shared folder | agent-led | onedrive-auditor | `system/config.py` path layer |
 | Security | agent-led + hook | leak-guard | `.claude/hooks/check_no_leaks.py` (the hook is the only layer that can actually *block*) |
 
@@ -2354,6 +2354,19 @@ the readers report and write each summary in one at a time** — which is the ar
 caught a Phase 2-4 update landing in a Phase 1 file during a 29-property refresh. Then four
 checks on every write: right file, every heading survived, every citation resolves, date moved
 forward not back.
+
+`citation-repair` (2026-10-05) covers the quarterly job the rename sweep creates, and its
+governing rule is **fix the name, never delete the citation** — a finding nobody can follow is a
+problem, a finding with no citation at all is a worse and irreversible one. It leans on
+`check_answers.py`'s own categories rather than treating its list as one problem, because that
+check once reported 30 unfindable citations when eight were merely renamed, which buried the four
+that were real. Three rules carry the risk: the true spelling comes from the file list rather than
+the check's lower-cased output, a replacement matching more than one file is refused outright (the
+library holds six signature pages differing only by the signer's surname), and the line count must
+be unchanged afterwards. It also names a second job the check cannot see — **a citation can
+resolve and still be unusable**, because 21 of 603 cited documents name something generic enough
+that a reader cannot tell which file is meant, one of them shared with 59 different documents.
+That needs a person who knows the deal, so it is reported and never guessed.
 
 `asking-this-codebase` is about the scratch code written to INVESTIGATE this system, which
 nothing tests. Six wrong hand-written queries in one session (2026-10-05), each producing a
