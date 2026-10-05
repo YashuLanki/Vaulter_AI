@@ -2292,7 +2292,8 @@ pattern without a name for it at the time. Generic version of this framework cal
 one defines the objective, which tools or subagents to use, the expected output, and how to
 handle edge cases, in plain language — the same way you'd brief a colleague. `screening-run`,
 `vaulter-screening-pipeline`, `proximity-mapping`, `document-research`, `answer-eval`, `commit_git`,
-`cleanup`, `recap`, `vaulter-rebuild`, `mcp-health-check`, and `full-sweep` are all Layer 1. This is this project's
+`cleanup`, `recap`, `publish-release`, `asking-this-codebase`, `mcp-health-check`, and
+`full-sweep` are all Layer 1. This is this project's
 "workflows/" — there is no separate directory by that name, and one should not be created; the
 skill *is* the workflow doc.
 
@@ -2323,13 +2324,43 @@ asking.
 | CoStar screening | `vaulter-screening-pipeline` | screening-checker, report-checker, fact-checker | `fit_screen.py`, `report.py`, `check_screener.py` |
 | Proximity mapping | `proximity-mapping` | onedrive-auditor (output hygiene), fact-checker (memo-bound claims) | `proximity_tool.py`, `geo_providers.py`, `geo_federal.py` |
 | Connector health | `mcp-health-check` (+ auto-dispatch from the server's own MCP instructions) | connection-doctor | `check_mcp_health.py` |
-| Install & onboarding | agent-led | setup-tester | `setup_wizard.py`, `release.py`/`apply_update.py` |
+| Install & onboarding | `publish-release` | setup-tester | `setup_wizard.py`, `release.py`/`apply_update.py` |
 | Documents & research | `document-research`, `answer-eval` | document-reader, city-researcher, fact-checker | `system/corpus/`, `check_answers.py` |
 | OneDrive shared folder | agent-led | onedrive-auditor | `system/config.py` path layer |
 | Security | agent-led + hook | leak-guard | `.claude/hooks/check_no_leaks.py` (the hook is the only layer that can actually *block*) |
 
 `vaulter-fact-checker` deliberately serves three desks — it's a shared verification worker, one
 agent per claim, not a desk of its own.
+
+**Two skills added and one retired, 2026-10-05.**
+
+`publish-release` gives the install desk a lead it never had. Publishing is the most dangerous
+thing this system does — a release reaches every teammate's machine — and the sequence existed
+only as prose scattered through this file plus whatever the maintainer remembered. It was
+performed three times in one session with no written playbook. **It also runs the three suites
+first and refuses to publish on a failure**, which `release.py` itself does not do: that
+judgement had always lived in whoever was publishing. Written for two readers at the owner's
+request — numbered steps a non-technical successor can follow, with the reasoning beneath each
+one. That second audience is the point: this was the single operation nobody but the maintainer
+could perform.
+
+`asking-this-codebase` is about the scratch code written to INVESTIGATE this system, which
+nothing tests. Six wrong hand-written queries in one session (2026-10-05), each producing a
+confident wrong number and none raising an error: a missing database connection returning zero
+for all 21 results, a summary filename passed where a property name was needed, identity
+comparison reporting 49 of 49 rows changed when none were, a tuple unpacked as a list, a regex
+matching across a line break, and a shell heredoc eating backslashes four separate times. The
+rule it carries is one this codebase already applies to search results and map providers and
+had never applied to its own scratch scripts: **a uniform result is a broken query until proven
+otherwise.**
+
+`vaulter-rebuild` was **retired** the same day. All four jobs its description named are done:
+the buy-box standard exists as `docs/COMPANY_PROFILE.md` (draft, awaiting a partner's sign-off,
+which is a decision rather than build work), jurisdiction dossiers are built and have their own
+researcher agent, the geo stack is off Google keys (the only two remaining mentions are comments
+recording the removal), and the screening phase files are deleted. What genuinely remains from
+the rebuild is **Tier C agenda monitoring** alone, recorded below rather than in a skill nobody
+would now invoke.
 
 `answer-eval` (2026-08-14) is the documents desk's **second lead**, not a desk of its own: what it
 scores is the property summaries that desk writes. It is the one place the two halves are visible
@@ -2468,8 +2499,11 @@ mistakes.
 - **`docs/REBUILD_PLAN.md`** — read §0 first. It records the "no connectors" verdict, what the
   rebuild removed and why, and the measurements behind the corpus design. **Now mostly a record
   of *why*, not a plan** (revised 2026-08-18): §§1–4 are built, §5.0 and §5.1's Tier B are built,
-  and §8's running order is worked through. What remains is §5.1's **Tier A (Census/BLS) and
-  Tier C (agenda monitoring)** and the open questions in §7. Its §6 codebase map was **deleted**
+  and §8's running order is worked through. What remains is §5.1's **Tier C (agenda
+  monitoring)** and the open questions in §7. **Tier A is built** (2026-09-29): `growth.py`
+  reads Census population, building permits and BLS employment, keylessly, as part of the growth
+  score — so §5.1's own "not built" note and the summary line at the top of REBUILD_PLAN are
+  both out of date there. Its §6 codebase map was **deleted**
   rather than corrected — it drifted out of date twice, and this file's own Repository layout and
   Architecture sections are the maintained copy. Don't reintroduce a second map there.
 - **`docs/COMPANY_PROFILE.md`** — the firm's screening standard, derived from the portfolio and
