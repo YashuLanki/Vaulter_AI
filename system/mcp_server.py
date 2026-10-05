@@ -1445,7 +1445,8 @@ def _search_needles(property_name: str, summary_text: str = "") -> list:
       1. the name as given;
       2. without trailing punctuation (fixes the 5-of-2,387 case);
       3. without a parenthetical alias;
-      4. any alias recorded for it in the property registry.
+      4. each side of a slash, longest first (2026-10-05);
+      5. any alias recorded for it in the property registry.
 
     Step 4 is where a genuinely different folder name lives. Those are real firm
     names, so they are held in `property_ids.json` — gitignored — and never in
@@ -1465,6 +1466,19 @@ def _search_needles(property_name: str, summary_text: str = "") -> list:
     add(property_name)
     add(_re.sub(r"[.,;:]+\s*$", "", str(property_name).strip()))
     add(_re.sub(r"\s{2,}", " ", _re.sub(r"\([^)]*\)", "", str(property_name))).strip())
+
+    # A slash separates two names for one property ("<A>/<B>"), and no folder is
+    # called that. Each side on its own, longest first, because the longer side
+    # is the more specific search and a two-letter initialism would match half
+    # the drive. Found 2026-10-05: one property's whole name matched NOTHING
+    # while its first segment matched 400+ files -- and the only thing that had
+    # ever rescued it was a segment of the summary's title line, so any caller
+    # without the summary reported it unlocatable.
+    if "/" in str(property_name):
+        for part in sorted((q.strip() for q in str(property_name).split("/")),
+                           key=len, reverse=True):
+            if len(part) >= 4:
+                add(part)
 
     try:
         from config import DATA_DIR
@@ -1599,8 +1613,7 @@ def _best_needle(property_name: str, con, summary_text: str = "") -> str:
 
     candidates = _search_needles(property_name, summary_text)
     if not candidates:
-        cache.setdefault("names", {})[property_name] = ""
-        return ""
+        return ""            # never remembered -- see below
 
     first = candidates[0]
     n_first = count(first)
@@ -1616,8 +1629,18 @@ def _best_needle(property_name: str, con, summary_text: str = "") -> str:
             best, best_n = needle, n
             if n >= _CONFIDENT:
                 break                     # good enough; stop paying
-    cache.setdefault("names", {})[property_name] = best
-    _needle_cache_save()
+    # A FAILURE IS NEVER REMEMBERED (2026-10-05). Callers hold different amounts
+    # of information: `_properties_with_no_files` passes the summary text, other
+    # paths pass none, and the summary's title line is where several properties'
+    # real folder names come from. So a caller with less information could
+    # compute "", store it, and hand that "" to every later caller -- including
+    # the ones that would have found the folder. Measured: the cache held
+    # exactly one entry, empty, for a property whose folder holds 400+ files.
+    # Recomputing a genuine miss costs a few capped counts; serving a wrong
+    # "cannot tell" costs a property silently never being checked again.
+    if best:
+        cache.setdefault("names", {})[property_name] = best
+        _needle_cache_save()
     return best
 
 

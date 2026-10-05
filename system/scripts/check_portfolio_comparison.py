@@ -1391,6 +1391,81 @@ def main() -> int:
     except Exception as e:
         check("coordinate-lookup checks ran", False, f"{type(e).__name__}: {e}")
 
+    # -- Finding the folder when the name carries a second name ------
+    # A Project Master name of the form "<A>/<B>" matched no folder: the only
+    # candidate was the whole string, and no folder is called that. The working
+    # name came ONLY from a segment of the summary's title line -- so any caller
+    # that passed no summary text got nothing, CACHED that nothing, and then
+    # handed it to callers that would have succeeded. Measured 2026-10-05: the
+    # remembered-names file held exactly one entry, empty, for a property whose
+    # folder holds 400+ files, written that same day against the current list.
+    print()
+    print("Finding a folder when the name carries a second name after a slash")
+    try:
+        import sqlite3 as _sq3
+        sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+        import mcp_server as _msn
+
+        # A throwaway file list, so this never touches the real one.
+        _con = _sq3.connect(":memory:")
+        _con.execute("CREATE TABLE files (path TEXT, name TEXT, size INT, mtime INT)")
+        for _i in range(40):
+            _con.execute("INSERT INTO files VALUES (?,?,?,?)",
+                         (f"X/Cedar Flat/doc{_i}.pdf", f"doc{_i}.pdf", 10, 0))
+        for _i in range(40):
+            _con.execute("INSERT INTO files VALUES (?,?,?,?)",
+                         (f"X/Juniper Mesa (Parcel 8/doc{_i}.pdf", f"doc{_i}.pdf", 10, 0))
+        _con.commit()
+
+        _cands = _msn._search_needles("Cedar Flat/WRN", "")
+        check("each side of a slash is tried, with no summary text to help",
+              "Cedar Flat" in _cands,
+              f"{len(_cands)} candidates")
+        check("...and the short side is not tried on its own",
+              "WRN" not in _cands,
+              "a 3-letter initialism would match half the drive")
+
+        # The real test: the chosen name, computed with nothing but the name.
+        _saved = _msn._needle_cache
+        _msn._needle_cache = lambda: {"names": {}}
+        _savedsave = _msn._needle_cache_save
+        _msn._needle_cache_save = lambda: None
+        try:
+            check("a slashed name now resolves to its folder",
+                  _msn._best_needle("Cedar Flat/WRN", _con, "") == "Cedar Flat")
+            # A slash INSIDE a parenthetical must not change an answer that
+            # already worked -- the stripped name is the better search.
+            check("a slash inside brackets leaves the old answer alone",
+                  _msn._best_needle("Juniper Mesa (Parcel 8/9)", _con, "")
+                  == "Juniper Mesa",
+                  "the bracket-stripped name still wins")
+            check("a name matching nothing still returns nothing",
+                  _msn._best_needle("Nowhere Ranch/ZZ", _con, "") == "")
+        finally:
+            _msn._needle_cache = _saved
+            _msn._needle_cache_save = _savedsave
+
+        # A failure must never be remembered: the next caller may know more.
+        _store = {"names": {}}
+        _saved = _msn._needle_cache
+        _savedsave = _msn._needle_cache_save
+        _msn._needle_cache = lambda: _store
+        _msn._needle_cache_save = lambda: None
+        try:
+            _msn._best_needle("Nowhere Ranch/ZZ", _con, "")
+            check("a FAILURE is never remembered",
+                  "Nowhere Ranch/ZZ" not in _store["names"],
+                  "a caller with the summary text must be free to try again")
+            _msn._best_needle("Cedar Flat/WRN", _con, "")
+            check("...but a success still is",
+                  _store["names"].get("Cedar Flat/WRN") == "Cedar Flat")
+        finally:
+            _msn._needle_cache = _saved
+            _msn._needle_cache_save = _savedsave
+        _con.close()
+    except Exception as e:
+        check("slashed-name checks ran", False, f"{type(e).__name__}: {e}")
+
     passed = sum(1 for _, ok, _ in RESULTS if ok)
     print(f"\n{passed}/{len(RESULTS)} checks passed")
     return 0 if passed == len(RESULTS) else 1
