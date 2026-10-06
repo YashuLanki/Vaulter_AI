@@ -290,6 +290,46 @@ def _irr(df) -> list:
     return sorted(out, key=lambda d: d["years"])
 
 
+def _portfolio_here(states: list, counties: list) -> dict:
+    """Counts from the firm's own property record for the states and counties in
+    this export: how many we hold, sold, have under contract, and marketed without
+    a buyer -- characteristics only, never a price. {} when the record cannot be
+    read, and the page then says nothing rather than something wrong."""
+    try:
+        from analysis.screening.portfolio_comparison import load_index
+        rows = load_index() or []
+    except Exception:  # noqa: BLE001 -- the briefing is optional; the screen is not
+        return {}
+    out = {}
+    want = {str(s).upper() for s in states if s}
+    for r in rows:
+        if not isinstance(r, dict) or str(r.get("state", "")).upper() not in want:
+            continue
+        st = out.setdefault(str(r["state"]).upper(), {"held": 0, "sold": 0, "pendingSale": 0,
+                                                       "pendingBuy": 0, "marketedUnsold": 0,
+                                                       "soldHolds": [], "counties": {}})
+        status = str(r.get("outcome_status") or "")
+        if status == "sold":
+            st["sold"] += 1
+            hy = r.get("hold_years")
+            if hy is None and r.get("exit_year") and r.get("entry_year"):
+                hy = int(r["exit_year"]) - int(r["entry_year"])
+            if hy is not None:
+                st["soldHolds"].append(int(hy))
+        elif status == "pending-sale":
+            st["pendingSale"] += 1; st["held"] += 1
+        elif status == "pending-acquisition":
+            st["pendingBuy"] += 1
+        else:
+            st["held"] += 1
+        if str(r.get("disposition_detail") or "") == "marketed-unsold":
+            st["marketedUnsold"] += 1
+        county = str(r.get("county") or "").strip()
+        if county and county.lower() != "unclear" and status != "pending-acquisition":
+            st["counties"][county] = st["counties"].get(county, 0) + 1
+    return out
+
+
 def build_report(result: dict, out_path: Path = None, include_imagery: bool = False,
                  verified: dict = None) -> Path:
     """
@@ -353,6 +393,10 @@ def build_report(result: dict, out_path: Path = None, include_imagery: bool = Fa
         "portfolioCoverage": result.get("portfolio_coverage"),
         "exitLotComps": result.get("exit_lot_comps", []),
         "irr": _irr(df),
+        # The firm's own record for the places in this file, for the briefing.
+        "portfolioHere": _portfolio_here(
+            sorted({x["state"] for x in listings if x["state"]}),
+            sorted({x["county"] for x in listings if x["county"]})),
 
         "generated": datetime.now().strftime("%d %B %Y"),
     }
@@ -370,7 +414,9 @@ def build_report(result: dict, out_path: Path = None, include_imagery: bool = Fa
         # exports, all confirmed 2026-07-29 to have accumulated unboundedly in
         # the shared OneDrive folder otherwise. The "generated" date inside the
         # report (above) still shows when THIS copy was built.
-        stem = Path(result["source"]).stem
+        # The stem the screen chose -- by the file's data, so a re-download
+        # replaces its earlier report (2026-10-05). Older result dicts lack it.
+        stem = result.get("output_stem") or Path(result["source"]).stem
         out_path = Path(SCREENING_OUTPUT_DIR) / f"screen_{stem}.html"
     out_path = Path(out_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)

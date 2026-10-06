@@ -3743,7 +3743,10 @@ no score -- it's a diary, not a dial.""".replace(
         overwritten by that.
         """
         from config import SCREENING_DECISIONS_DIR
-        stem = Path(source_file).stem or "unknown_export"
+        # The stem the screen itself used -- by the file's data, so a renamed
+        # re-download's decisions land beside the workbook they belong to.
+        from analysis.screening.fit_screen import stem_for_source_name
+        stem = stem_for_source_name(source_file)
         return Path(SCREENING_DECISIONS_DIR) / f"fit_screen_{stem}.md"
 
     @mcp.tool()

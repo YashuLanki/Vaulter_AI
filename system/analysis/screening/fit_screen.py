@@ -1859,6 +1859,92 @@ def _why(row) -> str:
     return (line[:1].upper() + line[1:] + ".") if line else ""
 
 
+# ---------------------------------------------------------------------------
+# One screen per export, however the file is named (2026-10-05)
+#
+# A browser re-download of the same CoStar report lands as "CostarExport (3).xlsx"
+# or "CostarExport_14.xlsx", so naming outputs after the FILE produced a new
+# workbook and report for the same data every time -- 11 pairs for one export,
+# measured in the team folder. Outputs are now named by what the file CONTAINS:
+# a fingerprint of the listing data, kept in a small hidden list beside the
+# outputs. Same data under a new name -> the earlier screen's files are written
+# over. Different data -> its own name, because a re-pulled export that changed
+# is a new screen. The list also records every filename seen for a stem, so the
+# decisions file can be found from whichever name the person typed.
+_SCREENS_FILE = ".screens.json"
+
+
+def _data_fingerprint(df: pd.DataFrame) -> str:
+    """A short, stable fingerprint of the file's data -- column names and every
+    cell as text, in order. Two downloads of the same report match; one changed
+    cell does not."""
+    import hashlib
+    h = hashlib.sha256()
+    h.update("|".join(str(c) for c in df.columns).encode("utf-8"))
+    h.update(pd.util.hash_pandas_object(df.astype(str), index=False).values.tobytes())
+    return h.hexdigest()[:16]
+
+
+def _screens_path() -> Path:
+    from config import SCREENING_OUTPUT_DIR
+    return Path(SCREENING_OUTPUT_DIR) / _SCREENS_FILE
+
+
+def _load_screens() -> dict:
+    """{stem: {"fingerprint": str, "sources": [names], "last_screened": iso}}; a
+    missing or wrong-shaped file is an empty list, never an error."""
+    import json
+    try:
+        data = json.loads(_screens_path().read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def output_stem(source_path: Path, df: pd.DataFrame, record: bool = True) -> str:
+    """The name shared by this screen's workbook, report and decisions file.
+
+    The stem of an earlier screen whose data fingerprint matches, else this
+    file's own stem. With record=True the list is updated so later runs and
+    the decisions file agree. Never raises: on any failure it is the file's
+    own stem, which is what it always was.
+    """
+    import json
+    from datetime import datetime
+    own = Path(source_path).stem
+    try:
+        fp = _data_fingerprint(df)
+        screens = _load_screens()
+        stem = next((k for k, v in screens.items()
+                     if isinstance(v, dict) and v.get("fingerprint") == fp), own)
+        if record:
+            entry = screens.get(stem) if isinstance(screens.get(stem), dict) else {}
+            sources = [s for s in entry.get("sources", []) if isinstance(s, str)]
+            if Path(source_path).name not in sources:
+                sources.append(Path(source_path).name)
+            screens[stem] = {"fingerprint": fp, "sources": sources,
+                             "last_screened": datetime.now().isoformat(timespec="seconds")}
+            p = _screens_path()
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_text(json.dumps(screens, indent=1), encoding="utf-8")
+        return stem
+    except Exception as e:  # noqa: BLE001 -- naming must never stop a screen
+        log.warning(f"[SCREEN] output name fell back to the file's own: {e}")
+        return own
+
+
+def stem_for_source_name(source_file: str) -> str:
+    """The output stem an export was screened under, from the name a person
+    typed -- so the decisions file matches the workbook even when the file was
+    a renamed re-download. Unknown name: its own stem."""
+    name = Path(source_file).name
+    own = Path(source_file).stem or "unknown_export"
+    for stem, v in _load_screens().items():
+        if isinstance(v, dict) and name in (v.get("sources") or []):
+            return stem
+    return own
+
+
 def screen(source_path: Path, moic: float = None, write_workbook: bool = True) -> dict:
     """
     Rank a CoStar export by fit against the existing portfolio.
@@ -1889,6 +1975,12 @@ def screen(source_path: Path, moic: float = None, write_workbook: bool = True) -
                 continue
     df = df.loc[:, [not str(c).startswith("Unnamed:") for c in df.columns]]
     log.info(f"Screening {len(df)} listings from {source_path.name} at {moic:g}x MOIC")
+    # Named by the data, not the filename, so a re-download replaces its earlier
+    # screen rather than sitting beside it. Recorded only when files are written.
+    out_stem = output_stem(source_path, df, record=write_workbook)
+    if out_stem != source_path.stem:
+        log.info(f"[SCREEN] {source_path.name} holds the same data as an earlier screen; "
+                 f"writing over fit_screen_{out_stem}")
 
     # No two CoStar exports carry the same columns. Resolve every concept the
     # screener reads from whatever this file happens to provide, before anything
@@ -1986,6 +2078,7 @@ def screen(source_path: Path, moic: float = None, write_workbook: bool = True) -
 
     result = {
         "source": source_path.name,
+        "output_stem": out_stem,
         "total_screened": len(df),
         "moic_target": moic,
         "tier_counts": df["Fit_Tier"].value_counts().sort_index().to_dict(),
@@ -2006,7 +2099,7 @@ def screen(source_path: Path, moic: float = None, write_workbook: bool = True) -
         # Confirmed 2026-07-29: this used to accumulate 149 files in the shared
         # OneDrive folder for 3 source files re-screened repeatedly during
         # development. Same fix already applied to pipeline/proximity_tool.py.
-        out = Path(SCREENING_OUTPUT_DIR) / f"fit_screen_{source_path.stem}.xlsx"
+        out = Path(SCREENING_OUTPUT_DIR) / f"fit_screen_{out_stem}.xlsx"
         out.parent.mkdir(parents=True, exist_ok=True)
         with pd.ExcelWriter(out, engine="openpyxl") as xl:
             view.to_excel(xl, sheet_name="Ranked", index=False)

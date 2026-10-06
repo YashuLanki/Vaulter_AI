@@ -49,7 +49,7 @@ python system/main.py stats                     # what this instance has availab
 python system/scripts/pull_project_master.py  # (maintainer's machine only) refresh the portfolio from Smartsheet
 
 # Checks -- run the one that matches what you touched (see "Three regression suites" below)
-python system/scripts/check_screener.py             # 135 checks on the screener's arithmetic
+python system/scripts/check_screener.py             # 152 checks on the screener's arithmetic (needs an export path)
 python system/scripts/check_portfolio_comparison.py # 137 checks on the comparison index
 python system/scripts/check_answers.py              # 20 checks on the knowledge answers come from
 python system/scripts/check_retrieval.py            # does summary search find the right passage
@@ -1447,10 +1447,66 @@ the firm's judgement:
   described the first bar as distance to our land.
 
 The report holds real deal data, so it stays a file in the team folder and is never published as a
-web page. `scripts/check_report_page.py` opens it in headless Microsoft Edge and drives it -- 11
+web page. `scripts/check_report_page.py` opens it in headless Microsoft Edge and drives it -- 12
 checks; skips on a machine without Edge. It exists because this JavaScript is run by nothing else,
 and two faults were found only by opening the page: a load-order mistake that would have stopped
 the whole page at its first draw, and the silent copy button.
+
+**Redesigned from scratch 2026-10-05, at the owner's request, for a non-technical reader.** Asked
+for: a friendly page, minimal plain wording, no jargon, and "no guesses -- if you don't know, don't
+add anything". The decisions, each made with the owner in an interview before anything was built:
+
+* **Measured facts on the page; everything modelled in a purple "If you assume our model" panel,
+  closed by default.** Asking price, acres, days listed, the seven growth signals, site checks and
+  "Similar to our deals" are on the face of every listing. What a parcel "needs to sell for", the
+  "room to profit" and the verdict sentence sit in the purple panel with the three assumptions
+  spelled out, because they rest on assumptions about a deal that has not happened. The
+  page-level panel is five tiles (return target, approval cost per lot, property tax, lots per
+  acre, time to sell), each with its measured source in a few words; the "what 3x means over time"
+  block was removed at the owner's request.
+* **Plain words.** Strong / Good / Fair / Weak fit / Can't rank for the tiers; "Needs to sell for";
+  "Other sellers here ask"; "Room to profit"; "confirmed from documents" for `[verified]`. The
+  `Why` and `Vaulter_Read` sentences are not shown -- both carry modelled price claims -- and the
+  page builds its own one-line summary from measured facts only (`leadLine`). **No dashes anywhere**
+  (`nodash`, applied in `esc`): a long dash between words becomes a comma, between numbers "to";
+  a missing value reads "not given" or "none", never "—".
+* **Weights as shares of 100 that always sum**; the sliders run 0-100 and each shows its share.
+* **Every listing has the same layout**, opened from the top three or the list: the top-three card
+  block (`cardTop`), facts strip, Google Earth button, Area growth | On the site, Similar to our
+  deals, then City notes, How it scored and the model panel folded, then the decision buttons.
+  Found by screenshotting two listings the owner called "a mess": a long airport name was squeezing
+  the growth labels into a one-word-per-line column, and the detail body had no spacing between
+  sections. **Screenshot it; do not reason about layout.** The reason text box on decisions was
+  removed (owner's call); the Pursue / Maybe / Pass buttons and "Copy for Claude" remain.
+* **Coordinates open in Google Earth** (`earth.google.com/web/search/<lat>,<lng>`), straight from
+  the file; a row without coordinates gets no button. Checked before shipping: all 216 points in
+  the real export land in the county the file names, and the 91 whose addresses the Census lookup
+  could place sit a median 0.11 mi from it, none over 2 mi.
+* **The list scrolls in its own box** (70% of the screen, sticky headings), so the page stays short.
+  The "Data 6 of 6" column is gone; a listing missing one of the six basic facts gets a small
+  "no price" tag instead. "Where each fact came from" became "What the spreadsheet gave us": each
+  fact with how many listings carry it.
+* **An analyst briefing is computed but hidden** (`section.brief[hidden]`): headline, what stands
+  out (long listings, sellers under pressure, flood, stuck-deal resemblance, no price), "through our
+  lens" counts, and "our record here" from the comparison index via `report._portfolio_here`
+  (counts only, never a price). The owner asked for it, then chose the four "At a glance" tiles
+  instead; the briefing stays one attribute away.
+* **Tested on five damaged copies of the real export** (Crexi-style names with no coordinates,
+  county or days listed; a bare address/price/acres sheet; two markets in one file; no prices; square
+  feet, and prices written as text with a dollar sign and an M): zero script errors, the missing-facts box names each gap, the map hides
+  itself only when nothing can be placed. One limit seen: with no coordinates the Census address
+  lookup put one Phoenix-area row in Mohave County, and the page says coordinates were "worked out
+  from elsewhere" but does not mark which points those are. A land type the file did not give is
+  left out, not printed as "Unknown".
+
+**Screening the same export twice replaces its result (2026-10-05).** A browser re-download lands
+as `CostarExport (3).xlsx` or `CostarExport_14.xlsx`, and naming outputs after the FILE had made
+eleven workbook/report pairs for one export in the team folder. `fit_screen.output_stem()` names
+outputs by a fingerprint of the file's DATA, kept in `output/screening/.screens.json`: identical
+data under any name writes over the earlier screen; changed data keeps its own name, because a
+re-pulled export that changed is a new screen. The workbook, report and decisions file all take
+the stem from it (`stem_for_source_name` maps a typed filename back). `check_screener.py` §28.
+Eight stale numbered pairs whose source files no longer existed were removed.
 
 The report layers for three readers — the decision (three candidates, the money, the county
 concentration), then the map and shortlist, then every listing and every assumption. Clicking
@@ -1687,6 +1743,22 @@ to a spelled-out name by prefix is wrong: `"arizona"` starts with `"ar"`, which 
 An earlier version also fell back to "the only dossier with this city name" and handed Arizona's
 water findings to a listing in Coolidge, *Texas* — same-named towns exist in several states.
 Both are now an explicit code lookup, and both are asserted in §18.
+
+**All four dossiers were fact-checked on 2026-10-05, and none was safe to quote as it stood.** One
+`vaulter-fact-checker` per dossier, every claim against the dossier's own sources and the current
+public record. Found: a wrong date (a water designation given as 3 March; the Governor's office and
+ADWR say 4 March), a fee change dated a year late (May 2026 where every source says May 2025), a
+"sewer is the binding constraint" stated as fact with no source for that city (the city is expanding
+its plant), fee amounts called "unknown" that the city's own cited report lists, a rate case cited
+for a city it does not cover, and -- in all four -- a June 2026 court ruling against the rule behind
+the EPCOR water designation that none of them mentioned. Every "What this changes" section was
+rewritten with the verified facts only, each change marked "(was: ...)", and each dossier gained a
+`## Verification — 2026-10-05` section with the sources; backups under
+`system/data/backups/jurisdictions_pre_factcheck_20261005/`. Two mechanics changed with it: the note
+now **leads with its date** (`_checked_date` reads `**Facts checked:**`, else `**Compiled:**`, and
+the page shows "checked 5 Oct 2026" beside City notes), and the 700-character cap became 4,000,
+since the page folds the note away and a cut-off point helped nobody. The dossiers' own refresh
+dates have arrived; the appeal status after 2026-10-01 is the open question in all four.
 
 ### Sold-deal precedent (`_sold-deals.md`, `get_sold_deals`) — 2026-08-12
 

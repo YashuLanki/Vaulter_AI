@@ -50,7 +50,7 @@ _SCREENING_HEADING = re.compile(r"^#+\s*\d*\.?\s*What this changes about screeni
 # Trailing detail that is real research but not a screening signal.
 _STOP_HEADING = re.compile(r"^#+\s*\d*\.?\s*(Open questions|Sources|Gaps)", re.IGNORECASE)
 
-_MAX_NOTE_CHARS = 700
+_MAX_NOTE_CHARS = 4000   # was 700; the report folds the note away since 2026-10-05, so a cut-off point helped nobody
 
 
 def _slug(name: str) -> str:
@@ -121,6 +121,13 @@ def load_dossiers() -> dict:
         note = _screening_section(text)
         if not note:
             continue
+        # The date the dossier's facts were last checked leads the note, so a
+        # reader of the report can see how fresh the research is. "Facts
+        # checked" is written by a verification pass; "Compiled" by the
+        # researcher. Neither present: no date is claimed. (2026-10-05)
+        checked = _checked_date(text)
+        if checked:
+            note = f"Checked {checked} | " + note
         # Filename is "<city>-<state>.md", e.g. "casa-grande-az.md". The state
         # is the LAST hyphen-separated piece so multi-word cities keep working.
         stem = path.stem.lower()
@@ -129,6 +136,20 @@ def load_dossiers() -> dict:
         city, _, state = stem.rpartition("-")
         out[(city, state)] = note
     return out
+
+
+_CHECKED = re.compile(r"\*\*(?:Facts checked|Compiled):\*\*\s*(\d{4}-\d{2}-\d{2})")
+
+
+def _checked_date(text: str) -> str:
+    """The most recent 'Facts checked' date, else the 'Compiled' date, else ''."""
+    dates = {}
+    for m in _CHECKED.finditer(text):
+        dates.setdefault(m.group(0).split(":")[0], m.group(1))
+    for key in ("**Facts checked", "**Compiled"):
+        if key in dates:
+            return dates[key]
+    return ""
 
 
 def _screening_section(text: str) -> str:

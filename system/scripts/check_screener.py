@@ -1037,8 +1037,11 @@ def main() -> int:
           "buyAvg!=null" in tpl.replace(" ", ""))
     check("the report guards the by-exit figure before printing it",
           "invCap!=null" in tpl.replace(" ", ""))
+    # Since the 2026-10-05 redesign the by-exit figure lives in the model panel,
+    # as its own sentence, and the at-a-glance cards never mention it.
+    glance = tpl[tpl.index("/* ---- at a glance"):tpl.index("/* ---- the three")]
     check("the by-exit figure is its own sentence, not merged into the card label",
-          'id="f-cap-n"' in tpl and "invested capital" in tpl,
+          "The asking price is only the start" in tpl and "avg_invested_capital" not in glance,
           "merging them is what made every shortlist read cheap")
 
     # ---- 21. Cost figures reach the whole team, not just the maintainer ----
@@ -1408,6 +1411,40 @@ def main() -> int:
                             "l": parts["schools"]}).mean(axis=1)
     check("  ...a listing strong locally beats one strong only on county figures",
           grouped[0] > grouped[1], f"{grouped[0]:.0f} vs {grouped[1]:.0f} (a plain average gave {parts.iloc[0].mean():.0f} vs {parts.iloc[1].mean():.0f})")
+
+    # ── 28. The same export screened twice replaces its result (2026-10-05) ──
+    # A browser re-download arrives as "CostarExport (3).xlsx", and naming outputs
+    # after the file made 11 pairs for one export in the team folder. Outputs are
+    # named by the data: identical data under any name reuses the earlier stem;
+    # changed data keeps its own name. Run against a throwaway output folder so
+    # the team's own list is never touched.
+    print("\n28. The same export screened twice replaces its result")
+    import tempfile as _tf
+    import config as _cfg
+    _keep = _cfg.SCREENING_OUTPUT_DIR
+    _tmpdir = _tf.mkdtemp(prefix="vlt_screens_")
+    try:
+        _cfg.SCREENING_OUTPUT_DIR = _tmpdir
+        a = pd.DataFrame({"Property Address": ["1 Elm St", "2 Oak St"], "For Sale Price": [100.0, 200.0]})
+        b = a.copy(); b.loc[0, "For Sale Price"] = 101.0
+        s1 = fs.output_stem(Path("CostarExport.xlsx"), a)
+        s2 = fs.output_stem(Path("CostarExport (3).xlsx"), a)
+        s3 = fs.output_stem(Path("CostarExport_14.xlsx"), b)
+        check("a first screen is named after its file", s1 == "CostarExport")
+        check("the same data under a browser-copy name writes over that screen", s2 == "CostarExport", s2)
+        check("changed data under a new name keeps its own name", s3 == "CostarExport_14", s3)
+        check("the decisions file follows the name the screen used",
+              fs.stem_for_source_name("CostarExport (3).xlsx") == "CostarExport"
+              and fs.stem_for_source_name("CostarExport_14.xlsx") == "CostarExport_14"
+              and fs.stem_for_source_name("never-seen.xlsx") == "never-seen")
+        (Path(_tmpdir) / fs._SCREENS_FILE).write_text("[1, 2, 3]", encoding="utf-8")
+        check("a wrong-shaped list falls back to the file's own name, never an error",
+              fs.output_stem(Path("Other.xlsx"), a) == "Other")
+        check("the real screen carries the stem it chose", "output_stem" in base and base["output_stem"])
+    finally:
+        _cfg.SCREENING_OUTPUT_DIR = _keep
+        import shutil as _sh
+        _sh.rmtree(_tmpdir, ignore_errors=True)
 
     passed = sum(1 for _, ok, _ in RESULTS if ok)
     print(f"\n{passed}/{len(RESULTS)} checks passed")

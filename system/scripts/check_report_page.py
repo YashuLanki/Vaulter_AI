@@ -34,7 +34,9 @@ window.addEventListener("load", () => {
   const V = window.__vaulterReport, L = V.L, W0 = V.W0, rescore = V.rescore, openDetail = V.openDetail,
         closeDetail = V.closeDetail, tk = V.tk, DATA = {listings: JSON.parse(JSON.stringify(V.L))};
   try {
-    out.cards = document.querySelectorAll("#cards .card").length;
+    out.brief = (q("#brief-head")||{}).textContent || "";
+    out.briefStand = document.querySelectorAll("#brief-stand li").length;
+    out.cards = document.querySelectorAll("#top3 .cand").length;   // the shortlist cards are the top three (redesign 2026-10-05)
     out.top3 = document.querySelectorAll("#top3 .cand").length;
     out.rows = document.querySelectorAll("#tbl tbody tr").length;
     out.sliders = document.querySelectorAll("#tune-rows input[type=range]").length;
@@ -53,7 +55,7 @@ window.addEventListener("load", () => {
     out.sayGrowthOnly = q("#tune-sum").textContent;
     out.topByGrowth = L.slice(0,3).map(x=>[x.now, x.rank, x.comp.growth]);
     out.growthSorted = L.slice(0,20).every((x,i,a)=>i===0 || a[i-1].comp.growth >= x.comp.growth);
-    out.cardsFollow = q("#cards .card").dataset.rank == String(L[0].rank);
+    out.cardsFollow = q("#top3 .cand").dataset.rank == String(L[0].rank);
     out.tableFollows = q("#tbl tbody tr").dataset.rank == String(L[0].rank);
     out.pinsRepainted = [...document.querySelectorAll("#svgmap circle.pin.t1")].length;
     // All zero
@@ -68,7 +70,6 @@ window.addEventListener("load", () => {
     out.detailHasDecision = q("#dbody .dec button") !== null;
     out.detailData = (q("#dbody .d-sup")||{}).textContent;
     q('#dbody .dec button[data-v="pursue"]').click();
-    const ta = q("#dnote"); ta.value = "Distressed seller, good exit"; ta.dispatchEvent(new Event("input", {bubbles:true}));
     out.decStored = JSON.stringify(V.dec()[L[0].rank]);
     out.decListed = document.querySelectorAll("#dec-list button").length;
     out.markInTable = !!q("#tbl tbody tr .mark.pursue");
@@ -132,6 +133,8 @@ def main() -> int:
         ("a decision is saved, listed and marked in the table",
          '"pursue"' in (o.get("decStored") or "") and o.get("decListed") == 1 and o.get("markInTable")),
         ("Copy for Claude always shows its text", o.get("copyBoxShown") and "record_screening_decision" in (o.get("copyText") or "")),
+        ("the briefing states the file's size and what stands out",
+         str(o.get("rows")) in (o.get("brief") or "") and (o.get("briefStand") or 0) > 0, o.get("brief")),
     ]
     ok = 0
     for name, cond, *detail in checks:
