@@ -83,9 +83,6 @@ header{display:grid;gap:12px}
 .btn.on,.btn[aria-pressed="true"]{background:var(--ink);color:var(--bg);border-color:transparent}
 .btn:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible,[tabindex]:focus-visible,summary:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
 .mark{display:inline-block;margin-left:8px;font-size:12px;font-weight:600;border-radius:999px;padding:2px 8px;background:var(--bg);border:1px solid var(--line);vertical-align:middle}
-.mark.pursue{background:var(--good-bg);color:var(--good);border-color:transparent}
-.mark.maybe{background:var(--warn-bg);color:var(--warn);border-color:transparent}
-.mark.pass{background:var(--crit-bg);color:var(--crit);border-color:transparent}
 
 /* notes */
 .note{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:16px 18px;display:grid;gap:8px}
@@ -172,12 +169,6 @@ td .sub{display:block;color:var(--muted);font-size:13.5px;margin-top:2px}
 .fitcell{display:flex;flex-direction:column;align-items:flex-start;gap:4px}
 .fitcell .sc{font-size:13px;color:var(--muted)}
 
-/* decisions */
-.dec-list{display:grid;gap:8px}
-.dec-list button{text-align:left;display:grid;grid-template-columns:auto 1fr;gap:4px 12px;align-items:center;background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:10px 14px;cursor:pointer;color:inherit}
-.dec-list .who{font-weight:600}
-.dec-list .mark{margin:0}
-
 /* how we know */
 .know{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:14px}
 .know div{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:14px 16px;display:grid;gap:6px;font-size:14.5px;min-width:0}
@@ -226,7 +217,6 @@ dl.kv dd{margin:0;font-weight:500}
 .hist{display:grid;gap:8px;font-size:15px}
 .hist .d{display:grid;grid-template-columns:auto 1fr;gap:10px;align-items:baseline}
 .hist .d b{font-weight:600} .hist .d i{font-style:normal;color:var(--muted)}
-.dec{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
 .led{display:grid;grid-template-columns:1fr auto;gap:6px 14px;font-size:14.5px}
 .led .k{color:var(--muted)} .led .v{font-weight:500;text-align:right} .led .none{color:var(--muted);text-align:right;font-size:13.5px}
 .led .tot{font-weight:600;color:var(--ink)} .led .rule{grid-column:1/-1;border-top:1px solid var(--line)}
@@ -347,20 +337,6 @@ footer{color:var(--muted);font-size:13.5px}
 </section>
 
 <section>
-  <div class="eyebrow">Your decisions</div>
-  <h2 style="margin-bottom:6px">Pursue, maybe or pass</h2>
-  <p class="muted" style="margin-bottom:14px" id="dec-intro">Mark a listing inside its detail view. Marks are kept in this browser only, until you copy them for Claude to save for the team.</p>
-  <p class="muted small" id="dec-empty">Nothing marked yet.</p>
-  <div class="dec-list" id="dec-list"></div>
-  <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:12px">
-    <button class="btn primary" id="dec-copy" type="button">Copy for Claude</button>
-    <button class="btn" id="dec-clear" type="button">Clear my marks</button>
-    <span class="muted small" id="dec-sum"></span>
-  </div>
-  <textarea class="box" id="dec-box" hidden aria-label="Decisions, to copy for Claude" style="margin-top:10px"></textarea>
-</section>
-
-<section>
   <h2 style="margin-bottom:14px">How we know each number</h2>
   <div class="know" id="know"></div>
   <div style="display:grid;gap:12px;margin-top:14px">
@@ -391,10 +367,6 @@ const L = DATA.listings, H = DATA.holdings || [];
 const N = DATA.screened, A = DATA.assumptions || {};
 const V = DATA.verified || {};
 const IMGS = (typeof IMG!=="undefined") ? IMG : {};
-const DKEY = "vaulter-decisions:" + DATA.source;
-let DEC = {};
-try { DEC = JSON.parse(localStorage.getItem(DKEY) || "{}") || {}; } catch(e) { DEC = {}; }
-const DLAB = {pursue:"Pursue", maybe:"Maybe", pass:"Pass"};
 
 /* ---- words ---------------------------------------------------------- */
 const tk = t => { const c = String(t||"").trim().charAt(0); return /[1-4]/.test(c) ? c : "U"; };
@@ -452,7 +424,7 @@ function rescore(w){
   }
   L.sort((a,b)=>b.score-a.score || a.rank-b.rank);
   L.forEach((x,i)=>x.now=i+1);
-  renderTop3(); render(); repaintPins(); tuneSay(); renderDecisions();
+  renderTop3(); render(); repaintPins(); tuneSay();
 }
 
 /* ---- a one-line plain summary, from measured facts only --------------- */
@@ -596,7 +568,7 @@ const plural = (n, one, many) => `${n} ${n===1?one:(many||one+"s")}`;
 /* ---- the three, and the same top block inside every detail view ------------- */
 function cardTop(x, full){
   return `<span class="cardhead"><span class="rankno num">${x.now}</span>${fitPill(x.tier, full ? x.score : null)}</span>
-      <span><span class="lead" style="display:block">${esc(x.addr)}${markTag(x)}</span>
+      <span><span class="lead" style="display:block">${esc(x.addr)}</span>
         <span class="where">${esc([x.city, x.county?x.county+" County":"", kind(x)].filter(Boolean).join(" · "))}</span></span>
       ${leadLine(x)?`<p>${esc(leadLine(x))}</p>`:""}
       <span class="facts${full?" four":""}">
@@ -662,7 +634,6 @@ const fT = document.getElementById("fTier"), fY = document.getElementById("fType
 [...new Set(L.map(x=>x.type))].filter(Boolean).sort().forEach(t=>fY.add(new Option(t,t)));
 [...new Set(L.map(x=>x.county))].filter(Boolean).sort().forEach(t=>fC.add(new Option(t,t)));
 let sortK = "rank", sortAsc = true;
-function markTag(x){ const d = DEC[x.rank]; return d && d.v ? `<span class="mark ${d.v}">${DLAB[d.v]}</span>` : ""; }
 function render(){
   document.getElementById("nlist").textContent = L.length;
   const q = fX.value.trim().toLowerCase();
@@ -679,7 +650,7 @@ function render(){
   cnt.textContent = rows.length===L.length ? "" : `${rows.length} of ${L.length} shown`;
   tb.innerHTML = rows.map(x=>`<tr data-rank="${x.rank}" tabindex="0">
       <td class="n num">${x.now}${x.now!==x.rank?`<span class="moved">was ${x.rank}</span>`:""}</td>
-      <td><span class="lead">${esc(x.addr)}</span>${markTag(x)}${x.missing?`<span class="mark" style="background:var(--warn-bg);color:var(--warn);border-color:transparent">no ${esc(x.missing)}</span>`:""}<span class="sub">${esc([x.city, kind(x)].filter(Boolean).join(" · "))}</span></td>
+      <td><span class="lead">${esc(x.addr)}</span>${x.missing?`<span class="mark" style="background:var(--warn-bg);color:var(--warn);border-color:transparent">no ${esc(x.missing)}</span>`:""}<span class="sub">${esc([x.city, kind(x)].filter(Boolean).join(" · "))}</span></td>
       <td class="n num">${acres(x.acres)}</td><td class="n num">${x.price==null?"<span class='muted'>none</span>":money(x.price)}</td>
       <td class="n num">${usd(x.askPerAcre)}</td><td class="n num">${days(x.dom)}</td>
       <td><span class="fitcell">${fitPill(x.tier, x.score)}</span></td></tr>`).join("");
@@ -775,12 +746,6 @@ function cityNotes(x){
   return `<details class="fold"><summary>City notes <span class="muted small" style="font-weight:400">· ${esc(x.city)}${when?` · checked ${when}`:""}</span></summary>
     <div class="inner"><ul class="worth" style="margin:0">${pts.map(t=>`<li>${esc(t)}</li>`).join("")}</ul></div></details>`;
 }
-function decisionHTML(x){
-  const d = DEC[x.rank] || {};
-  return `<div class="dec" data-dec="${x.rank}">
-      ${Object.keys(DLAB).map(k=>`<button type="button" class="btn${d.v===k?" on":""}" data-v="${k}" aria-pressed="${d.v===k}">${DLAB[k]}</button>`).join("")}
-    </div>`;
-}
 function detailHTML(x){
   const im = IMGS[String(x.rank)];
   const sellers = (x.distress && x.distress!=="none evident" ? x.distress.split(/;\s*/) : []).filter(t=>t && !/^\d+d on market$/.test(t.trim()));
@@ -798,8 +763,7 @@ function detailHTML(x){
     <div class="block"><div class="eyebrow">Similar to our deals</div>${histHTML(x)}</div>
     ${x.jurisdiction?cityNotes(x):""}
     <details class="fold"><summary>How it scored <span class="num muted">· ${x.score==null?"not ranked":Math.round(x.score)+" of 100"}</span>${x.dist!=null?`<span class="muted small" style="font-weight:400;margin-left:auto">${x.dist.toFixed(1)} mi to our nearest land${x.nearest?" ("+esc(x.nearest)+")":""}</span>`:""}</summary><div class="inner">${bars(x)}</div></details>
-    ${modelHTML(x)}
-    <div class="block"><div class="eyebrow">Your decision</div>${decisionHTML(x)}</div>`;
+    ${modelHTML(x)}`;
 }
 function openDetail(rank, from){
   const x = BYRANK[rank]; if(!x) return;
@@ -826,43 +790,6 @@ document.addEventListener("keydown", e=>{
   const n = e.target.closest("tr[data-rank]");
   if(n){ e.preventDefault(); openDetail(+n.dataset.rank, n); }
 });
-
-/* ---- decisions -------------------------------------------------------------- */
-function saveDec(){
-  try { localStorage.setItem(DKEY, JSON.stringify(DEC)); } catch(e) {}
-  renderDecisions(); render(); renderTop3();
-}
-dbody.addEventListener("click", e=>{
-  const b = e.target.closest(".dec button"); if(!b) return;
-  const r = +b.closest(".dec").dataset.dec, x = BYRANK[r], cur = DEC[r] || {};
-  DEC[r] = {v: cur.v===b.dataset.v ? "" : b.dataset.v, addr: x.addr, city: x.city||"", when: new Date().toISOString().slice(0,10)};
-  if(!DEC[r].v) delete DEC[r];
-  saveDec();
-  dbody.querySelectorAll(".dec button").forEach(o=>{ const on = !!(DEC[r] && DEC[r].v===o.dataset.v);
-    o.classList.toggle("on", on); o.setAttribute("aria-pressed", on); });
-});
-function renderDecisions(){
-  const marked = Object.entries(DEC).filter(([,d])=>d.v).sort((a,b)=>(BYRANK[a[0]]?.now||0)-(BYRANK[b[0]]?.now||0));
-  document.getElementById("dec-empty").hidden = marked.length>0;
-  document.getElementById("dec-list").innerHTML = marked.map(([r,d])=>`
-    <button type="button" data-rank="${r}"><span class="mark ${d.v}">${DLAB[d.v]}</span>
-      <span class="who">${esc(d.addr)}${d.city?", "+esc(d.city):""}</span></button>`).join("");
-  const n = k => marked.filter(([,d])=>d.v===k).length;
-  document.getElementById("dec-sum").textContent = marked.length ? `${n("pursue")} pursue · ${n("maybe")} maybe · ${n("pass")} pass` : "";
-}
-const dcopy = document.getElementById("dec-copy"); dcopy.dataset.label = dcopy.textContent;
-dcopy.onclick = ()=>{
-  const marked = Object.entries(DEC).filter(([,d])=>d.v);
-  if(!marked.length){ document.getElementById("dec-sum").textContent = "Nothing marked yet."; return; }
-  copyOut(`Please save these screening decisions with record_screening_decision for the file "${DATA.source}" (decided by: ____):\n`
-    + marked.map(([r,d])=>`- ${DLAB[d.v]}: ${d.addr}${d.city?", "+d.city:""} (ranked ${r} by the screen)`).join("\n"), "dec-box", dcopy);
-};
-const dclear = document.getElementById("dec-clear");
-dclear.onclick = ()=>{
-  if(dclear.dataset.armed!=="1"){ dclear.dataset.armed="1"; dclear.textContent = "Click again to clear every mark";
-    setTimeout(()=>{ dclear.dataset.armed=""; dclear.textContent="Clear my marks"; }, 4000); return; }
-  DEC = {}; dclear.dataset.armed=""; dclear.textContent="Clear my marks"; saveDec();
-};
 
 /* ---- how we know ------------------------------------------------------------ */
 const GS = DATA.growthStatus || {};
@@ -980,8 +907,8 @@ document.getElementById("foot").innerHTML =
 
 /* ---- go ----------------------------------------------------------------------- */
 L.forEach((x,i)=>x.now=i+1);
-renderTop3(); render(); tuneSay(); renderDecisions();
-window.__vaulterReport = {L, W0, rescore, openDetail, closeDetail, tk, dec: () => DEC};
+renderTop3(); render(); tuneSay();
+window.__vaulterReport = {L, W0, rescore, openDetail, closeDetail, tk};
 })();
 </script>
 </body>

@@ -1433,10 +1433,6 @@ def main() -> int:
         check("a first screen is named after its file", s1 == "CostarExport")
         check("the same data under a browser-copy name writes over that screen", s2 == "CostarExport", s2)
         check("changed data under a new name keeps its own name", s3 == "CostarExport_14", s3)
-        check("the decisions file follows the name the screen used",
-              fs.stem_for_source_name("CostarExport (3).xlsx") == "CostarExport"
-              and fs.stem_for_source_name("CostarExport_14.xlsx") == "CostarExport_14"
-              and fs.stem_for_source_name("never-seen.xlsx") == "never-seen")
         (Path(_tmpdir) / fs._SCREENS_FILE).write_text("[1, 2, 3]", encoding="utf-8")
         check("a wrong-shaped list falls back to the file's own name, never an error",
               fs.output_stem(Path("Other.xlsx"), a) == "Other")

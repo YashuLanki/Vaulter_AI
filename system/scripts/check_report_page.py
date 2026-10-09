@@ -8,7 +8,7 @@ headless Microsoft Edge, and drives it: the page draws with no script error,
 re-scoring at the screen's own weights reproduces the screener's scores and
 tiers, moving a weight re-ranks the cards, table and map together, all-zero
 weights say so instead of ranking nothing, Reset restores the original order,
-a decision mark is saved and shown, and "Copy for Claude" always shows its text.
+the detail view opens, and "Copy these shares" always shows its text.
 
 Written because the report's interactive parts are JavaScript, which no other
 check here runs: a load-order mistake that stopped the whole page, and a copy
@@ -64,20 +64,15 @@ window.addEventListener("load", () => {
     q("#tune-reset").click();
     out.sayAfterReset = q("#tune-sum").textContent;
     out.firstRowsAfterReset = [...document.querySelectorAll("#tbl tbody tr")].slice(0,3).map(r=>r.children[0].textContent+" "+r.children[1].textContent.slice(0,30));
-    // Detail + decision
+    // Detail view
     openDetail(L[0].rank);
     out.detailHasGrowth = !!q("#dbody .gsig");
-    out.detailHasDecision = q("#dbody .dec button") !== null;
     out.detailData = (q("#dbody .d-sup")||{}).textContent;
-    q('#dbody .dec button[data-v="pursue"]').click();
-    out.decStored = JSON.stringify(V.dec()[L[0].rank]);
-    out.decListed = document.querySelectorAll("#dec-list button").length;
-    out.markInTable = !!q("#tbl tbody tr .mark.pursue");
     closeDetail();
     // copy text (clipboard is unavailable headless; the fallback box must show)
-    q("#dec-copy").click();
-    out.copyBoxShown = !q("#dec-box").hidden || q("#dec-copy").textContent==="Copied";
-    out.copyText = q("#dec-box").value.slice(0,200);
+    q("#tune-copy").click();
+    out.copyBoxShown = !q("#tune-box").hidden;
+    out.copyText = q("#tune-box").value.slice(0,200);
     out.growthGrid = (q("#dbody .gsig")||{textContent:""}).textContent.slice(0,0);
   } catch (e) { out.exception = String(e) + " @ " + (e.stack||"").split("\n").slice(0,3).join(" | "); }
   document.title = "TESTOUT" + JSON.stringify(out);
@@ -128,11 +123,8 @@ def main() -> int:
         ("  ...and the cards and table follow the new order", o.get("cardsFollow") and o.get("tableFollows")),
         ("all-zero weights say so rather than ranking nothing", "zero" in (o.get("sayAllZero") or "")),
         ("Reset restores the screen's own order", o.get("firstRowsAfterReset") == o.get("firstRowsBefore")),
-        ("the detail view shows growth signals and the decision buttons",
-         o.get("detailHasGrowth") and o.get("detailHasDecision")),
-        ("a decision is saved, listed and marked in the table",
-         '"pursue"' in (o.get("decStored") or "") and o.get("decListed") == 1 and o.get("markInTable")),
-        ("Copy for Claude always shows its text", o.get("copyBoxShown") and "record_screening_decision" in (o.get("copyText") or "")),
+        ("the detail view shows growth signals", o.get("detailHasGrowth")),
+        ("Copy these shares always shows its text", o.get("copyBoxShown") and "top ten" in (o.get("copyText") or "")),
         ("the briefing states the file's size and what stands out",
          str(o.get("rows")) in (o.get("brief") or "") and (o.get("briefStand") or 0) > 0, o.get("brief")),
     ]

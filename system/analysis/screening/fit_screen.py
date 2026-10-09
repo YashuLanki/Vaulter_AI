@@ -1869,8 +1869,7 @@ def _why(row) -> str:
 # a fingerprint of the listing data, kept in a small hidden list beside the
 # outputs. Same data under a new name -> the earlier screen's files are written
 # over. Different data -> its own name, because a re-pulled export that changed
-# is a new screen. The list also records every filename seen for a stem, so the
-# decisions file can be found from whichever name the person typed.
+# is a new screen. The list also records every filename seen for a stem.
 _SCREENS_FILE = ".screens.json"
 
 
@@ -1902,11 +1901,11 @@ def _load_screens() -> dict:
 
 
 def output_stem(source_path: Path, df: pd.DataFrame, record: bool = True) -> str:
-    """The name shared by this screen's workbook, report and decisions file.
+    """The name shared by this screen's workbook and report.
 
     The stem of an earlier screen whose data fingerprint matches, else this
-    file's own stem. With record=True the list is updated so later runs and
-    the decisions file agree. Never raises: on any failure it is the file's
+    file's own stem. With record=True the list is updated so later runs
+    agree. Never raises: on any failure it is the file's
     own stem, which is what it always was.
     """
     import json
@@ -1931,18 +1930,6 @@ def output_stem(source_path: Path, df: pd.DataFrame, record: bool = True) -> str
     except Exception as e:  # noqa: BLE001 -- naming must never stop a screen
         log.warning(f"[SCREEN] output name fell back to the file's own: {e}")
         return own
-
-
-def stem_for_source_name(source_file: str) -> str:
-    """The output stem an export was screened under, from the name a person
-    typed -- so the decisions file matches the workbook even when the file was
-    a renamed re-download. Unknown name: its own stem."""
-    name = Path(source_file).name
-    own = Path(source_file).stem or "unknown_export"
-    for stem, v in _load_screens().items():
-        if isinstance(v, dict) and name in (v.get("sources") or []):
-            return stem
-    return own
 
 
 def screen(source_path: Path, moic: float = None, write_workbook: bool = True) -> dict:
