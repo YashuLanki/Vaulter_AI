@@ -127,15 +127,15 @@ _CITED_BASELINE = 51
 # hold the file -- checked against the drive and replaced with the real one,
 # since a wrong path sends a reader somewhere that does not exist.
 #
-# The 12 that remain are three distinct files, all deliberately left: an
-# executed June 2026 letter of intent for antelope-ellis that is not on the
-# drive under any similar name (the only "fully executed" files for that
-# property are leases from 2011 and 2021), and two WCR 34 settlement statements
-# whose folders hold dozens of closing documents but nothing matching. Several
-# generically-named settlement statements exist and choosing one would be a
-# guess. Fix them by finding the real document, never by picking the nearest
-# name.
-_UNRESOLVED_BASELINE = 12
+# Lowered 12 -> 1 on 2026-10-15. The firm's rename sweep had reached the files
+# behind 20 of 21 stale mentions (a recorded plat, its affidavit of correction
+# and an executed June 2026 letter of intent, each now carrying the property
+# name as a prefix and the date in ISO form); each new name matched exactly one
+# file and was corrected in place, backups under data/backups/. The one that
+# remains is a Phase I report cited by date where two plausible files exist (a
+# filed copy and an archived "received" copy); that is a person's call, never
+# the nearest name.
+_UNRESOLVED_BASELINE = 1
 
 # A citation can fail for two completely different reasons, and until
 # 2026-09-21 this check could not tell them apart -- so it reported both as

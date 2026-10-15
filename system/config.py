@@ -956,6 +956,16 @@ GEO_CACHE_DIR.mkdir(parents=True, exist_ok=True)
 PROPERTY_SUMMARIES_DIR = SHARED_DIR / "property_summaries"
 PROPERTY_SUMMARIES_DIR.mkdir(parents=True, exist_ok=True)
 
+# Mini term sheets drafted from a property's DD report (term_sheet/sheet.py,
+# 2026-10-08). Top level, like property_summaries: the team reviews and edits
+# these by hand afterwards, so they are not disposable run output. Created on
+# the first sheet someone asks for, never here -- see the note after the
+# output folders above for why a folder made at import is a mistake. `_reference/` holds the
+# reviewed example whose layout and wording every new sheet follows; it holds
+# real firm data, which is why it lives here and not in the repository.
+MINI_TERM_SHEETS_DIR = SHARED_DIR / "mini_term_sheets"
+MINI_TERM_SHEETS_REFERENCE_DIR = MINI_TERM_SHEETS_DIR / "_reference"
+
 # The firm's own portfolio data: the Smartsheet Project Master export, the
 # hand-verified coordinates table, and the property-details fallback list.
 #

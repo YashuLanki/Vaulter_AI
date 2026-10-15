@@ -1466,6 +1466,405 @@ def main() -> int:
     except Exception as e:
         check("slashed-name checks ran", False, f"{type(e).__name__}: {e}")
 
+    # ── §11 Mini term sheets (term_sheet/sheet.py, 2026-10-08) ─────────────────────
+    # Synthetic only: a made-up template and made-up names, so nothing here
+    # depends on the team folder or any real property.
+    print("\n§11 Mini term sheets")
+    try:
+        import tempfile
+        import openpyxl
+        from term_sheet import sheet as _ts
+        import config as _cfg
+
+        check("a filed date is read from YYYYMMDD and YYMMDD names",
+              _ts._filed_date("Report_Final_20261002.docx") == "2026-10-02"
+              and _ts._filed_date("260922 Commit X.pdf") == "2026-09-22")
+        check("a name with no date stays undated", _ts._filed_date("SS FINAL Signed.pdf") == "")
+
+        _kinds = dict(_ts._SUPPORTING)
+        check("'SS' is a settlement statement only as a whole word",
+              _kinds["Settlement statement"].search("ss final signed escrow.pdf") is not None
+              and _kinds["Settlement statement"].search("assignment of agreement.pdf") is None)
+        check("the firm's short form 'Commit' is a title commitment",
+              _kinds["Title commitment"].search("190922 commit x12.pdf") is not None)
+        check("a deed of trust is not a deed",
+              _ts._EXCLUDE["Deed"].search("deed of trust with recording.pdf") is not None)
+
+        check("jargon and fussy punctuation are flagged",
+              bool(_ts.wording_problems("x", "Per the PSA (2007); see CAD.")))
+        check("plain wording and a company name with an ampersand pass",
+              _ts.wording_problems("x", "Mesa & Sons-Test 9, LP bought the land in 2007 for a nominal sum.") == [])
+        # The no-repeats rule was removed at the team's request (2026-10-08): it forced
+        # the documents' own legal terms out of the sheet. Repeats must now pass.
+        check("a word repeated in one cell is no longer flagged",
+              _ts.wording_problems("x", "The recorded deed, the recorded plat and the recorded easement.") == [])
+        check("a company's legal designation may repeat in one cell",
+              _ts.wording_problems("x", "A Delaware limited liability company sells to a Texas "
+                                        "limited liability company and an Arizona limited liability "
+                                        "company.") == [])
+        check("files marked unused, superseded or a term sheet are set aside",
+              all(_ts._SET_ASIDE.search(n) for n in
+                  ["psa/not used/190902 2nd amend.pdf", "old version/x.pdf",
+                   "mini term sheets/critical dates.docx"])
+              and not _ts._SET_ASIDE.search("psa/1. original/190414 psa fe.pdf"))
+        check("public-body resolutions are not partnership resolutions",
+              bool(_ts._EXCLUDE["Partnership resolution or consent"].search(
+                  "tif / resolution tax increment district.pdf"))
+              and not _ts._EXCLUDE["Partnership resolution or consent"].search(
+                  "2019 refi / 190922 reso loan refi fe.pdf"))
+        check("a word boundary survived in every pattern (no stray control characters)",
+              chr(8) not in Path(_ts.__file__).read_text(encoding="utf-8"))
+        import re
+        _ex = _ts.rules_excerpt(_ts.DEFAULT_RULES, ("WHAT THE SHEET IS", "THE OTHER TABS", "MISSING AND DISAGREEING"))
+        check("the tab rules excerpt carries the punctuation rule and the other-tabs rules",
+              "No semicolons" in _ex and "THE OTHER TABS" in _ex and len(_ex) < len(_ts.DEFAULT_RULES))
+        _srv = (Path(_ts.__file__).parent.parent / "mcp_server.py").read_text(encoding="utf-8")
+        _asked = re.search(r'rules_excerpt\(rules\["text"\], \((.*?)\)\)', _srv)
+        check("every rules section the tab tool asks for exists in the rules",
+              bool(_asked) and all(h.strip(' "') in _ts.DEFAULT_RULES for h in _asked.group(1).split(",") if h.strip()))
+        _txt = ("The site has about 900 feet of frontage on the state highway, and driveway access "
+                "needs a permit.\n\nThe county fair is held each spring with a parade and music.")
+        _lr = [{"label": "Legal Access Secured?", "section": "Site & Ownership"},
+               {"label": "FIRPTA", "section": "Closing"}]
+        _g = _ts._gated_row_evidence(_txt, _lr, set())
+        check("the Legal row search gives a row a passage only when it names the row's subject",
+              len(_g) == 1 and "frontage" in _g[0] and "Legal Access" in _g[0])
+        # Paragraphs over 200 characters, so the passage splitter keeps them apart.
+        _pad = " The surrounding corridor continues to attract retail and service users of every size."
+        _ptxt = ("Retail capital markets: cap rates moved 25 basis points and annual returns softened "
+                 "across the region over the last twelve months." + _pad * 2 + "\n\n"
+                 "The partnership agreement provides a 10% cumulative priority return on unreturned "
+                 "capital contributions, paid before any other distribution." + _pad * 2 + "\n\n"
+                 "The Planning and Zoning Commission meets monthly; its members are listed below "
+                 "with their occupations and terms." + _pad * 2 + "\n\n"
+                 "The listing agreement sets a commission rate of 2% payable at closing to the "
+                 "listing broker." + _pad * 2)
+        _pr = [{"label": "Pref Rate", "section": "Version 1"},
+               {"label": "Commision Rate (RMC/Landwise 2%?)", "section": "Version 1"},
+               {"label": "IRR", "section": "Version 1"}]
+        _pg = _ts._gated_row_evidence(_ptxt, _pr, set())
+        check("a Proforma row takes only a passage carrying its own phrase, not a look-alike",
+              len(_pg) == 2 and any("priority return" in g and "Pref Rate" in g for g in _pg)
+              and any("commission rate" in g and "Commision" in g for g in _pg)
+              and not any("Zoning Commission" in g for g in _pg))
+        # The Legal fill reads the deal the report's YEAR names, never a folder
+        # branch, and leaves the firm's own sales out.
+        import datetime as _dtm
+        _t07 = _dtm.datetime(2007, 6, 1).timestamp()
+        _t24 = _dtm.datetime(2024, 8, 1).timestamp()
+        _t26 = _dtm.datetime(2026, 9, 1).timestamp()
+        _nm = [("Legal/Acquisition/Purchase Agreement/PSA Fully Signed.pdf", _t07),
+               ("Legal/Acquisition/Purchase Agreement/PSA Buyer Signed.pdf", _t07),
+               ("Legal/Acquisition/Purchase Agreement/070604 Addendum A to PSA.pdf", _t26),
+               ("Legal/Acquisition/Closing/Spec Warranty Deed SIGNED.pdf", _t07),
+               ("Legal/Acquisition/Closing/Survey Receipt.pdf", _t07),
+               ("Legal/Acquisition/Corres/a note.msg", _t07),
+               ("Legal/Disposition/2024 Buyer/240820 PSA Buyer FULLY EXECUTED.pdf", _t24),
+               ("Legal/Disposition/2024 Buyer/240903 Final SS Buyer.pdf", _t24)]
+        _in = [r for r, _ in _ts.deal_files(_nm, 2007)]
+        check("the deal's files are the ones dated within a year of the report's year",
+              "Legal/Acquisition/Closing/Survey Receipt.pdf" in _in
+              and not any("2024 Buyer" in r for r in _in))
+        check("a file whose NAME carries the year stays in its year when the drive date moved",
+              "Legal/Acquisition/Purchase Agreement/070604 Addendum A to PSA.pdf" in _in)
+        check("the firm's own sales are left out whatever year they carry",
+              not _ts.deal_files(_nm, 2024))
+        import config as _cfgc
+        _corp = Path(_cfgc.CORPUS_DIR) / "a made-up property"   # a path under the library; never opened
+        check("the years offered when asking hold only the firm's purchases",
+              [y for y, _ in _ts.deal_years(_corp, _nm)] == [2007])
+        _ld = _ts.legal_documents(_corp, _nm, 2007)
+        check("one copy of the agreement itself is read, then its addendum, the agreement first",
+              [d["name"] for d in _ld if d["kind"] == "Purchase agreement"]
+              == ["PSA Fully Signed.pdf", "070604 Addendum A to PSA.pdf"])
+        check("a sale's papers are never among the deal's documents",
+              not any("2024" in d["name"] for d in _ld))
+        # The Proforma fill: the partnership's own agreement before the general
+        # partner's, executed amendments only, the newest tax record and note,
+        # and a cost share from a sale is still read.
+        _pn = [("Legal/Acquisition/1 Organizational Docs/Operating Agreement - EXECUTED - GP LLC.pdf", _t07),
+               ("Legal/Entity/Partnership Agreement/Example Holdings LLLP Agreement - EXECUTED.pdf", _t07),
+               ("Legal/Entity/Partnership Agreement/171222 First Amendment PA Conversion SIGNED.pdf", _t24),
+               ("Legal/Entity/Partnership Agreement/171215 First Amendment PA Conversion draft.pdf", _t24),
+               ("Legal/Loan/2026 Refi/260922 Tax Certificate.pdf", _t26),
+               ("Legal/Acquisition/Closing Documents/Tax Certs 6-7-07.pdf", _t07),
+               ("Legal/Loan/2026 Refi/261002 Note EXECUTED.pdf", _t26),
+               ("Legal/Loan/2026 Refi/261007 DOT REC.pdf", _t26),
+               ("Legal/Loan/2026 Refi/261007 Rel DOT Old Loan REC.pdf", _t26),
+               ("Legal/Disposition/2025 ROW/250306 Development Agreement RECORDED.pdf", _t26)]
+        _pd = _ts.proforma_documents(_corp, _pn)
+        _pk = [(d["kind"], d["name"]) for d in _pd]
+        check("the Proforma fill reads the partnership's own agreement, not the general partner's",
+              [n for k, n in _pk if k == "Partnership / operating agreement"][:1]
+              == ["Example Holdings LLLP Agreement - EXECUTED.pdf"]
+              and not any("GP LLC" in n for k, n in _pk))
+        check("only the signed amendment is read, not its earlier draft",
+              any("SIGNED" in n for k, n in _pk) and not any("draft" in n for k, n in _pk))
+        check("the newest tax record and the note are read, never a release",
+              ("County tax records", "260922 Tax Certificate.pdf") in _pk
+              and ("Loan documents", "261002 Note EXECUTED.pdf") in _pk
+              and not any("Rel DOT" in n for k, n in _pk))
+        check("a recorded cost-share agreement filed under a sale is still read",
+              any("Development Agreement RECORDED" in n for k, n in _pk))
+        check("a deal is named from where it is filed",
+              _ts._deal("01. Legal/Loan/!LOANS/2026 Refi/Title/Commit/a.pdf") == "Loan / 2026 Refi"
+              and _ts._deal("01. Legal/Disposition/!OFFERS/2019 Sale/PSA/a.pdf") == "Disposition / 2019 Sale")
+
+        with tempfile.TemporaryDirectory() as _tmp:
+            _tmp = Path(_tmp)
+            prop = _tmp / "Mesa Test"
+            for rel in ["01. Legal/Acquisition/Closing/PSA Fully Signed 1-2-03.pdf",
+                        "01. Legal/Acquisition/Closing/Assignment of Agreement 3-4-03.pdf",
+                        "01. Legal/Disposition/!OFFERS/2019 Sale/PSA/190213 PSA Sale.pdf",
+                        "01. Legal/Disposition/!RESALES/2019 Sale/PSA/190213 PSA Sale.pdf",
+                        "04. Analysis/Mesa - DD Report - V1 - 20260426.docx",
+                        "06. Market/Mesa Due Diligence Report_Final_20261002.docx",
+                        "01. Legal/Disposition/!OFFERS/2018 Buyer/Seller Materials/Mesa DD Report.pdf"]:
+                (prop / rel).parent.mkdir(parents=True, exist_ok=True)
+                (prop / rel).write_bytes(b"x")
+            _saved_rel = _ts._rel
+            _ts._rel = lambda p: Path(p).relative_to(_tmp).as_posix()
+            try:
+                names, done = _ts.walk_names(prop)
+                check("the folder walk finishes on a small folder", done and len(names) == 7)
+                reports, others = _ts.find_dd_reports(prop, names)
+                check("DD reports come newest first",
+                      [r["filed"] for r in reports] == ["2026-10-02", "2026-04-26"])
+                check("a report in a buyer's / seller's package is left out and counted",
+                      others == 1)
+                sup = _ts.find_supporting_documents(prop, names)
+                psa = sup.get("Purchase agreement", [])
+                check("the acquisition agreement is always listed first",
+                      bool(psa) and psa[0]["name"].startswith("PSA Fully Signed"))
+                check("an assignment is not offered as the agreement",
+                      not any("Assignment" in r["name"] for r in psa))
+                check("the same file kept in two folders is listed once",
+                      sum(r["name"] == "190213 PSA Sale.pdf" for r in psa) == 1)
+                look = _ts.documents_for(prop, names, _ts.FIELD_SOURCES["Seller Contact"])
+                check("a missing Seller Contact is looked up in purchase and settlement documents only",
+                      set(look) <= {"Purchase agreement", "Settlement statement"}
+                      and look.get("Purchase agreement", [{}])[0].get("name", "").startswith("PSA Fully Signed"))
+            finally:
+                _ts._rel = _saved_rel
+
+            # A made-up template shaped like the firm's.
+            ref = _tmp / "ref"; ref.mkdir()
+            wb = openpyxl.Workbook(); ws = wb.active; ws.title = "Overview"
+            ws["A4"] = "MINI TERM SHEET – EXAMPLE"
+            for i, lab in enumerate(_ts.OVERVIEW_FIELDS):
+                ws.cell(6 + i, 1, lab); ws.cell(6 + i, 2, f"example answer {i}")
+            from openpyxl.styles import Font as _Font
+            lg = wb.create_sheet("Legal"); lg.column_dimensions["A"].width = 54; lg.column_dimensions["B"].width = 90
+            lg["A1"] = "II. Purchase Agreements"; lg["A1"].font = _Font(bold=True)
+            lg["A2"] = "LOI Drafted"; lg["B2"] = "Executed"
+            lg["A3"] = "Escrow Deposit 1"; lg["B3"] = "x"; lg["A4"] = "    Due Date"; lg["B4"] = "x"
+            lg["A6"] = "XIV. Operating Agreement"; lg["A6"].font = _Font(bold=True)
+            lg["A7"] = "Redlines"; lg["B7"] = "x"; lg["A8"] = "Redlines"; lg["B8"] = "x"
+            pf = wb.create_sheet("Proforma"); pf.column_dimensions["A"].width = 49; pf.column_dimensions["B"].width = 95
+            pf["A1"] = "V. Proforma"; pf["A1"].font = _Font(bold=True)
+            pf["A2"] = "VERSION 1:"; pf["A2"].font = _Font(bold=True)
+            pf["A3"] = "Date Drafted"; pf["B3"] = "x"; pf["A4"] = "    IRR"; pf["B4"] = "x"
+            pf["A6"] = "VERSION 2:"; pf["A6"].font = _Font(bold=True); pf["B6"] = "________________"
+            pf["A7"] = "Date Drafted"; pf["B7"] = "________________"; pf["A8"] = "    IRR"; pf["B8"] = "________________"
+            dd = wb.create_sheet("Due Diligence")
+            dd.column_dimensions["A"].width = 59; dd.column_dimensions["B"].width = 64; dd.column_dimensions["C"].width = 42
+            dd["A1"] = "VI. Environmental"; dd["A1"].font = _Font(bold=True); dd.merge_cells("A1:C1")
+            dd["A2"] = "Phase I ESA Completed?"; dd["B2"] = "x"; dd["C2"] = "src"
+            dd["A3"] = "Phase II ESA Required?"; dd["B3"] = "x"; dd["C3"] = "src"
+            ob = wb.create_sheet("Onboarding"); ob.column_dimensions["A"].width = 50
+            ob["A1"] = "Finance"; ob["A1"].font = _Font(bold=True); ob["A2"] = "Open Bank Account"
+            wb.save(ref / "Example_Mini_Term_Sheet.xlsx")
+            _saved_dirs = (_cfg.MINI_TERM_SHEETS_DIR, _cfg.MINI_TERM_SHEETS_REFERENCE_DIR)
+            _cfg.MINI_TERM_SHEETS_DIR, _cfg.MINI_TERM_SHEETS_REFERENCE_DIR = _tmp / "out", ref
+            try:
+                # A report handed over through the DD Drop folder is read from there,
+                # and nothing outside that folder can be named through it.
+                drop = _ts.dd_drop_dir(); drop.mkdir(parents=True, exist_ok=True)
+                check("every Overview field except Proposed Use has documents that can fill it",
+                      set(_ts.FIELD_SOURCES) == set(_ts.OVERVIEW_FIELDS) - {"Property / Project Name",
+                                                                           "Proposed Use(s)"})
+                (drop / "Test DD Report.pdf").write_bytes(b"%PDF-1.4 not a real pdf")
+                check("a dropped report is listed and found by its name",
+                      _ts.drop_reports()[0]["path"] == "DD Drop/Test DD Report.pdf"
+                      and _ts.resolve_drop("Test DD Report.pdf") is not None
+                      and _ts.resolve_drop("DD Drop/Test DD Report.pdf") is not None)
+                check("nothing outside the DD Drop folder can be named through it",
+                      _ts.resolve_drop("DD Drop/../Example_Mini_Term_Sheet.xlsx") is None
+                      and _ts.resolve_drop("../../secret.pdf") is None)
+                # Every row of every tab is named from the template (2026-10-12).
+                _rows = _ts.template_rows(ref / "Example_Mini_Term_Sheet.xlsx")
+                _keys = [r["key"] for r in _rows]
+                check("every row is named once, and Overview names are the plain labels",
+                      len(_keys) == len(set(_keys)) and
+                      [k for k in _keys if ":" not in k][:14] == _ts.OVERVIEW_FIELDS)
+                check("a repeated label is told apart by its section, an indented one by its parent",
+                      "Legal: Operating Agreement > Redlines (2)" in _keys
+                      and "Legal: Purchase Agreements > Escrow Deposit 1 > Due Date" in _keys)
+                check("VERSION blocks are sections, and IRR keeps its capitals",
+                      "Proforma: Version 1 > IRR" in _keys and "Proforma: Version 2 > IRR" in _keys)
+                check("the to-do tab has no answer column and is marked so",
+                      all(r["kind"] == "todo" for r in _rows if r["tab"] == "Onboarding"))
+                check("the Due Diligence tab has a source column; the Legal tab does not",
+                      next(r["has_source"] for r in _rows if r["tab"] == "Due Diligence")
+                      and not next(r["has_source"] for r in _rows if r["tab"] == "Legal"))
+                check("the example's wording is offered as the style model",
+                      _ts.style_examples()[0] == ("Property / Project Name", "example answer 0"))
+                # The fixed template decides the layout even when a newer example
+                # sits beside it: the logo must never follow the example.
+                import shutil as _sh, time as _time, zipfile as _zf2
+                _sh.copy(ref / "Example_Mini_Term_Sheet.xlsx", ref / _ts.TEMPLATE_FILENAME)
+                with _zf2.ZipFile(ref / _ts.TEMPLATE_FILENAME, "a") as z:
+                    z.writestr("xl/media/marker.txt", "the fixed template")
+                _time.sleep(0.05)
+                (ref / "Newer_Example.xlsx").write_bytes((ref / "Example_Mini_Term_Sheet.xlsx").read_bytes())
+                check("the fixed template is never taken as the wording example",
+                      _ts.reference_workbook().name == "Newer_Example.xlsx")
+                pt, _ = _ts.save_overview("Template Test", {"County": "x"})
+                with _zf2.ZipFile(pt) as z:
+                    check("every sheet is copied from the fixed template, not the newest example",
+                          "xl/media/marker.txt" in z.namelist())
+                (ref / "Newer_Example.xlsx").unlink()
+                (ref / _ts.TEMPLATE_FILENAME).unlink()
+                p1, gaps = _ts.save_overview("Mesa Test", {"County": "Test County, Arizona", "Owner": ""})
+                # One sheet per property under one name, replaced by the next run
+                # (owner, 2026-10-13); p2 is a fresh save for the byte-for-byte check below.
+                pr1, _ = _ts.save_overview("Replace Test", {"County": "first"})
+                p2, _ = _ts.save_overview("Replace Test", {"County": "second"})
+                _vals = [c.value for row in openpyxl.load_workbook(p2, read_only=True)["Overview"].iter_rows(max_col=2) for c in row]
+                check("a second run replaces the property's one sheet under the same fixed name",
+                      pr1 == p2 and p2.name == f"{p2.parent.name} - Mini Term Sheet.xlsx"
+                      and "second" in _vals and "first" not in _vals
+                      and len(list(p2.parent.glob("*.xlsx"))) == 1)
+                check("each sheet goes in its property's own folder",
+                      p1.parent == _tmp / "out" / "Mesa Test" and p2.parent == _tmp / "out" / "Replace Test")
+                check("the template folder is never taken as a property's folder",
+                      _ts.property_sheet_folder("_reference").name != "_reference")
+                head = openpyxl.load_workbook(p1)["Overview"]["A4"].value
+                check("the heading names the property, with no dash",
+                      head == "MESA TEST MINI TERM SHEET", head)
+                p3, _ = _ts.save_overview("Mesa Test", {"County": "x"},
+                                          title="Mesa Test Tracts 1, 2, 3, 4, 5 and 6 of the Bulk Plat")
+                check("a tract list passed as the title does not become the heading",
+                      openpyxl.load_workbook(p3)["Overview"]["A4"].value == "MESA TEST MINI TERM SHEET")
+
+                # The rules live in the team folder and are read on every call.
+                r0 = _ts.load_rules()
+                check("with no rules document, the built-in rules are used and say so",
+                      r0["text"] == _ts.DEFAULT_RULES and "built-in" in r0["source"])
+                doc = _ts.write_default_rules_document()
+                check("the rules document is seeded with both sections",
+                      _ts.load_rules()["text"].strip() == _ts.DEFAULT_RULES.strip()
+                      and _ts.load_rules()["abbreviations"] == _ts.DEFAULT_ABBREVIATIONS)
+                doc.write_text(doc.read_text(encoding="utf-8").replace(
+                    "## Abbreviations to spell out\n", "## Abbreviations to spell out\n\n- XYZQ\n"),
+                    encoding="utf-8")
+                check("an edit to the rules document takes effect with no update",
+                      bool(_ts.wording_problems("x", "per the XYZQ")))
+                before = doc.read_text(encoding="utf-8")
+                _ts.write_default_rules_document()
+                check("seeding never overwrites the team's edited rules",
+                      doc.read_text(encoding="utf-8") == before)
+                doc.write_text("# Rules\n\nnothing useful here\n", encoding="utf-8")
+                r1 = _ts.load_rules()
+                check("a rules document missing its sections falls back and says so",
+                      r1["text"] == _ts.DEFAULT_RULES and "built-in copy used" in r1["source"])
+                out = openpyxl.load_workbook(p1)
+                o = out["Overview"]
+                check("no answer from the example survives into a new sheet",
+                      not any("example answer" in str(o.cell(r, 2).value) for r in range(6, 20))
+                      and out["Legal"]["B2"].value is None)
+                check("the template's own blank lines are kept",
+                      out["Proforma"]["B7"].value == "________________")
+                check("an empty field is marked NEEDS INPUT and counted",
+                      o["B7"].value == _ts.NEEDS_INPUT and "Owner" in gaps and len(gaps) == 13)
+                o["B10"].value = "edited by a person"
+                out.save(p1)
+                _, gaps2 = _ts.save_overview("Mesa Test", {"Owner": "Answered."}, existing=p1.name)
+                again = openpyxl.load_workbook(p1)["Overview"]
+                check("filling an answer touches only that field",
+                      again["B7"].value == "Answered." and again["B10"].value == "edited by a person"
+                      and len(gaps2) == 12)
+                import zipfile as _zf
+                with _zf.ZipFile(ref / "Example_Mini_Term_Sheet.xlsx") as a, _zf.ZipFile(p2) as b:
+                    check("every part but the sheets and strings is copied byte for byte",
+                          all(a.read(n) == b.read(n) for n in a.namelist()
+                              if not n.startswith(("xl/worksheets/", "xl/sharedStrings", "xl/styles"))),
+                          "the logo and layout must be the original's, not a rebuilt copy")
+                    hidden = b"".join(b.read(n) for n in b.namelist() if n.endswith(".xml"))
+                    check("no answer from the example hides inside the file",
+                          b"example answer" not in hidden and b"Executed" not in hidden)
+                # Saving the other tabs (2026-10-12): defaults by kind, sources, gaps.
+                pt2, g = _ts.save_fields("Mesa Test", {"Due Diligence: Environmental > Phase I ESA Completed?": "Not completed\nNo Phase I in the report."},
+                                         existing=p1.name,
+                                         sources={"Due Diligence: Environmental > Phase I ESA Completed?": "DD report section 10"})
+                w2 = openpyxl.load_workbook(pt2)
+                check("a Due Diligence answer lands with its source; an unanswered row reads Not "
+                      "confirmed and is not a gap",
+                      w2["Due Diligence"]["B2"].value.startswith("Not completed")
+                      and w2["Due Diligence"]["C2"].value == "DD report section 10"
+                      and w2["Due Diligence"]["B3"].value == _ts.NOT_CONFIRMED
+                      and not any(k.startswith("Due Diligence:") for k in g))
+                _, g2 = _ts.save_fields("Mesa Test", {"Legal: Purchase Agreements > LOI Drafted": "Drafted June 2007."},
+                                        existing=p1.name)
+                w3 = openpyxl.load_workbook(pt2)
+                check("an unmentioned checklist step reads Not verified and is not a gap",
+                      w3["Legal"]["B3"].value == _ts.NOT_VERIFIED and w3["Legal"]["B4"].value == _ts.NOT_VERIFIED
+                      and not any(k.startswith("Legal:") for k in g2))
+                _wo = openpyxl.load_workbook(pt2)["Overview"]
+                check("the rows above the first answer keep the template's height, so the logo keeps its size",
+                      all(_wo.row_dimensions[r].height in (None, 187.2) or _wo.row_dimensions[r].height > 100
+                          for r in range(1, 4)) or _wo.row_dimensions[2].height is None)
+                check("a row longer than the team's sheets ever run is flagged, the Overview never",
+                      _ts.too_long("Legal: Closing > Legal", "x" * 800)
+                      and not _ts.too_long("Legal: Closing > Legal", "x" * 300)
+                      and not _ts.too_long("Legal Description", "x" * 5000))
+                from term_sheet import dashboard as _db
+                _pg = _db.write_dashboard(pt2)
+                _ph = _pg.read_text(encoding="utf-8")
+                _pl = _db.build_payload(_db.read_workbook(pt2))
+                check("a dashboard page is built beside the workbook, holding its rows and no external resources",
+                      _pg.suffix == ".html" and _pg.parent == pt2.parent and "const DATA=" in _ph
+                      and "Drafted June 2007." in _ph and "http" not in _ph.split("<script>")[0].lower()
+                      and "</script>" not in _ph.split("const DATA=")[1].split("\n")[0][:-1].replace("<\\/", ""))
+                check("the page's attention list carries the yellow rows and its tally is read, not worked out",
+                      any("needs" in a["what"].lower() or a["kind"] == "gap" for a in _pl["attention"])
+                      and all(p["done"] <= p["of"] for p in _pl["progress"]))
+                _figs = _ts.sheet_figures("Mesa Test", p1.name)
+                check("the numbers check gathers every tab's figures with their rows, never a NEEDS INPUT row",
+                      any(t == "Legal" and "June 2007" not in f and k.endswith("LOI Drafted") for t, k, f in _figs) is False
+                      and all("NEEDS INPUT" not in f for _, _, f in _figs)
+                      and all(t in ("Overview", "Legal", "Due Diligence", "Proforma") for t, _, _ in _figs))
+                _now = dict(_ts.current_values("Mesa Test", p1.name, "Legal"))
+                check("the Legal fill is shown what each row says now",
+                      _now.get("Legal: Purchase Agreements > LOI Drafted") == "Drafted June 2007."
+                      and _ts.NOT_VERIFIED in _now.values()
+                      and not any(k.startswith("Onboarding") for k in _now))
+                check("a Proforma blank line from the template is left alone",
+                      w3["Proforma"]["B7"].value in (None, "________________"))
+                check("a tab not yet saved stays untouched",
+                      w3["Proforma"]["B3"].value is None)
+                check("the Overview written earlier is not changed by a later tab save",
+                      w3["Overview"]["B10"].value == "edited by a person")
+                try:
+                    _ts.save_fields("Mesa Test", {"Onboarding: Finance > Open Bank Account": "done"}, existing=p1.name)
+                    check("a to-do row is refused", False)
+                except ValueError:
+                    check("a to-do row is refused", True)
+                check("document kinds are found for a Due Diligence row and an Overview row",
+                      _ts.kinds_for_keys(["Due Diligence: Environmental > Phase I ESA Completed?"]) == ["Reports and studies"]
+                      and "Purchase agreement" in _ts.kinds_for_keys(["Seller Contact"]))
+                try:
+                    _ts.save_overview("Mesa Test", {"Not A Row": "x"})
+                    check("a label that is not an Overview row is refused", False)
+                except ValueError:
+                    check("a label that is not an Overview row is refused", True)
+            finally:
+                _cfg.MINI_TERM_SHEETS_DIR, _cfg.MINI_TERM_SHEETS_REFERENCE_DIR = _saved_dirs
+    except Exception as e:
+        import traceback as _tb
+        _where = [l.strip() for l in _tb.format_exc().splitlines() if l.strip().startswith("File ")][-1:]
+        check("mini term sheet checks ran", False, f"{type(e).__name__}: {e} ({'; '.join(_where)})")
+
     passed = sum(1 for _, ok, _ in RESULTS if ok)
     print(f"\n{passed}/{len(RESULTS)} checks passed")
     return 0 if passed == len(RESULTS) else 1

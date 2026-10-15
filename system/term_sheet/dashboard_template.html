@@ -1,0 +1,241 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>__TITLE__</title>
+<style>
+/* Palette and type in the style the team liked: slate header, gold rule,
+   serif headings, tabular figures. No external fonts or scripts: the page
+   must open from the team folder with no network. */
+:root{
+  --bg:#f3f4f2; --surface:#ffffff; --surface-2:#eef1f0; --ink:#1d2627; --muted:#5b6869; --line:#d5dbda;
+  --slate:#394f50; --slate-ink:#ffffff; --gold:#f7c240; --gold-ink:#6b4d00; --gold-soft:#fdf1cf;
+  --ok:#2f7a4f; --ok-soft:#e1f1e7; --warn:#a05f00; --warn-soft:#fbecd2; --risk:#b03a2e; --risk-soft:#f7e0dd;
+  --info:#3d5f86; --info-soft:#e2eaf4;
+  --display:Georgia,"Times New Roman",serif; --body:"Segoe UI",Helvetica,Arial,sans-serif; --mono:Consolas,Menlo,monospace;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#141a1b; --surface:#1c2425; --surface-2:#232d2e; --ink:#e7ecea; --muted:#9fadac; --line:#33403f;
+  --slate:#2c3d3e; --gold-ink:#f7c240; --gold-soft:#3a3018; --ok:#7cc79a; --ok-soft:#1d3427; --warn:#f0b35a;
+  --warn-soft:#3a2c14; --risk:#ee8b80; --risk-soft:#3d1f1c; --info:#9bbbe0; --info-soft:#1f2b3a; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#141a1b; --surface:#1c2425; --surface-2:#232d2e; --ink:#e7ecea; --muted:#9fadac; --line:#33403f;
+  --slate:#2c3d3e; --gold-ink:#f7c240; --gold-soft:#3a3018; --ok:#7cc79a; --ok-soft:#1d3427; --warn:#f0b35a;
+  --warn-soft:#3a2c14; --risk:#ee8b80; --risk-soft:#3d1f1c; --info:#9bbbe0; --info-soft:#1f2b3a; color-scheme:dark}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.5 var(--body)}
+.wrap{max-width:1120px;margin:0 auto;padding:20px 16px 48px;display:grid;gap:16px}
+h1,h2{font-family:var(--display);margin:0}
+h1{font-size:clamp(24px,4vw,32px);font-weight:700}
+h2{font-size:18px;font-weight:600}
+h3{font-size:13px;font-weight:600;margin:0;color:var(--muted);text-transform:uppercase;letter-spacing:.04em}
+p{margin:0}
+.num{font-family:var(--mono);font-variant-numeric:tabular-nums}
+.muted{color:var(--muted)}
+.small{font-size:12px}
+header.deal{background:var(--slate);color:var(--slate-ink);border-radius:12px;padding:18px 22px;border-bottom:4px solid var(--gold);display:flex;align-items:center;gap:22px}
+header.deal>div{display:grid;gap:8px}
+header .logo{height:84px;width:auto;border:0;outline:0;display:block}
+header .eyebrow{font-size:11px;letter-spacing:.08em;text-transform:uppercase;opacity:.8}
+header .meta{display:flex;flex-wrap:wrap;gap:10px 18px;align-items:center;opacity:.95}
+.pill{display:inline-block;border-radius:999px;padding:3px 10px;font-size:12px;font-weight:600;background:var(--gold);color:var(--gold-ink)}
+.pill.ok{background:var(--ok-soft);color:var(--ok)} .pill.open{background:var(--warn-soft);color:var(--warn)}
+.pill.unknown{background:var(--surface-2);color:var(--muted)} .pill.gap{background:var(--gold-soft);color:var(--gold-ink)}
+.pill.flag{background:var(--risk-soft);color:var(--risk)} .pill.na{background:var(--surface-2);color:var(--muted)}
+.pill.filled{background:var(--info-soft);color:var(--info)}
+.toolbar{display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:space-between}
+.toolbar input{flex:1 1 260px;max-width:420px;padding:9px 12px;border:1px solid var(--line);border-radius:8px;background:var(--surface);color:var(--ink);font:inherit}
+.btn{display:inline-block;padding:8px 12px;border:1px solid var(--line);border-radius:8px;background:var(--surface);color:var(--ink);font:inherit;cursor:pointer;text-decoration:none}
+.btn:hover{background:var(--surface-2)}
+nav.tabs{display:flex;flex-wrap:wrap;gap:4px;border-bottom:1px solid var(--line)}
+nav.tabs button{background:none;border:0;border-bottom:3px solid transparent;padding:10px 12px;font:inherit;font-weight:600;color:var(--muted);cursor:pointer}
+nav.tabs button[aria-selected="true"]{color:var(--ink);border-bottom-color:var(--gold)}
+section.tab[hidden]{display:none}
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:14px 16px}
+.card.first{border-top:3px solid var(--gold)}
+.card .big{font-family:var(--mono);font-size:24px;font-weight:600;margin:4px 0 2px}
+.two{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:14px}
+.panel{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:16px 18px;display:grid;gap:10px;align-content:start}
+.panel h2{display:flex;justify-content:space-between;align-items:baseline;gap:8px}
+.kv{display:grid;grid-template-columns:minmax(120px,30%) 1fr;gap:6px 14px}
+.kv dt{color:var(--muted);font-size:12px;font-weight:600;padding-top:3px}
+.kv dd{margin:0;white-space:pre-wrap}
+.kv dt,.kv dd{border-top:1px solid var(--line);padding-top:8px}
+.kv dt:first-child,.kv dt:first-child+dd{border-top:0;padding-top:0}
+ul.plain{margin:0;padding-left:18px;display:grid;gap:6px}
+.event{display:grid;grid-template-columns:110px 1fr auto;gap:10px;align-items:start;border-top:1px solid var(--line);padding-top:8px}
+.event:first-child{border-top:0;padding-top:0}
+.counts{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:10px}
+.count{border-radius:10px;padding:10px 12px;background:var(--surface-2)}
+.count b{display:block;font-family:var(--mono);font-size:22px}
+.count.ok{background:var(--ok-soft);color:var(--ok)} .count.open{background:var(--warn-soft);color:var(--warn)} .count.unknown{color:var(--muted)}
+.bar{height:8px;border-radius:4px;background:var(--surface-2);overflow:hidden}
+.bar i{display:block;height:100%;background:var(--gold)}
+table.rows{width:100%;border-collapse:collapse}
+table.rows th{text-align:left;font-size:12px;color:var(--muted);font-weight:600;padding:8px 10px;border-bottom:1px solid var(--line)}
+table.rows td{padding:8px 10px;border-bottom:1px solid var(--line);vertical-align:top;white-space:pre-wrap}
+table.rows td.l{width:28%;font-weight:600}
+table.rows tr.sec td{background:var(--surface-2);font-family:var(--display);font-size:15px;font-weight:600;padding:9px 10px}
+table.rows tr.dim td{color:var(--muted)}
+details.fold{border:1px solid var(--line);border-radius:12px;background:var(--surface);padding:0 16px}
+details.fold summary{cursor:pointer;padding:12px 0;font-weight:600;list-style:none;display:flex;justify-content:space-between;gap:8px}
+details.fold summary::-webkit-details-marker{display:none}
+details.fold[open] summary{border-bottom:1px solid var(--line)}
+.hits{display:grid;gap:8px}
+.hit{border:1px solid var(--line);border-radius:10px;padding:10px 12px;background:var(--surface)}
+mark{background:var(--gold-soft);color:inherit;padding:0 2px;border-radius:3px}
+.copybox{width:100%;min-height:90px;margin-top:8px;font:12px var(--mono);border:1px solid var(--line);border-radius:8px;padding:8px;background:var(--surface-2);color:var(--ink)}
+footer{color:var(--muted);font-size:12px;border-top:1px solid var(--line);padding-top:12px;display:grid;gap:4px}
+@media print{nav.tabs,.toolbar{display:none} section.tab[hidden]{display:block} .panel,.card{break-inside:avoid}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="deal" id="head"></header>
+
+  <div class="toolbar">
+    <input id="q" type="search" placeholder="Search every tab: a word, a date, a dollar figure" aria-label="Search">
+    <div>
+      <a class="btn" id="xlsx" href="#">Open the Excel file</a>
+      <button class="btn" id="copy" type="button">Copy a summary</button>
+      <button class="btn" id="theme" type="button">Dark or light</button>
+      <button class="btn" type="button" onclick="window.print()">Print</button>
+    </div>
+  </div>
+  <div id="search" class="hits" hidden></div>
+
+  <nav class="tabs" id="tabs" role="tablist"></nav>
+  <main id="main"></main>
+
+</div>
+
+<script>
+/*__DATA__*/
+(function(){
+  const $ = (s, el) => (el || document).querySelector(s);
+  const esc = s => String(s == null ? "" : s).replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+  // No dashes between words on the page (team rule): a long dash becomes a comma, a hyphen between spaces "to".
+  const nodash = s => String(s == null ? "" : s).replace(/\s[—–]\s/g, ", ").replace(/\s-\s/g, " to ");
+  const txt = s => esc(nodash(s));
+  const stateWord = {ok:"confirmed", open:"open", unknown:"not confirmed", gap:"needs input", flag:"check", na:"not applicable", filled:"", blank:"", todo:""};
+  const money = s => s;
+  const fmtDate = iso => { const [y,m,d] = iso.split("-").map(Number); return new Date(y, m-1, d).toLocaleDateString("en-US", {year:"numeric", month:"long", day:"numeric"}); };
+
+  // Header
+  const since = DATA.status === "Owned" && DATA.since ? `Owned since ${DATA.since}` : DATA.status;
+  $("#head").innerHTML = `
+    ${DATA.logo ? `<img class="logo" src="${DATA.logo}" alt="">` : ""}
+    <div><div class="eyebrow">Mini term sheet</div><h1>${txt(DATA.name)}</h1>
+    ${since ? `<div class="small" style="opacity:.85">${txt(since)}</div>` : ""}</div>`;
+  $("#xlsx").href = encodeURI(DATA.file);
+
+  // Tabs
+  const order = ["Overview", "Timeline", "Site & Title", "Due Diligence", "Legal", "Proforma", "Onboarding"];
+  const tabs = $("#tabs"), main = $("#main");
+  order.forEach((name, i) => {
+    const b = document.createElement("button"); b.textContent = name; b.setAttribute("role", "tab");
+    b.setAttribute("aria-selected", i === 0); b.onclick = () => show(name); tabs.appendChild(b);
+    const s = document.createElement("section"); s.className = "tab"; s.dataset.tab = name; s.hidden = i !== 0; main.appendChild(s);
+  });
+  function show(name){
+    [...tabs.children].forEach(b => b.setAttribute("aria-selected", b.textContent === name));
+    [...main.children].forEach(s => s.hidden = s.dataset.tab !== name);
+    try { localStorage.setItem("mts-tab", name); } catch (e) {}
+  }
+
+  const rows = tab => (DATA.tabs[tab] || []);
+  const pill = r => r.flag ? `<span class="pill flag">check</span>` : (stateWord[r.state] ? `<span class="pill ${r.state}">${stateWord[r.state]}</span>` : "");
+
+  function table(list, opts){
+    opts = opts || {};
+    let sec = null, out = `<table class="rows"><thead><tr><th>Row</th><th>What the sheet says</th>${opts.source ? "<th>Where from</th>" : ""}<th></th></tr></thead><tbody>`;
+    list.forEach(r => {
+      if (r.section !== sec) { sec = r.section; if (sec) out += `<tr class="sec"><td colspan="4">${txt(sec)}</td></tr>`; }
+      const dim = (r.state === "unknown" || r.state === "blank") ? " dim" : "";
+      out += `<tr class="row${dim}"><td class="l">${txt(r.label)}</td><td>${txt(r.value) || '<span class="muted">not given</span>'}</td>${opts.source ? `<td class="small muted">${txt(r.source)}</td>` : ""}<td>${pill(r)}</td></tr>`;
+    });
+    return out + "</tbody></table>";
+  }
+  function fold(title, list, opts, open){
+    const n = list.filter(r => r.state !== "unknown" && r.state !== "blank").length;
+    return `<details class="fold"${open ? " open" : ""}><summary><span>${txt(title)}</span><span class="muted small">${n} of ${list.length} with a fact</span></summary>${table(list, opts)}</details>`;
+  }
+  const bySection = list => { const m = new Map(); list.forEach(r => { if (!m.has(r.section)) m.set(r.section, []); m.get(r.section).push(r); }); return m; };
+
+  // Overview
+  const keyDates = DATA.key_dates || [];
+  const evt = e => `<div class="event"><span class="num small">${fmtDate(e.date)}</span><div><b>${txt(e.label)}</b><div class="small muted">${txt(e.section)}</div></div><span class="small muted num">${e.ahead ? `in ${e.days} days` : `${-e.days} days ago`}</span></div>`;
+  const pf = DATA.progress;
+  const att = a => `<li><span class="pill ${a.kind}">${stateWord[a.kind] || a.kind}</span> ${txt(a.what)} <span class="small muted">(${txt(a.where)})</span></li>`;
+  $('[data-tab="Overview"]').innerHTML = `
+    <div class="cards">${DATA.figures.map((f, i) => `<div class="card${i ? "" : " first"}"><h3>${txt(f.label)}</h3><div class="big">${txt(f.value)}</div><div class="small muted">${txt(f.note)}</div></div>`).join("")}</div>
+    <div class="two" style="margin-top:14px">
+      <div class="panel"><h2>${txt(DATA.key_dates_title)} <span class="small muted">counted from today</span></h2>
+        ${keyDates.map(evt).join("") || '<p class="muted">No dated steps on the Legal tab yet.</p>'}
+        <p class="small muted">Dates are the ones written on the Legal tab. Full list under Timeline.</p></div>
+      <div class="panel"><h2>Deal at a glance</h2><dl class="kv">${DATA.glance.map(g => `<dt>${txt(g.label)}</dt><dd>${txt(g.value)}</dd>`).join("")}</dl></div>
+    </div>
+    <div class="two" style="margin-top:14px">
+      <div class="panel"><h2>Needs attention <span class="small muted">${DATA.attention.length} items</span></h2>
+        ${DATA.attention.length ? `<ul class="plain">${DATA.attention.slice(0, 8).map(att).join("")}</ul>${DATA.attention.length > 8 ? `<details><summary class="small muted" style="cursor:pointer">Show the other ${DATA.attention.length - 8}</summary><ul class="plain" style="margin-top:8px">${DATA.attention.slice(8).map(att).join("")}</ul></details>` : ""}` : '<p class="muted">Nothing is waiting on a person.</p>'}</div>
+      <div class="panel"><h2>How complete it is</h2>
+        ${pf.map(p => `<div><div style="display:flex;justify-content:space-between"><b>${txt(p.tab)}</b><span class="num small">${p.done} of ${p.of}</span></div><div class="bar"><i style="width:${p.of ? Math.round(100*p.done/p.of) : 0}%"></i></div><div class="small muted">${txt(p.note)}</div></div>`).join("")}
+        <p class="small muted">A count of rows with something on them, read from the sheet. It says nothing about the deal.</p></div>
+    </div>`;
+
+  // Timeline
+  $('[data-tab="Timeline"]').innerHTML = `<div class="panel"><h2>Every dated step on the Legal tab <span class="small muted">${DATA.events.length} dates</span></h2>
+    ${DATA.events.map(e => `<div class="event"><span class="num small">${fmtDate(e.date)}</span><div><b>${txt(e.label)}</b><div class="small">${txt(e.text)}</div></div><span class="small muted num">${e.ahead ? `in ${e.days} days` : `${-e.days} days ago`}</span></div>`).join("") || '<p class="muted">No dates found on the Legal tab.</p>'}
+    <p class="small muted">Read from the row text as written; "in N days" is counted from the day this page was built.</p></div>`;
+
+  // Site & Title: the Overview's site rows and the Legal tab's site section
+  const siteLabels = ["Location", "County", "APN(s)", "Legal Description", "Parcel Size (Acres)", "Lot Size", "Current Zoning", "Proposed Use(s)"];
+  const site = rows("Overview").filter(r => siteLabels.some(l => r.label.startsWith(l)));
+  const own = rows("Legal").filter(r => /site|ownership/i.test(r.section));
+  $('[data-tab="Site & Title"]').innerHTML = `<div class="panel"><h2>The site</h2>${table(site)}</div><div class="panel" style="margin-top:14px"><h2>Ownership and title</h2>${table(own)}</div>`;
+
+  // Due Diligence
+  const dd = rows("Due Diligence");
+  const c = {ok:0, open:0, unknown:0}; dd.forEach(r => { if (c[r.state] != null) c[r.state]++; });
+  $('[data-tab="Due Diligence"]').innerHTML = `<div class="counts" style="margin-bottom:12px"><div class="count ok"><b>${c.ok}</b>confirmed</div><div class="count open"><b>${c.open}</b>open or not done</div><div class="count unknown"><b>${c.unknown}</b>not confirmed in the report</div></div>
+    ${[...bySection(dd)].map(([s, l], i) => fold(s, l, {source:true}, true)).join("")}`;
+
+  // Legal and Proforma: folded by section, the empty steps greyed
+  $('[data-tab="Legal"]').innerHTML = [...bySection(rows("Legal"))].map(([s, l], i) => fold(s, l, {}, i < 2)).join("");
+  $('[data-tab="Proforma"]').innerHTML = [...bySection(rows("Proforma"))].map(([s, l], i) => fold(s, l, {}, true)).join("");
+  $('[data-tab="Onboarding"]').innerHTML = `<div class="panel"><h2>Finance onboarding checklist</h2><p class="small muted">The finance team's standing list for any acquisition. Nothing on it is filled in by the sheet.</p><ul class="plain">${rows("Onboarding").map(r => `<li>${txt(r.label)}</li>`).join("")}</ul></div>`;
+
+  // Search across every tab
+  const all = [];
+  Object.keys(DATA.tabs).forEach(t => DATA.tabs[t].forEach(r => all.push({tab:t, r})));
+  const box = $("#search");
+  $("#q").addEventListener("input", e => {
+    const q = e.target.value.trim().toLowerCase();
+    if (q.length < 2) { box.hidden = true; box.innerHTML = ""; return; }
+    const hits = all.filter(({r}) => (r.label + " " + r.value).toLowerCase().includes(q)).slice(0, 40);
+    const hi = s => esc(nodash(s)).replace(new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "ig"), m => `<mark>${m}</mark>`);
+    box.innerHTML = hits.length ? hits.map(({tab, r}) => `<div class="hit"><div class="small muted">${txt(tab)} › ${txt(r.section)}</div><b>${hi(r.label)}</b><div>${hi(r.value || "not given")}</div></div>`).join("") : '<div class="hit muted">Nothing on any tab matches.</div>';
+    box.hidden = false;
+  });
+
+  // Copy: the text always appears in a box too, because a copy button that
+  // silently does nothing is worse than one that shows its text.
+  $("#copy").onclick = () => {
+    const lines = [DATA.name, since, ...DATA.figures.map(f => `${f.label}: ${f.value}`), "",
+      "Needs attention:", ...(DATA.attention.length ? DATA.attention.map(a => `- ${a.what}`) : ["nothing"]), "",
+      `From ${DATA.file}, built ${fmtDate(DATA.built)}.`];
+    const text = nodash(lines.join("\n"));
+    let box = $("#copybox"); if (!box) { box = document.createElement("textarea"); box.id = "copybox"; box.className = "copybox"; box.readOnly = true; $(".toolbar").after(box); }
+    box.value = text;
+    try { navigator.clipboard && navigator.clipboard.writeText(text); } catch (e) {}
+  };
+  $("#theme").onclick = () => { const r = document.documentElement; const cur = r.getAttribute("data-theme"); const next = cur === "dark" ? "light" : "dark"; r.setAttribute("data-theme", next); try { localStorage.setItem("mts-theme", next); } catch (e) {} };
+  try { const t = localStorage.getItem("mts-theme"); if (t) document.documentElement.setAttribute("data-theme", t); const tab = localStorage.getItem("mts-tab"); if (tab && order.includes(tab)) show(tab); } catch (e) {}
+
+  window.__mts = {rows: all.length, events: DATA.events.length, attention: DATA.attention.length};
+})();
+</script>
+</body>
+</html>

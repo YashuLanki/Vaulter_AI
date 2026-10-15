@@ -55,6 +55,7 @@ python system/scripts/check_answers.py              # 20 checks on the knowledge
 python system/scripts/check_retrieval.py            # does summary search find the right passage
 python system/scripts/check_find.py                 # does find-in-document find the right passage
 python system/scripts/check_report_page.py          # does the screening report page work in a browser
+python system/scripts/check_term_sheet_page.py      # does the mini term sheet dashboard work in a browser
 ```
 
 There is no lint/test framework configured (no pytest, no linter config) — the three
@@ -634,7 +635,7 @@ boundary is "is this your own computer, logged in as you." claude.ai (the web ap
 be used with this server: it runs in the cloud and can only reach a network address, never
 a process on someone's own machine. Claude Desktop or Claude Code are required.
 
-**32 tools.** Don't maintain this list by hand — it drifted to 19 entries with one duplicated
+**35 tools.** Don't maintain this list by hand — it drifted to 19 entries with one duplicated
 and two missing. Get the truth from the code:
 
 ```bash
@@ -656,6 +657,15 @@ instructions) — `search_property_summaries`, `get_property_summary`, `update_p
 `compare_to_portfolio_history`.
 **Proximity** — `run_proximity_for_property`, `run_proximity_for_listing`,
 `compare_proximity_to_portfolio`, `open_proximity_files`.
+**Mini term sheets** (`system/term_sheet/`, shipped 2026-10-15) — `start_mini_term_sheet`,
+`get_mini_term_sheet_tab`, `save_mini_term_sheet`, `check_mini_term_sheet_documents`,
+`open_mini_term_sheet_dashboard`. A teammate asks for "a mini term sheet for <property>"; the
+sheet is drafted from the property's DD report alone, tab by tab, into the firm's own template
+in the team folder's `mini_term_sheets/`, and the folder is only searched for what is missing or
+to confirm the numbers after the person says yes. **Read `system/term_sheet/CLAUDE.md` before
+touching any of it** — every decision, the gold-standard check and the writing rules (which
+live in the team folder, not in code) are recorded there. `check_portfolio_comparison.py` §11
+holds its regression checks; `check_term_sheet_page.py` opens the dashboard in headless Edge.
 
 **A pending restart is detected and said out loud (`_restart_pending`, 2026-09-01).** Applying an
 update rewrites the `VERSION` file, and `_get_code_version()` reads that file — so between an
