@@ -1421,10 +1421,12 @@ def main() -> int:
     print("\n28. The same export screened twice replaces its result")
     import tempfile as _tf
     import config as _cfg
-    _keep = _cfg.SCREENING_OUTPUT_DIR
+    _keep, _keep_layout = _cfg.SCREENING_OUTPUT_DIR, _cfg.NEW_LAYOUT
     _tmpdir = _tf.mkdtemp(prefix="vlt_screens_")
     try:
-        _cfg.SCREENING_OUTPUT_DIR = _tmpdir
+        # The old layout keeps the screens record beside the output folder, so pointing that
+        # folder here keeps the team's real record (system/screens.json) out of this test.
+        _cfg.SCREENING_OUTPUT_DIR, _cfg.NEW_LAYOUT = _tmpdir, False
         a = pd.DataFrame({"Property Address": ["1 Elm St", "2 Oak St"], "For Sale Price": [100.0, 200.0]})
         b = a.copy(); b.loc[0, "For Sale Price"] = 101.0
         s1 = fs.output_stem(Path("CostarExport.xlsx"), a)
@@ -1438,7 +1440,7 @@ def main() -> int:
               fs.output_stem(Path("Other.xlsx"), a) == "Other")
         check("the real screen carries the stem it chose", "output_stem" in base and base["output_stem"])
     finally:
-        _cfg.SCREENING_OUTPUT_DIR = _keep
+        _cfg.SCREENING_OUTPUT_DIR, _cfg.NEW_LAYOUT = _keep, _keep_layout
         import shutil as _sh
         _sh.rmtree(_tmpdir, ignore_errors=True)
 

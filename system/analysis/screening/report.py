@@ -417,7 +417,9 @@ def build_report(result: dict, out_path: Path = None, include_imagery: bool = Fa
         # The stem the screen chose -- by the file's data, so a re-download
         # replaces its earlier report (2026-10-05). Older result dicts lack it.
         stem = result.get("output_stem") or Path(result["source"]).stem
-        out_path = Path(SCREENING_OUTPUT_DIR) / f"screen_{stem}.html"
+        from layout import screen_dir, report_name
+        out_path = (screen_dir(result["market_folder"]) if result.get("market_folder")
+                    else Path(SCREENING_OUTPUT_DIR)) / report_name(stem, result.get("market_folder") or "")
     out_path = Path(out_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(html, encoding="utf-8")

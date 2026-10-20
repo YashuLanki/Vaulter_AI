@@ -1932,7 +1932,7 @@ def _summary_staleness(property_name: str, summary_text: str) -> str:
 def _no_file_msg(source_file: str) -> str:
     """What to say when no listing file resolves -- by name, or because the folder is empty."""
     if not source_file.strip():
-        return ("There is no listing file in the CoStar Drop folder yet. Any export works -- "
+        return ("There is no listing file in the Screen > Drop folder yet. Any export works -- "
                 "CoStar, Crexi, LoopNet or a broker's spreadsheet (.xlsx, .xls or .csv). "
                 "Call open_costar_folder to open the folder")
     return f"Could not find a listing file matching '{source_file}'"
@@ -2014,7 +2014,7 @@ def _resolve_costar_source(source_file: str, property_name: str = "", file_conte
             for candidate in drop.rglob("*"):
                 if candidate.is_file() and (candidate.name.lower() == target_lower or (
                         candidate.suffix.lower() in _OK and candidate.stem.lower() == target_stem)):
-                    where = "shared CoStar Drop" if drop == COSTAR_DROP_DIR else "local data/drop"
+                    where = "shared Screen > Drop" if drop == COSTAR_DROP_DIR else "local data/drop"
                     log.info(f"[MCP] CoStar source resolved from the {where}: {candidate}")
                     return candidate
         except OSError as e:
@@ -2229,7 +2229,7 @@ them in this order:
 
 (1) FROM THE DROP FOLDER, strongly preferred. If the user just says "screen
 it" or "screen the new export", call screen_listings with NO source_file: it
-screens the newest file in the team's CoStar Drop folder and says which file
+screens the newest file in the team's Screen > Drop folder and says which file
 that was -- tell the user. If they name a file, pass source_file (the
 extension is optional). Costs nothing -- the file never travels through the
 conversation. If the user has the file but hasn't put it anywhere, call
@@ -3829,7 +3829,7 @@ for every listing.""".replace(
             if not property_name.strip():
                 return "Which property is the mini term sheet for?"
             ts.dd_drop_dir().mkdir(parents=True, exist_ok=True)
-            drop_where = "Vaulter AI Shared > mini_term_sheets > " + ts.DD_DROP_NAME
+            drop_where = f"Vaulter AI Shared > {__import__('config').MINI_TERM_SHEETS_DIR.name} > " + ts.DD_DROP_NAME
 
             folder, matches = None, []
             try:
@@ -4384,7 +4384,7 @@ for every listing.""".replace(
             path, gaps = ts.save_fields(property_name, {str(k): str(v or "") for k, v in fields.items()},
                                         title=title, existing=existing_file,
                                         sources={str(k): str(v or "") for k, v in (sources or {}).items()})
-            msg = [f"Saved {path.name} in the team folder: Vaulter AI Shared > mini_term_sheets > "
+            msg = [f"Saved {path.name} in the team folder: Vaulter AI Shared > {__import__('config').MINI_TERM_SHEETS_DIR.name} > "
                    f"{path.parent.name}."]
             # The page beside it is rebuilt from the workbook on every save, so
             # it can never disagree with the Excel file (team request, 2026-10-12).
@@ -4567,7 +4567,7 @@ for every listing.""".replace(
         nothing, where pasting the file's contents costs tens of thousands of
         tokens on a real export.
 
-        Opens the TEAM's shared "CoStar Drop" folder in OneDrive: it's easy to
+        Opens the TEAM's shared "Screen > Drop" folder in OneDrive: it's easy to
         find beside the other Vaulter AI folders, and anything dropped there is
         screenable by every teammate without re-sending it.
         """
@@ -4584,13 +4584,13 @@ for every listing.""".replace(
                 local = sorted(f for f in DROP_DIR.iterdir() if f.is_file())
 
             if not shared and not local:
-                return ("Opened the team's CoStar Drop folder in OneDrive — it's empty.\n\n"
+                return ("Opened the team's Screen > Drop folder in OneDrive — it's empty.\n\n"
                         "Drop a CoStar export or broker spreadsheet in, then tell me its "
                         "filename and I'll screen it. (Dropping the file here is free; "
                         "attaching it to this conversation instead costs a lot, since the "
                         "whole file has to be sent through the chat.)")
 
-            out = ["Opened the team's CoStar Drop folder in OneDrive."]
+            out = ["Opened the team's Screen > Drop folder in OneDrive."]
             if shared:
                 out.append("\nReady to screen (shared with the team):")
                 out += [f"  - {f.name}" for f in shared]
@@ -4840,7 +4840,7 @@ for every listing.""".replace(
 
         HOW TO CALL IT: when the user says "screen it" or "screen the new
         export" without naming a file, call this with NO source_file -- it
-        screens the newest file in the team's CoStar Drop folder and names the
+        screens the newest file in the team's Screen > Drop folder and names the
         file it used. Pass source_file only when the user names one.
 
         Free, and the same method in every US market: every market-relative
@@ -4886,7 +4886,7 @@ for every listing.""".replace(
 
         Args:
             source_file:      The file's name, if the user named one. Leave EMPTY to
-                               screen the newest file in the CoStar Drop folder.
+                               screen the newest file in the Screen > Drop folder.
             property_name:    Optional name to narrow the file search
             file_content_b64: Base64 file content -- LAST RESORT, not the default for an
                                attached file. Measured ~43,000 tokens to pass one real
@@ -5287,10 +5287,9 @@ for every listing.""".replace(
         import glob
         import webbrowser
         try:
-            from config import SCREENING_OUTPUT_DIR
+            from layout import all_screen_reports      # each market's folder in the new layout
 
-            reports = sorted(glob.glob(str(Path(SCREENING_OUTPUT_DIR) / "screen_*.html")),
-                             key=lambda f: Path(f).stat().st_mtime, reverse=True)
+            reports = all_screen_reports()
             if not reports:
                 return ("No screening report has been generated yet. Run screen_listings "
                         "first and one will be written alongside the workbook.")

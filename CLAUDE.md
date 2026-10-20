@@ -194,6 +194,19 @@ Vaulter AI Shared/
     daily_status/  installs/  error_reports/  setup_logs/
 ```
 
+**Superseded 2026-10-20 by the plugin's layout, at the owner's request.** `CoStar Drop/` and
+`output/` became `Screen/` (`Screen/Drop/` for listing files, `Screen/<Metro ST>/` holding only
+each screen's "<date> <Metro ST> - Ranking.xlsx" and "... - Report.html", the name kept in the
+screens record as `label` so a re-screen writes over its own files) and `Proximity/` ("<place> -
+Nearby.csv", "<a> vs <b> - Comparison.csv"); the screens record moved to `system/screens.json`.
+`property_summaries/`, `mini_term_sheets/` and `jurisdictions/` become "Property Summaries",
+"Mini Term Sheets" and "City Research" once folders by those names exist (`config._named`).
+**Do not rename them until every install record shows a version that has `_named`**: an older
+install re-creates the old folder empty at import and writes summaries into it. `config.NEW_LAYOUT` (whether `Screen/` exists) and
+`system/layout.py`, a copy of the plugin's, decide it, so this server and the plugin always file
+a screen in the same place. Before the switch this file re-created `CoStar Drop/` and `output/`
+at every import; it now creates only the folders of whichever layout is live.
+
 **This map was wrong until 2026-10-01, and the way it was found is the point.** An
 audit walked the actual folder instead of reading this section: `jurisdictions/`
 existed at the top level unlisted, `system/` had four more subfolders than shown, and

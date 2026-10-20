@@ -93,8 +93,8 @@ def _state_code(value: str) -> str:
 def jurisdictions_dir() -> Path | None:
     """Where the team's dossiers live, or None if the shared folder is absent."""
     try:
-        from config import SHARED_DIR
-        return Path(SHARED_DIR) / "jurisdictions"
+        from config import JURISDICTIONS_DIR
+        return Path(JURISDICTIONS_DIR)
     except Exception:
         return None
 

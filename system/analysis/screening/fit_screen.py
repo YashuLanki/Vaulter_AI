@@ -1885,8 +1885,8 @@ def _data_fingerprint(df: pd.DataFrame) -> str:
 
 
 def _screens_path() -> Path:
-    from config import SCREENING_OUTPUT_DIR
-    return Path(SCREENING_OUTPUT_DIR) / _SCREENS_FILE
+    from layout import screens_registry           # system/ in the new layout (2026-10-20)
+    return screens_registry()
 
 
 def _load_screens() -> dict:
@@ -1921,7 +1921,8 @@ def output_stem(source_path: Path, df: pd.DataFrame, record: bool = True) -> str
             sources = [s for s in entry.get("sources", []) if isinstance(s, str)]
             if Path(source_path).name not in sources:
                 sources.append(Path(source_path).name)
-            screens[stem] = {"fingerprint": fp, "sources": sources,
+            # **entry keeps the readable name a screen was given (layout.result_label).
+            screens[stem] = {**entry, "fingerprint": fp, "sources": sources,
                              "last_screened": datetime.now().isoformat(timespec="seconds")}
             p = _screens_path()
             p.parent.mkdir(parents=True, exist_ok=True)
@@ -2070,6 +2071,10 @@ def screen(source_path: Path, moic: float = None, write_workbook: bool = True) -
         "moic_target": moic,
         "tier_counts": df["Fit_Tier"].value_counts().sort_index().to_dict(),
         "markets": sorted(_col(df, "Market Name").dropna().astype(str).unique().tolist()),
+        # The market folder this screen belongs in (Screen/<Metro ST>/ in the new layout).
+        "market_folder": __import__("layout").market_name(
+            _col(df, "Market Name").tolist(), _col(df, "State", default="").tolist(),
+            _col(df, "County Name", default="").tolist()),
         "holdings_used": len(holdings),
         "portfolio_coverage": round(portfolio_coverage, 3),
         "evidence_coverage": _coverage(df, holdings),
@@ -2086,7 +2091,8 @@ def screen(source_path: Path, moic: float = None, write_workbook: bool = True) -
         # Confirmed 2026-07-29: this used to accumulate 149 files in the shared
         # OneDrive folder for 3 source files re-screened repeatedly during
         # development. Same fix already applied to pipeline/proximity_tool.py.
-        out = Path(SCREENING_OUTPUT_DIR) / f"fit_screen_{out_stem}.xlsx"
+        from layout import screen_dir, ranking_name
+        out = screen_dir(result["market_folder"]) / ranking_name(out_stem, result["market_folder"])
         out.parent.mkdir(parents=True, exist_ok=True)
         with pd.ExcelWriter(out, engine="openpyxl") as xl:
             view.to_excel(xl, sheet_name="Ranked", index=False)

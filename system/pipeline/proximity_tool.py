@@ -763,8 +763,8 @@ def _search_around(lat: float, lon: float, matched_name: str, location_note: str
     # CSV only -- the XLSX twin of every file was dropped 2026-07-29: it
     # carried the same rows as the CSV, so it was pure duplication in the
     # shared folder, not a different output.
-    slug = matched_name.replace(" ", "_").replace("/", "-").replace("&", "and")
-    csv_path = prox_dir / f"{slug}.csv"
+    # A name a person can read in the folder (owner, 2026-10-20): "Cedar Flat 40 - Nearby.csv".
+    csv_path = prox_dir / f"{_readable(matched_name)} - Nearby.csv"
 
     # ── Export CSV ────────────────────────────────────────────────
     fieldnames = ["name", "category", "address", "latitude", "longitude",
@@ -825,6 +825,12 @@ def _site_summary(records: list) -> dict:
             e["nearest"] = r["distance_miles"]
             e["nearest_name"] = r["name"]
     return out
+
+
+def _readable(name: str) -> str:
+    """A file name a person can read: spaces kept, characters Windows refuses removed, capped."""
+    name = re.sub(r'[\\/:*?"<>|_]+', " ", str(name))
+    return re.sub(r"\s+", " ", name).strip(" .")[:100] or "Unnamed"
 
 
 def compare_proximity(property_names: list,
@@ -1004,8 +1010,7 @@ def compare_proximity(property_names: list,
     # note in _search_around() above for why this isn't timestamped.
     # CSV only -- see the same note in _search_around() above for why the
     # XLSX twin was dropped.
-    slug = re.sub(r"[^A-Za-z0-9]+", "_", "_vs_".join(s["label"] for s in sites))[:80]
-    csv_path = prox_dir / f"compare_{slug}.csv"
+    csv_path = prox_dir / f"{_readable(' vs '.join(s['label'] for s in sites))} - Comparison.csv"
 
     header = ["category"]
     for s in sites:

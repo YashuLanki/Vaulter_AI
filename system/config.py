@@ -917,8 +917,19 @@ LEGACY_PROCESSED_DIR = DATA_DIR / "processed"
 SHARED_OUTPUT_DIR = SHARED_DIR / "output"
 SHARED_SYSTEM_DIR = SHARED_DIR / "system"
 
-PROXIMITY_OUTPUT_DIR  = SHARED_OUTPUT_DIR / "proximity"
-SCREENING_OUTPUT_DIR  = SHARED_OUTPUT_DIR / "screening"
+# THE NEW LAYOUT (owner, 2026-10-20), the same switch the plugin uses so the two never
+# disagree: Screen/ with a Drop/ and one folder per market, Proximity/ on its own, no
+# output/. On when Screen/ exists; nothing here creates it. Without this, this file
+# re-created CoStar Drop/ and output/ in the team folder at the start of every conversation.
+SCREEN_DIR = SHARED_DIR / "Screen"
+NEW_LAYOUT = SCREEN_DIR.is_dir()
+
+if NEW_LAYOUT:
+    PROXIMITY_OUTPUT_DIR = SHARED_DIR / "Proximity"
+    SCREENING_OUTPUT_DIR = SCREEN_DIR          # each screen in SCREEN_DIR/<Metro ST>/ (layout.screen_dir)
+else:
+    PROXIMITY_OUTPUT_DIR  = SHARED_OUTPUT_DIR / "proximity"
+    SCREENING_OUTPUT_DIR  = SHARED_OUTPUT_DIR / "screening"
 
 PROXIMITY_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 SCREENING_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
@@ -953,7 +964,14 @@ GEO_CACHE_DIR.mkdir(parents=True, exist_ok=True)
 # (disposable, machine-generated) for the most carefully-curated thing the
 # team has. The same reasoning covers `_passed-on-deals.md`, which lives
 # here too.
-PROPERTY_SUMMARIES_DIR = SHARED_DIR / "property_summaries"
+# Readable names (owner, 2026-10-20) are used once a folder by that name exists. The rename
+# waits until every machine runs code that knows both names: an older one would re-create the
+# old folder empty and save write-ups into it.
+def _named(readable: str, current: str) -> Path:
+    return SHARED_DIR / readable if (SHARED_DIR / readable).is_dir() else SHARED_DIR / current
+
+
+PROPERTY_SUMMARIES_DIR = _named("Property Summaries", "property_summaries")
 PROPERTY_SUMMARIES_DIR.mkdir(parents=True, exist_ok=True)
 
 # Mini term sheets drafted from a property's DD report (term_sheet/sheet.py,
@@ -963,7 +981,9 @@ PROPERTY_SUMMARIES_DIR.mkdir(parents=True, exist_ok=True)
 # output folders above for why a folder made at import is a mistake. `_reference/` holds the
 # reviewed example whose layout and wording every new sheet follows; it holds
 # real firm data, which is why it lives here and not in the repository.
-MINI_TERM_SHEETS_DIR = SHARED_DIR / "mini_term_sheets"
+MINI_TERM_SHEETS_DIR = _named("Mini Term Sheets", "mini_term_sheets")
+# The team's city research (jurisdiction dossiers), read by analysis/screening/jurisdiction_notes.py.
+JURISDICTIONS_DIR = _named("City Research", "jurisdictions")
 MINI_TERM_SHEETS_REFERENCE_DIR = MINI_TERM_SHEETS_DIR / "_reference"
 
 # The firm's own portfolio data: the Smartsheet Project Master export, the
@@ -1013,7 +1033,7 @@ PROJECT_MASTER_FILENAME = "Vaulter_Project_Master.xlsx"
 # reason: a file pasted into a conversation has to land somewhere, and it must
 # not land here -- one person's paste should not appear in the team's folder.
 # It is otherwise expected to stay empty.
-COSTAR_DROP_DIR = SHARED_DIR / "CoStar Drop"
+COSTAR_DROP_DIR = (SCREEN_DIR / "Drop") if NEW_LAYOUT else (SHARED_DIR / "CoStar Drop")
 COSTAR_DROP_DIR.mkdir(parents=True, exist_ok=True)
 
 # Priority 4 (docs/MULTI_USER_TRANSITION.md) — auto-update. UPDATES_DIR is
