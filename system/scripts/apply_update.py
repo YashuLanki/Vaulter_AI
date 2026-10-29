@@ -132,7 +132,7 @@ ALLOWED_EXTRA_TOP_LEVEL = ("quick_start", ".claude")
 # release.py already excludes both; this is the receiving end refusing them
 # independently, so a package built by an older or hand-made script cannot
 # place them either.
-REFUSED_EXTRA_PATHS = (Path(".claude") / "hooks",)
+REFUSED_EXTRA_PATHS = (Path(".claude") / "hooks", Path(".claude") / "worktrees")
 REFUSED_EXTRA_NAMES = {"settings.json", "settings.local.json", "leak_patterns.txt"}
 
 
