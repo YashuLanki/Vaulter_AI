@@ -42,6 +42,8 @@ TEST = """
     o.legalShown = !document.querySelector('section[data-tab="Legal"]').hidden;
     document.getElementById("copy").click();
     o.copyBox = (document.getElementById("copybox") || {value: ""}).value.length;
+    document.getElementById("xlsx").click();
+    o.xlsxBox = (document.getElementById("xlsxbox") || {textContent: ""}).textContent;
     o.counts = window.__mts;
   } catch (e) { o.exception = String(e); }
   document.title = "TESTOUT" + JSON.stringify(o);
@@ -99,6 +101,10 @@ def main() -> int:
         ("the search finds rows", o.get("hits", 0) > 0, o.get("hits")),
         ("a tab click shows that tab", o.get("legalShown") is True, o.get("legalShown")),
         ("the copy button shows its text in a box", o.get("copyBox", 0) > 20, o.get("copyBox")),
+        # A page opened from a file cannot open the workbook in Excel (2026-10-29: the browser
+        # only downloads a copy), so the button must say how to open the real one.
+        ("the Excel button says how to open the real file", "open the Excel file" in o.get("xlsxBox", ""),
+         o.get("xlsxBox")),
     ]
     failed = 0
     for name, ok, detail in checks:

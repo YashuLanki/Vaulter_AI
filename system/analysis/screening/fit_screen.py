@@ -1933,16 +1933,30 @@ def output_stem(source_path: Path, df: pd.DataFrame, record: bool = True) -> str
         return own
 
 
-def screen(source_path: Path, moic: float = None, write_workbook: bool = True) -> dict:
-    """
-    Rank a CoStar export by fit against the existing portfolio.
+def saved_ranking(source_path: Path) -> Path | None:
+    """The ranking workbook an earlier screen wrote for this file's DATA, or None.
 
-    Nothing is eliminated. Returns a dict with the ranked DataFrame, the
-    assumptions used, and (if written) the workbook path.
+    Found the way screen() names its outputs: by the data fingerprint, so a
+    re-downloaded copy under another name still finds its screen, and a changed
+    file does not find a stale one. Never raises.
     """
-    moic = moic or ASSUMPTIONS["moic_target_high"]
-    source_path = Path(source_path)
+    try:
+        from config import SCREEN_DIR, SCREENING_OUTPUT_DIR
+        stem = output_stem(Path(source_path), _read_export(Path(source_path)), record=False)
+        entry = _load_screens().get(stem)
+        label = entry.get("label") if isinstance(entry, dict) else None
+        found = list(Path(SCREEN_DIR).glob(f"*/{label} - Ranking.xlsx")) if label else []
+        old = Path(SCREENING_OUTPUT_DIR) / f"fit_screen_{stem}.xlsx"
+        if old.is_file():
+            found.append(old)
+        return max(found, key=lambda p: p.stat().st_mtime) if found else None
+    except Exception as e:  # noqa: BLE001 -- the caller falls back to ranking afresh
+        log.warning(f"[SCREEN] could not look for a saved ranking: {e}")
+        return None
 
+
+def _read_export(source_path: Path) -> pd.DataFrame:
+    """The listing file as screen() reads it, before any column is interpreted."""
     # A broker's spreadsheet often opens with a title or blank line, so find the
     # real header rather than assuming the first row.
     hdr = _header_row(source_path)
@@ -1961,7 +1975,19 @@ def screen(source_path: Path, moic: float = None, write_workbook: bool = True) -
                 break
             except UnicodeDecodeError:
                 continue
-    df = df.loc[:, [not str(c).startswith("Unnamed:") for c in df.columns]]
+    return df.loc[:, [not str(c).startswith("Unnamed:") for c in df.columns]]
+
+
+def screen(source_path: Path, moic: float = None, write_workbook: bool = True) -> dict:
+    """
+    Rank a CoStar export by fit against the existing portfolio.
+
+    Nothing is eliminated. Returns a dict with the ranked DataFrame, the
+    assumptions used, and (if written) the workbook path.
+    """
+    moic = moic or ASSUMPTIONS["moic_target_high"]
+    source_path = Path(source_path)
+    df = _read_export(source_path)
     log.info(f"Screening {len(df)} listings from {source_path.name} at {moic:g}x MOIC")
     # Named by the data, not the filename, so a re-download replaces its earlier
     # screen rather than sitting beside it. Recorded only when files are written.

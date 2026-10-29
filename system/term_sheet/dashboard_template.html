@@ -98,7 +98,7 @@ footer{color:var(--muted);font-size:12px;border-top:1px solid var(--line);paddin
   <div class="toolbar">
     <input id="q" type="search" placeholder="Search every tab: a word, a date, a dollar figure" aria-label="Search">
     <div>
-      <a class="btn" id="xlsx" href="#">Open the Excel file</a>
+      <button class="btn" id="xlsx" type="button">Open the Excel file</button>
       <button class="btn" id="copy" type="button">Copy a summary</button>
       <button class="btn" id="theme" type="button">Dark or light</button>
       <button class="btn" type="button" onclick="window.print()">Print</button>
@@ -129,7 +129,13 @@ footer{color:var(--muted);font-size:12px;border-top:1px solid var(--line);paddin
     ${DATA.logo ? `<img class="logo" src="${DATA.logo}" alt="">` : ""}
     <div><div class="eyebrow">Mini term sheet</div><h1>${txt(DATA.name)}</h1>
     ${since ? `<div class="small" style="opacity:.85">${txt(since)}</div>` : ""}</div>`;
-  $("#xlsx").href = encodeURI(DATA.file);
+  // A page opened from a file cannot open another file in Excel: the browser
+  // downloads a copy at best, and edits to a copy never reach the team's sheet.
+  // So the button says how to open the real one, through Claude.
+  $("#xlsx").onclick = () => {
+    let box = $("#xlsxbox"); if (!box) { box = document.createElement("p"); box.id = "xlsxbox"; box.className = "small"; $(".toolbar").after(box); }
+    box.innerHTML = `Your browser cannot open the Excel file itself. Ask Claude: <b>open the Excel file for ${txt(DATA.name)}</b>. Or open <b>${esc(DATA.file)}</b> in the same folder as this page.`;
+  };
 
   // Tabs
   const order = ["Overview", "Timeline", "Site & Title", "Due Diligence", "Legal", "Proforma", "Onboarding"];

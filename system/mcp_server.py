@@ -117,6 +117,28 @@ def _open_in_file_manager(path: "Path", select: bool = False) -> None:
         subprocess.Popen(["xdg-open", str(target)], **quiet)
 
 
+def _ranked_listings(source_path):
+    """The ranking a listing's rank refers to, and a line saying where it came from.
+
+    The saved ranking the person already saw, when there is one: ranking the file
+    again could number the listings differently, if the data behind the growth
+    score changed in between. Only with no saved screen is it ranked now, and the
+    reply says so (2026-10-29, from the plugin's 2026-10-27 fix).
+    """
+    import pandas as pd
+    from analysis.screening.fit_screen import saved_ranking, screen
+    saved = saved_ranking(source_path)
+    if saved is not None:
+        try:
+            return (pd.read_excel(saved, sheet_name="Ranked"),
+                    f"Rank as in the saved screen {saved.name}.")
+        except Exception as e:  # noqa: BLE001 -- fall through to ranking afresh, said out loud
+            log.warning(f"saved ranking {saved} unreadable: {e}")
+    return (screen(source_path, write_workbook=False)["dataframe"],
+            "No saved screen of this file was found, so it was ranked just now; "
+            "screen it first so the numbers match the ranking people see.")
+
+
 def _find_property_folders(property_name: str) -> list:
     """
     Find property folders under !PROPERTIES/<STATE>/ whose name contains
@@ -4037,7 +4059,8 @@ for every listing.""".replace(
             return f"Could not read the {tab} tab: {e}"
 
     @mcp.tool()
-    def open_mini_term_sheet_dashboard(property_name: str, existing_file: str = "") -> str:
+    def open_mini_term_sheet_dashboard(property_name: str, existing_file: str = "",
+                                       open_excel: bool = False) -> str:
         """
         Open a property's mini term sheet DASHBOARD in the user's browser: the
         one-page view of the saved workbook (figures, dates, what needs
@@ -4046,14 +4069,37 @@ for every listing.""".replace(
         file name to open that sheet's page; else the newest page in the
         property's folder opens.
 
+        With open_excel=True it opens the Excel FILE itself in Excel instead.
+        Use that when the user asks to open, download or edit the Excel file:
+        the page cannot open it (a browser only downloads a copy, and edits to
+        a copy never reach the team's sheet), so its button tells them to ask.
+
         Args:
             property_name: the property, as given to start_mini_term_sheet
             existing_file: the workbook's file name from save_mini_term_sheet (optional)
+            open_excel: open the workbook in Excel rather than the page
         """
         import webbrowser
         try:
             from term_sheet import sheet as ts
             folder = ts.property_sheet_folder(property_name)
+            if open_excel:
+                if existing_file:
+                    book = ts._find_existing_sheet(property_name, existing_file).with_suffix(".xlsx")
+                else:
+                    books = sorted((p for p in folder.glob("*.xlsx") if not p.name.startswith("~$")),
+                                   key=lambda p: p.stat().st_mtime, reverse=True)
+                    book = books[0] if books else None
+                if not book or not book.is_file():
+                    return (f"No mini term sheet workbook in {folder.name} yet. Save a sheet first "
+                            "with save_mini_term_sheet.")
+                # os.startfile starts no child process of ours, so nothing can
+                # touch the MCP pipe; elsewhere the file manager's opener does.
+                if sys.platform == "win32":
+                    os.startfile(str(book))
+                else:
+                    _open_in_file_manager(book)
+                return f"Opened {book.name} in Excel. File: {book}"
             if existing_file:
                 page = ts._find_existing_sheet(property_name, existing_file).with_suffix(".html")
                 if not page.is_file():
@@ -4066,8 +4112,8 @@ for every listing.""".replace(
                             "save_mini_term_sheet and the page is built beside it.")
                 page = pages[0]
             if webbrowser.open(page.as_uri()):
-                return (f"Opened {page.name} in the browser. The Excel file is one click away on the "
-                        f"page. File: {page}")
+                return (f"Opened {page.name} in the browser. To open the Excel file itself, call this "
+                        f"tool again with open_excel=True. File: {page}")
             return f"Could not confirm a browser opened. Open this file directly: {page}"
         except Exception as e:
             return f"Could not open the dashboard: {e}"
@@ -5330,7 +5376,6 @@ for every listing.""".replace(
             radius_miles:  Search radius (default 5)
         """
         try:
-            from analysis.screening.fit_screen import screen
             from pipeline.proximity_tool import coordinate_coverage, run_proximity_search
 
             source_path = _resolve_costar_source(source_file=source_file,
@@ -5339,10 +5384,10 @@ for every listing.""".replace(
                 return (f"{_no_file_msg(source_file)}. "
                         f"Call open_costar_folder to see the drop folder.")
 
-            df = screen(source_path, write_workbook=False)["dataframe"]
+            df, basis = _ranked_listings(source_path)
             hit = df[df["Rank"] == rank]
             if hit.empty:
-                return f"No listing ranked {rank} — this file has {len(df)}."
+                return f"No listing ranked {rank} — this file has {len(df)}. {basis}"
 
             row = hit.iloc[0]
             lat, lng = row.get("Latitude"), row.get("Longitude")
@@ -5363,7 +5408,7 @@ for every listing.""".replace(
             header = (f"#{rank} {row.get('Property Address')} — "
                       f"{_acres_str(row.get('Land Area (AC)'))} {row.get('Secondary Type')}, "
                       f"{row.get('City')}\n"
-                      f"Ranked {rank} of {len(df)} · {row.get('Fit_Tier')}\n")
+                      f"Ranked {rank} of {len(df)} · {row.get('Fit_Tier')}\n{basis}\n")
             return header + "\n" + body
 
         except Exception as e:
@@ -5437,21 +5482,21 @@ for every listing.""".replace(
             radius_miles:   search radius (default 5)
         """
         try:
-            from analysis.screening.fit_screen import screen
             from pipeline.proximity_tool import compare_proximity, coordinate_coverage
 
             lat = lng = None
             label = ""
+            basis = ""
             if rank:
                 source_path = _resolve_costar_source(source_file=source_file,
                                                      property_name=listing_property_name)
                 if source_path is None:
                     return (f"{_no_file_msg(source_file)}. "
                             f"Call open_costar_folder to see the drop folder.")
-                df = screen(source_path, write_workbook=False)["dataframe"]
+                df, basis = _ranked_listings(source_path)
                 hit = df[df["Rank"] == rank]
                 if hit.empty:
-                    return f"No listing ranked {rank} — this file has {len(df)}."
+                    return f"No listing ranked {rank} — this file has {len(df)}. {basis}"
                 row = hit.iloc[0]
                 lat, lng = row.get("Latitude"), row.get("Longitude")
                 if lat is None or lng is None or lat != lat or lng != lng:
@@ -5462,12 +5507,13 @@ for every listing.""".replace(
                 label = f"LISTING {rank} - {row.get('Property Address')}"
                 lat, lng = float(lat), float(lng)
 
-            return compare_proximity(
+            body = compare_proximity(
                 property_names=list(property_names or []),
                 radius_miles=radius_miles,
                 vaulter_dir=Path(__file__).parent,
                 candidate_label=label, candidate_lat=lat, candidate_lon=lng,
             )
+            return f"{basis}\n\n{body}" if basis else body
         except Exception as e:
             log.error(f"[MCP] compare_proximity_to_portfolio failed: {e}", exc_info=True)
             return f"compare_proximity_to_portfolio failed: {e}"
