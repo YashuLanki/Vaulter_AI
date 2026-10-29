@@ -2112,13 +2112,17 @@ def create_mcp_server():
     mcp = FastMCP(
         name="Vaulter AI Property Intelligence",
         instructions="""Before doing anything else in a brand-new conversation, call
-check_system_health() once to check whether this local instance is actually working
-(document library synced and indexed, shared folder connectivity, active portfolio
-file, code version). Do not call it again later in the same conversation.
-If it comes back healthy, say nothing about it at all and just proceed with whatever the
-user asked. Only mention it if it reports an actual problem -- then state the problem in
-plain English and continue with the user's request anyway; never withhold help or delay a
-task because of what this check finds.
+check_for_update() once. It only says whether a newer version of Vaulter AI is waiting
+to be installed (or installed and waiting for a restart). If it says the user is up to
+date, say nothing about it at all and just proceed with whatever the user asked. If it
+says an update is waiting, tell the user in one plain sentence and ask whether they want
+it installed now -- alongside their answer, never instead of it. Do not call it again
+later in the same conversation; if an update arrives mid-conversation, a note on a later
+tool answer will say so.
+
+check_system_health() is the fuller check (document library, shared folder, portfolio
+file, out-of-date summaries). Call it only when the user asks whether things are working,
+or something seems wrong -- not automatically.
 
 If ANY vaulter_ai tool call -- including check_system_health itself -- errors, times out,
 or hangs, that's a different situation from check_system_health reporting a data problem:
@@ -2149,8 +2153,8 @@ answer is YES and you should say so directly. Do NOT search the
 connector directory for it — this system is a local MCP server on the user's own
 computer, not an installable connector, so a connector search will always come back
 empty and reads as "not connected" when in fact it is working. Answer from the tools
-you already hold; if you want to confirm the library is synced and indexed, that is
-what check_system_health already reported at the start of this conversation.
+you already hold; if you want to confirm the library is synced and indexed, call
+check_system_health.
 
 IF THE USER SEEMS NEW OR UNSURE WHAT TO ASK. When someone asks "what can you
 do?", "how does this work?", or opens with something vague, do not recite a
@@ -2278,6 +2282,57 @@ for every listing.""".replace(
     )
 
     @mcp.tool()
+    def check_for_update() -> str:
+        """
+        Say whether a newer version of Vaulter AI is waiting for this user.
+        Call this once, automatically, at the start of every new conversation.
+
+        If it says the user is up to date, say NOTHING about it and carry on
+        with what they asked. If an update is ready, tell them in one plain
+        sentence and ask whether they want it installed now; if yes, call
+        apply_pending_update. If a restart is owed, tell them to fully quit
+        and reopen Claude Desktop. Never delay their answer for this.
+        """
+        # The quiet upkeep check_system_health used to do at the start of
+        # every conversation -- staging an update, leaving this machine's
+        # note on the team list, sending errors to the team -- still runs
+        # here, so nothing is lost by no longer calling that tool by default.
+        # Only its reporting is dropped: the owner asked (2026-10-29) that
+        # the start of a chat mention the version and nothing else.
+        for _step in (_report_unfinished_apply, _check_and_stage_update,
+                      _check_and_stage_org_settings,
+                      _write_install_checkin, _report_errors_to_team):
+            try:
+                _step()
+            except Exception as e:
+                log.warning(f"[UPDATE] {_step.__name__} failed (continuing): {e}")
+        _mark_update_checked()
+
+        waiting = _restart_pending()
+        if waiting:
+            return (f"Vaulter AI was updated to {waiting}, but Claude Desktop has not "
+                    f"been restarted since. Tell the user to fully quit and reopen "
+                    f"Claude Desktop (not just close the window). Nothing is broken "
+                    f"meanwhile.")
+
+        ready = _update_ready()
+        if ready:
+            what = ""
+            try:
+                from config import PENDING_UPDATE_DIR
+                staged = _json_object(Path(PENDING_UPDATE_DIR) / "ready.json") or {}
+                if str(staged.get("notes") or "").strip():
+                    what = f" What it changes: {str(staged['notes']).strip()[:600]}."
+            except Exception:
+                what = ""
+            return (f"A new version of Vaulter AI ({ready}) is ready to install.{what} "
+                    f"Tell the user in one plain sentence and ask whether they want it "
+                    f"installed now. If yes, call apply_pending_update. Never install it "
+                    f"without asking.")
+
+        return f"Up to date ({_get_code_version()}). Say nothing about this."
+
+    @mcp.tool()
     def check_system_health() -> str:
         """
         Check whether this local Vaulter AI instance is actually working:
@@ -2292,13 +2347,11 @@ for every listing.""".replace(
         and running it here means it happens roughly once per Claude Desktop
         session, which is the same cadence in practice.
 
-        Call this once, automatically, at the very start of every new
-        conversation, before anything else -- not on every message, and
-        not again later in the same conversation. If everything comes
-        back healthy, say NOTHING about it and just proceed with the
-        user's actual request; a clean bill of health is not worth
-        reporting. Only surface this if it finds an actual problem, and
-        even then keep it brief and keep going -- state the issue in
+        Call this when the user asks whether Vaulter AI is working, or when
+        something seems wrong -- NOT automatically at the start of a
+        conversation (check_for_update does that). If everything comes
+        back healthy, say so briefly. If it finds a problem, keep it brief
+        and keep going -- state the issue in
         plain English, then continue with whatever the user asked. Never
         refuse or delay a task because of what this check finds; it is
         informational only.
@@ -5522,15 +5575,15 @@ for every listing.""".replace(
     return mcp
 
 
-def _update_check_due(hours: int = 6) -> bool:
+def _update_check_due(hours: float = 1) -> bool:
     """
     Whether it is time to ask this install's release channel for a newer version.
 
     Gated, because the question costs a shared-OneDrive round trip and it is now
     asked from ordinary tool calls rather than only from check_system_health.
-    Six hours rather than a day: a working day holds more than one conversation,
-    and the whole reason for asking here is that the health check cannot be
-    relied on to ask even once.
+    One hour (was six until 2026-10-29): the owner wants someone already in a
+    conversation to hear about a new release within the hour, not the next day.
+    The cost is one read of a small file OneDrive already keeps on this disk.
 
     Returns True whenever it CANNOT tell. An unreadable stamp must not silence
     the check -- a machine that never asks is precisely the state this exists to
@@ -5651,7 +5704,8 @@ def _with_pending_notice(tool_name: str, result):
         the channel check, returns the original result untouched.
     """
     try:
-        if tool_name == "check_system_health" or not isinstance(result, str):
+        if tool_name in ("check_system_health", "check_for_update") \
+                or not isinstance(result, str):
             return result
 
         # Ask the channel at most every few hours. Marked BEFORE the call, not

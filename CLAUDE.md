@@ -715,8 +715,11 @@ days on a machine in daily use, and nothing anywhere would say so.
 Worse, the **download** was wired to the same single caller. `_check_and_stage_update` runs only
 from `check_system_health`, so on an install whose health check never fires there was nothing
 staged to report either — the notice would have been permanently silent for the exact machines it
-is for. Both halves had to move: the wrapper now asks the channel too, on a **six-hour gate**
-(`UPDATE_CHECK_STAMP_FILE`, local so the gate itself costs no shared-folder round trip). Measured
+is for. Both halves had to move: the wrapper now asks the channel too, on a **one-hour gate** (six
+until 2026-10-29) (`UPDATE_CHECK_STAMP_FILE`, local so the gate itself costs no shared-folder
+round trip). **Since 2026-10-29 the start-of-conversation call is `check_for_update`, not
+`check_system_health`**, at the owner's request: it runs the same quiet upkeep but reports only
+"update ready" or "restart owed", never stale summaries. `check_system_health` is now on request. Measured
 through the real stdio transport: **0.64s for a tool call that asks the channel against 0.51s for
 one that does not.**
 
