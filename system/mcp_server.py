@@ -2204,6 +2204,9 @@ search about them proves nothing. Route by question:
   check_mini_term_sheet_documents only after the user agrees to look for what is
   missing or to confirm the numbers. Only when someone asks for a sheet, for a
   named property.
+- The deal tracker or pipeline, what is under contract or closing, track record,
+  deals bought or sold, contributions or returns -> open_deal_tracker (it brings
+  itself up to date when opened)
 Never answer "the firm has no record of that" just because search_documents
 came back empty -- for everything above the first line, the record was never
 in that index to begin with.
@@ -4463,6 +4466,460 @@ for every listing.""".replace(
             return "\n".join(msg)
         except Exception as e:
             return f"Could not save the mini term sheet: {e}"
+
+    # ─── Deal tracker (deal_tracker/, 2026-10-29) ────────────────────────────
+    # The firm's acquisitions and dispositions: the live pipeline and the whole
+    # history, kept current from Smartsheet, the summaries, closing statements
+    # and offer papers on the drive and saved email attachments, so nobody has
+    # to remember to update a spreadsheet. Page and Excel copy update each other.
+
+    def _deal_tracker_page(rec) -> str:
+        from deal_tracker import dashboard as _dtd
+        try:
+            return str(_dtd.write(rec))
+        except Exception as e:
+            return f"(the page could not be rebuilt: {e})"
+
+    @mcp.tool()
+    def open_deal_tracker(open_excel: bool = False) -> str:
+        """
+        Open the DEAL TRACKER: the live PIPELINE (every acquisition and
+        disposition in motion: stage, buyer or seller, price, key date, days
+        out, next step, offer terms, open items) and the HISTORY of every deal
+        the firm has made (equity put in, returns, sale dates, hold, status,
+        all-time / 5-year / 1-year views). Use when anyone asks for the deal
+        tracker or pipeline, what is under contract or closing soon, where a
+        deal stands, the track record, how many deals we bought or sold, or
+        total contributions or returns. open_excel=True opens the Excel copy
+        in Excel instead (it is two-way: edits saved there are kept).
+
+        Opening it brings it up to date first (Smartsheet, the property
+        summaries and any edits saved in the Excel copy, which cost nothing)
+        and reports new closing statements, offer papers or saved email
+        attachments waiting to be read. Read those straight away, as the reply
+        says: keeping the tracker current without anyone having to remember is
+        the point of it.
+
+        Args:
+            open_excel: open the Excel copy instead of the page
+        """
+        import webbrowser
+        try:
+            from deal_tracker import tracker as T
+            rec = T.load()
+            if rec is None:
+                return ("There is no deal tracker yet. It starts from the old tracker spreadsheet and the "
+                        "team's pipeline workbook: ask the user where they are, then call "
+                        "import_deal_tracker(file_path=..., pipeline_file=...).")
+            T.refresh(rec)
+            T.save(rec)
+            page = Path(_deal_tracker_page(rec))
+            target = page.with_name("Deal Tracker.xlsx") if open_excel else page
+            if open_excel and target.is_file() and sys.platform == "win32":
+                os.startfile(str(target))
+            elif target.is_file():
+                webbrowser.open(target.as_uri())
+            msg = [f"Opened {target.name}. File: {target}"]
+            # New papers are found through the file list, so "nothing new" is only as
+            # fresh as the list (the 2026-08-11 lesson); say its age when it is old.
+            from corpus import index as _ix
+            age = _ix.index_age()
+            if not age:
+                msg.append("The list of the drive's files is missing, so new papers on the drive were NOT "
+                           "checked. Say so; do not tell the user nothing is new.")
+            elif (_dt_mod.datetime.now(age[1].tzinfo) - age[1]).days >= 2:
+                msg.append(f"The list of the drive's files was last rebuilt {age[1].date()}; papers filed "
+                           "since then are not seen yet. Mention this in one line.")
+            waiting = T.pending(rec)
+            if waiting:
+                msg.append(f"\n{len(waiting)} new document(s) to read into the tracker:")
+                msg += [f"  - {w['filed']} {w['source']}: {w['property_folder'] or 'no property folder'} "
+                        f"({w['document'].rsplit('/', 1)[-1]})" for w in waiting[:15]]
+                msg.append("Do this now without asking: call get_deal_tracker_documents, record each one "
+                           "(closing statements with save_deal_tracker_update, offer papers with "
+                           "save_deal_pipeline_update), repeat until none are left, then call "
+                           "open_deal_tracker again so the page shows them. Tell the user in one short "
+                           "line what was added.")
+            if rec["attention"]:
+                msg.append(f"\n{len(rec['attention'])} item(s) need a person (also on the page): "
+                           + " | ".join(rec["attention"][:6])
+                           + ("" if len(rec["attention"]) <= 6 else " | ...")
+                           + "\nMention these briefly; when the user answers, use edit_deal_tracker.")
+            return "\n".join(msg)
+        except Exception as e:
+            return f"Could not open the deal tracker: {e}"
+
+    @mcp.tool()
+    def get_deal_tracker_documents(limit: int = 2, document_key: str = "", file_name: str = "") -> str:
+        """
+        The next new closing statements, offer papers (LOI, counter, PSA,
+        amendment) or saved email attachments for the deal tracker, with their
+        text, so you can record what each says. Only documents not read before
+        are returned, and never a file whose name suggests accounting.
+
+        Args:
+            limit: how many to return at once (1 to 4)
+            document_key: with file_name, read one of the OTHER versions listed
+                for that closing (when they look like a separate sale)
+            file_name: that other version's file name, as listed
+        """
+        try:
+            from deal_tracker import tracker as T
+            from deal_tracker import pipeline as P
+            rec = T.load()
+            if rec is None:
+                return "There is no deal tracker yet; call open_deal_tracker first."
+            waiting = T.pending(rec)
+            if document_key and file_name:
+                w = next((x for x in waiting if x["key"] == document_key), None)
+                f = next((p for p in (w or {}).get("files", []) if p.rsplit("/", 1)[-1] == file_name.strip()), None)
+                if not f:
+                    return "That file is not one of the versions listed for that document_key."
+                w = {**w, "document": f, "others": []}
+                return (f"=== document_key: {w['key']} (other version)\nReading: {f}\n" + T.read_text(w)
+                        + "\n\nRecord it with save_deal_tracker_update(document_key=..., ...) as usual.")
+            if not waiting:
+                return "Nothing new to read. Call open_deal_tracker to show the updated page."
+            batch = waiting[:max(1, min(limit, 4))]
+            out = [f"{len(waiting)} waiting; here are {len(batch)}.", ""]
+            for w in batch:
+                paper = w["key"].startswith("paper:")
+                out.append(f"=== document_key: {w['key']}")
+                out.append(f"From: {w['source']}. Filed: {w['filed']}. "
+                           + (f"An offer paper (LOI, counter, PSA, amendment) from the offer folder "
+                              f"'{w['offer_folder']}'. " if paper else f"Folder suggests: {w['side']}. ")
+                           + f"Property folder: {w['property_folder'] or 'none'}.")
+                if paper:
+                    known = [d for d in rec.get("pipeline", []) if d["id"] == w.get("hint")]
+                    known = known or P.find_entry(rec, w["property_folder"])[:3]
+                    for d in known:
+                        out.append(f"Pipeline now has {d['id']}: {d.get('type')} {d.get('property')}, "
+                                   f"{d.get('buyer') if d.get('type') == 'Disposition' else d.get('seller')}, "
+                                   f"stage {d.get('stage')}, price {d.get('price')}, next step {d.get('next_step')}.")
+                out.append(f"Reading: {w['document']}")
+                if w["others"]:
+                    out.append(("Earlier or other papers in this offer (not read): " if paper else
+                                "Other versions in the same closing (not read): ") + "; ".join(w["others"][:8]))
+                try:
+                    if paper:
+                        text, used = P.read_best(rec, w)
+                        if used != w["document"]:
+                            out.append(f"(That file would not open; read {used.rsplit('/', 1)[-1]} instead.)")
+                        out.append(text)
+                    else:
+                        out.append(T.read_text(w))
+                except Exception as e:
+                    out.append(f"[Could not read it: {e}. Skip it: record nothing, and it will be offered "
+                               "again next time.]")
+                out.append("")
+            if any(w["key"].startswith(("paper:", "inbox:")) for w in batch):
+                out.append(
+                    "For an OFFER PAPER call save_deal_pipeline_update(document_key=..., deal=<pipeline id, "
+                    "or the property>, deal_type='Acquisition' or 'Disposition', fields={...}) with only what "
+                    "the paper states: stage (one of " + ", ".join(P.STAGES) + "), buyer, seller, price, "
+                    "price_basis, deposit, loi_date / counter_date / psa_date / dd_expires / close_date "
+                    "(YYYY-MM-DD), acres, parcel, status (one short line on where it stands, e.g. 'PSA v2 "
+                    "redline from buyer 10/16/26'), next_step (a few words), and terms={'Document / Date', "
+                    "'Price', 'Deposit', 'DD / Feasibility', 'Closing', 'Key Condition', 'Status'}. A DRAFT "
+                    "PSA means 'PSA Negotiation', never 'Under Contract'; only a fully executed PSA is "
+                    "'Under Contract'. A new buyer's offer on a property is a NEW pipeline deal "
+                    "(create_new=true). If it is not about a deal at all, not_a_deal=true.\n")
+            out.append(
+                "For a CLOSING STATEMENT call save_deal_tracker_update(document_key=..., kind=..., deal=..., "
+                "date=..., price=..., acres=..., other_party=..., final_sale=...):\n"
+                "- kind: 'purchase' when the firm bought, 'sale' when it sold (all or part), 'neither' for "
+                "anything else (a loan, a refinance, an easement, an estimate with no closing).\n"
+                "- price: the contract SALES PRICE line, not cash to seller or totals after credits. "
+                "date: the closing or settlement date as YYYY-MM-DD. acres: only if the document states it.\n"
+                "- deal: the property, as the folder or document names it. final_sale=true only if the "
+                "document shows the firm's last remaining land was sold.\n"
+                "- contributions / distributions: only if the document itself states the investors' "
+                "totals; never work them out.\n"
+                "- An estimated statement with no settlement date: record kind='neither'; the final one "
+                "will be offered when it is filed.\n"
+                "- If the other versions listed look like a SEPARATE closing (another buyer or parcel), "
+                "record this one with keep_open=true, read that one with get_deal_tracker_documents("
+                "document_key=..., file_name=...), and record it as usual.\n"
+                "Use only figures printed in the document. Leave out anything it does not state.")
+            return "\n".join(out)
+        except Exception as e:
+            return f"Could not read the deal tracker documents: {e}"
+
+    @mcp.tool()
+    def save_deal_tracker_update(document_key: str, kind: str, deal: str = "", date: str = "",
+                                 price: float | None = None, acres: float | None = None,
+                                 other_party: str = "", final_sale: bool = False,
+                                 contributions: float | None = None, distributions: float | None = None,
+                                 create_new_deal: bool = False, state: str = "",
+                                 keep_open: bool = False) -> str:
+        """
+        Record what one CLOSING STATEMENT (or a saved attachment that is one)
+        from get_deal_tracker_documents says. Marks it read, with every other
+        version of the same closing, and rebuilds the page. A figure fills an
+        empty field; one that disagrees with the record is kept aside for a
+        person, never overwritten. A sale also closes the matching pipeline deal.
+
+        Args:
+            document_key: exactly as get_deal_tracker_documents gave it
+            kind: 'purchase', 'sale' or 'neither'
+            deal: the deal's name or id (not needed for 'neither')
+            date: closing date, YYYY-MM-DD
+            price: the contract price, in dollars
+            acres: acres bought or sold, if stated
+            other_party: the seller (purchase) or buyer (sale)
+            final_sale: true only if this sale left the firm owning none of it
+            contributions: investors' total put in, only if the document states it
+            distributions: investors' total returned, only if the document states it
+            create_new_deal: true to add a deal that is not in the tracker yet
+            state: two-letter state, for a new deal
+            keep_open: true when another statement in the same closing folder is
+                       a separate sale still to be recorded
+        """
+        try:
+            from deal_tracker import tracker as T
+            rec = T.load()
+            if rec is None:
+                return "There is no deal tracker yet."
+            item = next((w for w in T.pending(rec) if w["key"] == document_key), None)
+            if item is None:
+                return ("That document_key is not waiting to be read (already recorded, or mistyped). "
+                        "Call get_deal_tracker_documents for the current list.")
+            kind = (kind or "").strip().lower()
+            if kind not in ("purchase", "sale", "neither"):
+                return "kind must be 'purchase', 'sale' or 'neither'."
+            if kind == "neither":
+                T.mark_read(rec, document_key, "not a purchase or sale")
+                T.save(rec)
+                return f"Marked as read, nothing recorded. {len(T.pending(rec))} left."
+            hits = T.find_deal(rec, deal) if deal.strip() else []
+            if not hits and item["property_folder"]:
+                hits = T.find_deal(rec, item["property_folder"])
+            if len(hits) > 1:
+                return ("That name fits more than one deal; call again with deal set to one of these ids: "
+                        + "; ".join(f"{h['id']} = {h['name']}" for h in hits[:10]))
+            if not hits:
+                if not create_new_deal:
+                    guess = T.likely_same(rec, deal or item["property_folder"])
+                    return ("No deal in the tracker has that name."
+                            + (f" Closest: {guess['id']} = {guess['name']}." if guess else "")
+                            + " Call again with deal set to the right id, or create_new_deal=true if it "
+                              "is genuinely a new deal.")
+                d = T.new_deal(rec, deal or item["property_folder"], f"{item['source']} {item['document']}",
+                               state=state.strip().upper())
+            else:
+                d = hits[0]
+            name = item["document"].rsplit("/", 1)[-1]
+            source = ("Closing statement " if item["source"] == "drive" else "Email attachment ") + name
+            said = T.record_event(rec, d, kind, date, price, acres, other_party, final_sale,
+                                  contributions, distributions, source)
+            if rec.get("pipeline"):
+                from deal_tracker import pipeline as P
+                closed = P.close_from_statement(rec, d, kind, date, price, other_party)
+                if closed:
+                    said.append(closed)
+            if item["property_folder"]:
+                T.link_name(rec, item["property_folder"], d)
+            if not keep_open:
+                T.mark_read(rec, document_key, kind, d["id"])
+            T.save(rec)
+            _deal_tracker_page(rec)
+            return (f"{d['name']}: " + (", ".join(said) or "nothing new") + f". Status now: {T.status(d)}. "
+                    f"{len(T.pending(rec))} document(s) left.")
+        except Exception as e:
+            return f"Could not record that document: {e}"
+
+    @mcp.tool()
+    def save_deal_pipeline_update(deal: str, fields: dict, document_key: str = "", deal_type: str = "",
+                                  create_new: bool = False, not_a_deal: bool = False,
+                                  open_item_done: str = "", new_open_item: str = "") -> str:
+        """
+        Update one LIVE pipeline deal: from an offer paper given by
+        get_deal_tracker_documents (pass its document_key), or because the user
+        said so (no document_key). Only what the paper or the user states;
+        a blank never erases. Rebuilds the page and the Excel copy.
+
+        Args:
+            deal: the pipeline id (p001...) or the property
+            fields: any of stage, buyer, seller, price, price_basis, deposit,
+                    loi_date, counter_date, psa_date, dd_expires, close_date,
+                    acres, parcel, apn, city, county, state, broker, escrow,
+                    status, next_step, terms (a dict of offer terms)
+            document_key: the paper's key, when the update comes from a paper
+            deal_type: 'Acquisition' or 'Disposition' (needed for a new deal)
+            create_new: true for an offer not in the pipeline yet
+            not_a_deal: true if the paper is not about a deal; marks it read
+            open_item_done: words from an open item that is now resolved
+            new_open_item: something a person needs to check
+        """
+        try:
+            from deal_tracker import tracker as T
+            from deal_tracker import pipeline as P
+            rec = T.load()
+            if rec is None or rec.get("pipeline") is None:
+                return "There is no pipeline yet; load it with import_deal_tracker(pipeline_file=...)."
+            item = None
+            if document_key:
+                item = next((w for w in T.pending(rec) if w["key"] == document_key), None)
+                if item is None:
+                    return "That document_key is not waiting (already recorded, or mistyped)."
+            if not_a_deal:
+                if item:
+                    T.mark_read(rec, document_key, "not a deal paper")
+                    T.save(rec)
+                return f"Marked as read, nothing recorded. {len(T.pending(rec))} left."
+            hits = P.find_entry(rec, deal, deal_type) if deal.strip() else []
+            if len(hits) > 1:
+                return ("That fits more than one pipeline deal; call again with deal set to one id: "
+                        + "; ".join(f"{h['id']} = {h.get('type')} {h.get('property')} "
+                                    f"({h.get('buyer') or h.get('seller')}, {h.get('stage')})" for h in hits[:10]))
+            source = (f"{'Offer paper' if document_key.startswith('paper:') else 'Email attachment'} "
+                      f"{item['document'].rsplit('/', 1)[-1]}") if item else "Told by a teammate"
+            if not hits:
+                if not create_new or deal_type.title() not in ("Acquisition", "Disposition"):
+                    return ("No pipeline deal matches. Call again with deal set to its id, or with "
+                            "create_new=true and deal_type 'Acquisition' or 'Disposition'.")
+                d = P.new_entry(rec, deal_type, deal, source)
+            else:
+                d = hits[0]
+            said = P.apply(rec, d, fields or {}, source)
+            if item:
+                if item["key"].startswith("paper:"):
+                    folder = item["key"][len("paper:"):]
+                    if folder not in d["folders"]:
+                        d["folders"].append(folder)
+                d["documents"] = (d.get("documents", []) + [{"name": item["document"].rsplit("/", 1)[-1],
+                                                              "filed": item["filed"]}])[-12:]
+                T.mark_read(rec, document_key, "pipeline", d["id"])
+            items = rec.setdefault("open_items", [])
+            if open_item_done.strip():
+                gone = [i for i in items if open_item_done.strip().lower() in i.lower()]
+                rec["open_items"] = [i for i in items if i not in gone]
+                said.append(f"{len(gone)} open item(s) cleared")
+            if new_open_item.strip():
+                rec["open_items"].append(f"{d.get('property')}: {new_open_item.strip()}")
+                said.append("open item added")
+            T.save(rec)
+            _deal_tracker_page(rec)
+            return (f"{d['id']} {d.get('property')}: " + (", ".join(said) or "nothing new")
+                    + f". Stage: {d.get('stage')}. {len(T.pending(rec))} document(s) left.")
+        except Exception as e:
+            return f"Could not update the pipeline: {e}"
+
+    @mcp.tool()
+    def edit_deal_tracker(deal: str, field: str, value: str) -> str:
+        """
+        Change one thing in the HISTORY when the user says so: join two names
+        that are the same deal, or correct a figure. Use for the "needs a
+        person" items once the user answers. (Pipeline deals are changed with
+        save_deal_pipeline_update.)
+
+        Args:
+            deal: the deal's name or id
+            field: 'same as' (value = the OTHER deal's name or id; the two are
+                   joined, keeping the old tracker's deal), or one of: name, state,
+                   acquired (YYYY-MM-DD), purchase_price, acres, contributions,
+                   distributions, last_sale (YYYY-MM-DD), lost (yes/no), note
+            value: the new value
+        """
+        try:
+            from deal_tracker import tracker as T
+            rec = T.load()
+            if rec is None:
+                return "There is no deal tracker yet."
+            hits = T.find_deal(rec, deal)
+            if len(hits) != 1:
+                return ("Which deal? " + ("; ".join(f"{h['id']} = {h['name']}" for h in hits[:10])
+                                          if hits else "No deal has that name."))
+            d, field = hits[0], field.strip().lower().replace(" ", "_")
+            if field == "same_as":
+                other = T.find_deal(rec, value)
+                if len(other) != 1 or other[0] is d:
+                    return ("Which deal is it the same as? " + ("; ".join(f"{h['id']} = {h['name']}"
+                                                                         for h in other[:10]) or "No match."))
+                o = other[0]
+                keep, drop = (o, d) if d["section"] == "new" else (d, o)
+                if drop["section"] == "new":
+                    T.merge(rec, keep, drop)
+                    said = f"joined: {drop['name']} is now part of {keep['name']}"
+                else:
+                    T.link_name(rec, drop["name"], keep)
+                    said = f"{drop['name']} recorded as another name for {keep['name']}"
+            elif field == "note":
+                d["notes"].append(value.strip())
+                said = "note added"
+            elif field in ("name", "state", "acquired", "last_sale"):
+                if field == "name":
+                    T.link_name(rec, d["name"], d)
+                d[field] = value.strip()
+                d["sources"][field] = "Corrected by hand"
+                said = f"{field} set"
+            elif field in ("purchase_price", "acres", "contributions", "distributions"):
+                num = T._num(value)
+                if num is None:
+                    return f"{value!r} is not a number."
+                d[field] = num
+                d["sources"][field] = "Corrected by hand"
+                said = f"{field.replace('_', ' ')} set"
+            elif field == "lost":
+                d["lost"] = value.strip().lower() in ("yes", "true", "y")
+                said = "lost flag set"
+            else:
+                return "That field cannot be changed here."
+            rec["attention"] = [a for a in rec["attention"] if d["name"] not in a]
+            T.save(rec)
+            _deal_tracker_page(rec)
+            return f"Done: {said}. Call open_deal_tracker to show the page."
+        except Exception as e:
+            return f"Could not change the deal tracker: {e}"
+
+    @mcp.tool()
+    def import_deal_tracker(file_path: str = "", pipeline_file: str = "", replace: bool = False) -> str:
+        """
+        Start the deal tracker. file_path is the old acquisition/disposition
+        tracker spreadsheet (the HISTORY, its first sheet); pipeline_file is
+        the team's pipeline workbook (Dashboard / Deal Detail / Offer Terms
+        sheets, the LIVE deals). Done once; afterwards the tracker keeps itself
+        current. A pipeline_file alone adds the pipeline to an existing tracker.
+        Refuses to start again unless replace=true, which discards everything
+        recorded since.
+
+        Args:
+            file_path: the history spreadsheet's full path
+            pipeline_file: the pipeline workbook's full path
+            replace: start over from these spreadsheets
+        """
+        try:
+            from deal_tracker import tracker as T
+            paths = {}
+            for k, v in (("history", file_path), ("pipeline", pipeline_file)):
+                if v.strip():
+                    paths[k] = Path(v.strip().strip('"')).expanduser()
+                    if not paths[k].is_file():
+                        return f"No file at {paths[k]}. Ask the user for the spreadsheet's full path."
+            if not paths:
+                return "Give file_path (the history spreadsheet), pipeline_file (the pipeline workbook), or both."
+            rec = T.load()
+            if "history" in paths:
+                if rec is not None and not replace:
+                    return ("A deal tracker already exists. Starting again would discard everything "
+                            "recorded since; only do that if the user asks, with replace=true.")
+                rec = T.import_tracker(paths["history"])
+            elif rec is None:
+                return "Start the history first: file_path is the old tracker spreadsheet."
+            if "pipeline" in paths:
+                if rec.get("pipeline") and not replace:
+                    return "The pipeline is already loaded; replace=true would discard its updates since."
+                T.add_pipeline(rec, paths["pipeline"])
+            T.refresh(rec)
+            T.save(rec)
+            page = _deal_tracker_page(rec)
+            return (f"Deal tracker: {len(rec['deals'])} deals in the history"
+                    + (f", {len(rec['pipeline'])} in the pipeline (papers filed from "
+                       f"{rec['pipeline_watch_from']} on update it)" if rec.get("pipeline") else "")
+                    + f". New closings are picked up from {rec['watch_from']} on. Page: {page}. "
+                      "Call open_deal_tracker to open it and read any new documents.")
+        except Exception as e:
+            return f"Could not start the deal tracker: {e}"
 
     @mcp.tool()
     def open_property_files(property_name: str) -> str:

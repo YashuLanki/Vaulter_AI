@@ -1,0 +1,458 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Deal Tracker</title>
+<style>
+/* The mini term sheet's palette (slate, gold, serif headings, mono figures),
+   laid out for finding things: one search, jump links, a rail of what is coming
+   up, and a side panel for a deal. No external fonts or scripts: the page opens
+   from the team folder with no network. */
+:root{
+  --bg:#f4f5f3; --surface:#ffffff; --surface-2:#f0f2f1; --surface-3:#e6eae9; --ink:#1d2627; --muted:#5f6c6d; --faint:#8b9798;
+  --line:#dde2e1; --slate:#394f50; --slate-ink:#ffffff; --gold:#f7c240; --gold-ink:#6b4d00; --gold-soft:#fdf3d6;
+  --ok:#2f7a4f; --ok-soft:#e3f2e8; --warn:#a05f00; --warn-soft:#fcefd8; --risk:#b03a2e; --risk-soft:#f9e3e0;
+  --info:#3d5f86; --info-soft:#e5ecf5; --shadow:0 1px 2px rgba(20,30,30,.06),0 4px 14px rgba(20,30,30,.05);
+  --display:Georgia,"Times New Roman",serif; --body:"Segoe UI",Helvetica,Arial,sans-serif; --mono:Consolas,Menlo,monospace;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#121819; --surface:#1a2223; --surface-2:#212b2c; --surface-3:#2a3536; --ink:#e7ecea; --muted:#a3b0af; --faint:#7d8a89;
+  --line:#2f3b3b; --slate:#22302f; --gold-ink:#f7c240; --gold-soft:#3a3018; --ok:#7cc79a; --ok-soft:#1c3226;
+  --warn:#f0b35a; --warn-soft:#382b14; --risk:#ee8b80; --risk-soft:#3b1f1c; --info:#9bbbe0; --info-soft:#1e2a38;
+  --shadow:0 1px 2px rgba(0,0,0,.3); color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#121819; --surface:#1a2223; --surface-2:#212b2c; --surface-3:#2a3536; --ink:#e7ecea; --muted:#a3b0af; --faint:#7d8a89;
+  --line:#2f3b3b; --slate:#22302f; --gold-ink:#f7c240; --gold-soft:#3a3018; --ok:#7cc79a; --ok-soft:#1c3226;
+  --warn:#f0b35a; --warn-soft:#382b14; --risk:#ee8b80; --risk-soft:#3b1f1c; --info:#9bbbe0; --info-soft:#1e2a38;
+  --shadow:0 1px 2px rgba(0,0,0,.3); color-scheme:dark}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth;scroll-padding-top:120px}
+body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.5 var(--body)}
+h1,h2,h3{margin:0} p{margin:0}
+.num{font-family:var(--mono);font-variant-numeric:tabular-nums}
+.muted{color:var(--muted)} .faint{color:var(--faint)} .small{font-size:12px} .nw{white-space:nowrap}
+button{font:inherit;color:inherit}
+
+.top{background:var(--slate);color:var(--slate-ink);border-bottom:3px solid var(--gold)}
+.top .in{max-width:1320px;margin:0 auto;padding:16px 20px;display:flex;flex-wrap:wrap;gap:12px 20px;align-items:center}
+.brand{display:grid;gap:2px;margin-right:auto}
+.brand .eyebrow{font-size:11px;letter-spacing:.1em;text-transform:uppercase;opacity:.75}
+.brand h1{font-family:var(--display);font-size:26px;font-weight:700;line-height:1.1}
+.brand .when{font-size:12px;opacity:.8}
+.search{position:relative;flex:1 1 280px;max-width:420px}
+.search input{width:100%;padding:10px 14px 10px 36px;border-radius:10px;border:1px solid transparent;background:rgba(255,255,255,.12);color:#fff;font:inherit}
+.search input::placeholder{color:rgba(255,255,255,.7)}
+.search input:focus{outline:none;background:var(--surface);color:var(--ink);border-color:var(--gold)}
+.search svg{position:absolute;left:12px;top:50%;transform:translateY(-50%);opacity:.75}
+.results{position:absolute;top:calc(100% + 6px);left:0;right:0;background:var(--surface);color:var(--ink);border:1px solid var(--line);border-radius:10px;box-shadow:var(--shadow);max-height:360px;overflow:auto;z-index:30}
+.results button{display:flex;width:100%;justify-content:space-between;gap:10px;text-align:left;border:0;background:none;padding:9px 12px;border-bottom:1px solid var(--line);cursor:pointer}
+.results button:hover,.results button:focus{background:var(--surface-2);outline:none}
+.tools{display:flex;gap:6px}
+.ibtn{border:1px solid rgba(255,255,255,.25);background:transparent;color:#fff;border-radius:8px;padding:8px 11px;cursor:pointer;font-size:13px}
+.ibtn:hover{background:rgba(255,255,255,.1)}
+
+.tabbar{position:sticky;top:0;z-index:20;background:color-mix(in srgb,var(--bg) 92%,transparent);backdrop-filter:blur(6px);border-bottom:1px solid var(--line)}
+.tabbar .in{max-width:1320px;margin:0 auto;padding:0 20px;display:flex;gap:4px;align-items:center}
+.tabbar button[role=tab]{border:0;background:none;padding:13px 16px 11px;font-weight:600;color:var(--muted);border-bottom:3px solid transparent;cursor:pointer}
+.tabbar button[aria-selected=true]{color:var(--ink);border-bottom-color:var(--gold)}
+.tabbar .count{font-weight:400;color:var(--faint);margin-left:4px}
+
+.wrap{max-width:1320px;margin:0 auto;padding:20px 20px 56px}
+section.view[hidden]{display:none}
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-bottom:18px}
+.kpi{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:14px 16px;box-shadow:var(--shadow);display:grid;gap:2px;align-content:start}
+.kpi .lab{font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-weight:600}
+.kpi .val{font-family:var(--mono);font-size:26px;font-weight:600;line-height:1.25}
+.kpi .val.txt{font-family:var(--display);font-size:19px;padding-top:5px}
+.kpi .sub{font-size:12px;color:var(--muted)}
+.kpi .rows{display:grid;gap:3px;margin-top:6px;border-top:1px solid var(--line);padding-top:6px}
+.kpi .rows div{display:flex;justify-content:space-between;gap:8px;font-size:12px}
+.kpi.accent{border-top:3px solid var(--gold)}
+
+.layout{display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:20px;align-items:start}
+@media (max-width:1040px){.layout{grid-template-columns:1fr}.rail{position:static!important}}
+.rail{position:sticky;top:64px;display:grid;gap:14px}
+.box{background:var(--surface);border:1px solid var(--line);border-radius:12px;box-shadow:var(--shadow)}
+.box>header{display:flex;justify-content:space-between;align-items:baseline;gap:8px;padding:12px 14px;border-bottom:1px solid var(--line)}
+.box>header h2{font-family:var(--display);font-size:16px;font-weight:600}
+.box .body{padding:10px 14px;display:grid;gap:8px}
+.rail .item{display:grid;gap:1px;padding:7px 0;border-top:1px solid var(--line);cursor:pointer}
+.rail .item:first-child{border-top:0}
+.rail .item:hover b{text-decoration:underline}
+.empty{color:var(--muted);font-size:13px;padding:4px 0}
+
+.chips{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:14px}
+.chip{border:1px solid var(--line);background:var(--surface);border-radius:999px;padding:6px 12px;font-size:13px;cursor:pointer;text-decoration:none;color:var(--ink)}
+.chip:hover{background:var(--surface-2)}
+.chip b{font-family:var(--mono);margin-left:4px;color:var(--muted);font-weight:600}
+.chip[aria-pressed=true]{background:var(--slate);border-color:var(--slate);color:#fff}
+.chip[aria-pressed=true] b{color:var(--gold)}
+
+details.sec{margin-bottom:14px}
+details.sec>summary{list-style:none;cursor:pointer;display:flex;align-items:center;gap:10px;padding:12px 16px}
+details.sec>summary::-webkit-details-marker{display:none}
+details.sec>summary h2{font-family:var(--display);font-size:17px;font-weight:600}
+details.sec>summary .n{font-family:var(--mono);font-size:12px;background:var(--surface-3);border-radius:999px;padding:1px 8px;color:var(--muted)}
+details.sec>summary .chev{margin-left:auto;transition:transform .15s;color:var(--faint)}
+details.sec[open]>summary .chev{transform:rotate(90deg)}
+details.sec[open]>summary{border-bottom:1px solid var(--line)}
+
+table{width:100%;border-collapse:collapse}
+th{text-align:left;font-size:11px;letter-spacing:.05em;text-transform:uppercase;color:var(--muted);font-weight:600;padding:9px 12px;border-bottom:1px solid var(--line);background:var(--surface);white-space:nowrap}
+th.r,td.r{text-align:right} td.r>.num,td.num{white-space:nowrap}
+td{padding:10px 12px;border-bottom:1px solid var(--line);vertical-align:top}
+tbody tr:last-child td{border-bottom:0}
+tbody tr.click{cursor:pointer}
+tbody tr.click:hover{background:var(--surface-2)}
+td .main{font-weight:600}
+td .sub{font-size:12px;color:var(--muted);margin-top:1px}
+.scroll{max-height:72vh;overflow:auto}
+.scroll th{position:sticky;top:0;z-index:1}
+th.sort{cursor:pointer} th.sort:hover{color:var(--ink)} th .arr{opacity:.6}
+
+.pill{display:inline-block;border-radius:999px;padding:2px 9px;font-size:12px;font-weight:600;white-space:nowrap}
+.p-active{background:var(--info-soft);color:var(--info)} .p-contract{background:var(--gold-soft);color:var(--gold-ink)}
+.p-closed{background:var(--ok-soft);color:var(--ok)} .p-dead{background:var(--risk-soft);color:var(--risk)} .p-other{background:var(--surface-3);color:var(--muted)}
+.track{display:flex;gap:3px;margin-top:6px}
+.track i{height:4px;width:16px;border-radius:2px;background:var(--surface-3)}
+.track i.on{background:var(--gold)} .track.done i.on{background:var(--ok)}
+.late{color:var(--risk);font-weight:600} .soon{color:var(--warn);font-weight:600}
+.pos{color:var(--ok)} .neg{color:var(--risk)}
+.terms{overflow:auto}
+.terms td{min-width:180px;font-size:13px}
+.terms td.k,.terms th.k{position:sticky;left:0;background:var(--surface);min-width:130px;color:var(--muted);font-weight:600;font-size:12px}
+.callout{border:1px solid var(--line);border-left:4px solid var(--gold);background:var(--surface);border-radius:10px;padding:12px 14px;margin-bottom:16px}
+.callout summary{cursor:pointer;font-weight:600}
+ul.plain{margin:8px 0 0;padding-left:18px;display:grid;gap:5px}
+.bar{display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:space-between;margin-bottom:14px}
+select{padding:8px 11px;border:1px solid var(--line);border-radius:8px;background:var(--surface);color:var(--ink);font:inherit}
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:10px;overflow:hidden;background:var(--surface)}
+.seg button{border:0;background:none;padding:8px 14px;font-weight:600;color:var(--muted);cursor:pointer}
+.seg button[aria-pressed=true]{background:var(--gold);color:var(--gold-ink)}
+
+.veil{position:fixed;inset:0;background:rgba(15,22,22,.35);z-index:40;opacity:0;pointer-events:none;transition:opacity .15s}
+.veil.on{opacity:1;pointer-events:auto}
+aside.drawer{position:fixed;top:0;right:0;bottom:0;width:min(520px,100vw);background:var(--bg);z-index:50;box-shadow:-8px 0 30px rgba(0,0,0,.15);transform:translateX(100%);transition:transform .2s;display:flex;flex-direction:column}
+aside.drawer.on{transform:none}
+.drawer .dh{background:var(--slate);color:#fff;padding:16px 18px;border-bottom:3px solid var(--gold);display:flex;gap:10px;align-items:flex-start}
+.drawer .dh h2{font-family:var(--display);font-size:21px;line-height:1.2}
+.drawer .dh .x{margin-left:auto;border:1px solid rgba(255,255,255,.3);background:none;color:#fff;border-radius:8px;padding:4px 10px;cursor:pointer}
+.drawer .db{overflow:auto;padding:16px 18px;display:grid;gap:14px;align-content:start}
+.drawer h3{font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-weight:600;margin-bottom:6px}
+.kv{display:grid;grid-template-columns:150px 1fr;gap:0}
+.kv dt,.kv dd{margin:0;padding:7px 0;border-top:1px solid var(--line)}
+.kv dt{color:var(--muted);font-size:12px;font-weight:600;padding-right:10px}
+.kv dt:first-of-type,.kv dt:first-of-type+dd{border-top:0}
+.figs{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:8px}
+.fig{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:9px 11px}
+.fig .lab{font-size:11px;color:var(--muted);font-weight:600}
+.fig .v{font-family:var(--mono);font-size:17px;font-weight:600}
+.note{font-size:12px;color:var(--muted)}
+footer{max-width:1320px;margin:0 auto;padding:16px 20px 32px;color:var(--muted);font-size:12px;display:grid;gap:4px;border-top:1px solid var(--line)}
+@media print{.top .tools,.search,.tabbar,.rail,.chips,.bar{display:none!important} section.view[hidden]{display:block} .scroll{max-height:none;overflow:visible} details.sec{break-inside:avoid}}
+</style>
+</head>
+<body>
+<header class="top"><div class="in">
+  <div class="brand"><span class="eyebrow">Vaulter acquisitions and dispositions</span><h1>Deal Tracker</h1><span class="when" id="when"></span></div>
+  <div class="search">
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+    <input id="q" type="search" placeholder="Find any deal, buyer or seller" aria-label="Find any deal" autocomplete="off">
+    <div class="results" id="results" hidden></div>
+  </div>
+  <div class="tools">
+    <button class="ibtn" id="xlsx" type="button">Open in Excel</button>
+    <button class="ibtn" id="theme" type="button" aria-label="Dark or light">Dark / light</button>
+    <button class="ibtn" type="button" onclick="window.print()">Print</button>
+  </div>
+</div></header>
+
+<nav class="tabbar"><div class="in" role="tablist">
+  <button role="tab" data-view="pipeline" aria-selected="true">Pipeline<span class="count" id="c-pipe"></span></button>
+  <button role="tab" data-view="history" aria-selected="false">History<span class="count" id="c-hist"></span></button>
+</div></nav>
+
+<div class="wrap">
+  <p class="note" id="xlsxnote" hidden style="margin-bottom:12px"></p>
+
+  <section class="view" data-view="pipeline">
+    <div class="kpis" id="pk"></div>
+    <div class="layout">
+      <div>
+        <div class="bar">
+          <div class="chips" id="pjump" style="margin:0"></div>
+          <select id="ptype" aria-label="Type"><option value="">Acquisitions and dispositions</option><option>Acquisition</option><option>Disposition</option></select>
+        </div>
+        <div id="psecs"></div>
+      </div>
+      <div class="rail">
+        <div class="box"><header><h2>Coming up</h2><span class="small muted">closings and due diligence</span></header><div class="body" id="coming"></div></div>
+        <div class="box"><header><h2>Open items</h2><span class="small muted" id="oin"></span></header><div class="body" id="open"></div></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="view" data-view="history" hidden>
+    <div class="bar">
+      <div class="seg" id="period" role="group" aria-label="Period">
+        <button type="button" data-y="0" aria-pressed="true">All time</button>
+        <button type="button" data-y="5" aria-pressed="false">Last 5 years</button>
+        <button type="button" data-y="1" aria-pressed="false">Last 12 months</button>
+      </div>
+      <span class="small muted" id="periodnote"></span>
+    </div>
+    <div class="kpis" id="hk"></div>
+    <div id="attention"></div>
+    <div class="bar">
+      <div class="chips" id="hstatus" style="margin:0"></div>
+      <div style="display:flex;gap:8px;align-items:center"><select id="hstate" aria-label="State"><option value="">Every state</option></select><span class="small muted" id="hcount"></span></div>
+    </div>
+    <div class="box scroll"><table><thead><tr id="hhead"></tr></thead><tbody id="hrows"></tbody></table></div>
+  </section>
+</div>
+
+<footer id="foot"></footer>
+<div class="veil" id="veil"></div>
+<aside class="drawer" id="drawer" aria-hidden="true"><div class="dh"><div id="dtitle"></div><button class="x" id="dclose" type="button">Close</button></div><div class="db" id="dbody"></div></aside>
+
+<script>
+/*__DATA__*/
+(function(){
+  const $ = s => document.querySelector(s), $$ = s => [...document.querySelectorAll(s)];
+  const esc = s => String(s == null ? "" : s).replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+  // No dashes between words on the page (team rule).
+  const txt = s => esc(String(s == null ? "" : s).replace(/\s[—–]\s/g, ", ").replace(/\s-\s/g, ", "));
+  const NG = '<span class="faint">not given</span>';
+  const money = v => v == null ? NG : (Math.abs(v) >= 1e6 ? `$${(v/1e6).toFixed(2)}M` : `$${Math.round(v).toLocaleString("en-US")}`);
+  const moneyT = v => v == null ? "not given" : (Math.abs(v) >= 1e6 ? `$${(v/1e6).toFixed(1)}M` : `$${Math.round(v).toLocaleString("en-US")}`);
+  const fmtD = (iso, approx) => { if (!iso) return NG; const [y,m,d] = String(iso).split("-").map(Number);
+    if (approx || !m) return `<span title="Year only">${y}</span>`;
+    return new Date(y, m-1, d).toLocaleDateString("en-US", {year:"numeric", month:"short", day:"numeric"}); };
+  const today = new Date(DATA.built + "T00:00:00");
+  const H = DATA.deals, P = DATA.pipeline || [];
+  $("#when").textContent = `Refreshed ${DATA.built_at}`;
+  $("#c-pipe").textContent = P.length ? P.length : "";
+  $("#c-hist").textContent = H.length;
+
+  // ── Side panel ──
+  function openDrawer(title, html){
+    $("#dtitle").innerHTML = title; $("#dbody").innerHTML = html;
+    $("#drawer").classList.add("on"); $("#veil").classList.add("on"); $("#drawer").setAttribute("aria-hidden", "false");
+    $("#dbody").scrollTop = 0; $("#dclose").focus();
+  }
+  function closeDrawer(){ $("#drawer").classList.remove("on"); $("#veil").classList.remove("on"); $("#drawer").setAttribute("aria-hidden", "true"); }
+  $("#dclose").onclick = closeDrawer; $("#veil").onclick = closeDrawer;
+  document.addEventListener("keydown", e => { if (e.key === "Escape") { closeDrawer(); $("#results").hidden = true; } });
+  const kv = (l, v) => v == null || v === "" ? "" : `<dt>${l}</dt><dd>${v}</dd>`;
+  const fig = (l, v) => `<div class="fig"><div class="lab">${l}</div><div class="v">${v}</div></div>`;
+  const srcList = s => Object.keys(s || {}).length ? `<details><summary class="small muted" style="cursor:pointer">Where each figure came from</summary><ul class="plain small">${Object.entries(s).map(([k, v]) => `<li><b>${txt(k.replace(/_/g, " "))}:</b> ${txt(v)}</li>`).join("")}</ul></details>` : "";
+
+  // ── Tabs ──
+  function view(name){
+    $$("[role=tab]").forEach(b => b.setAttribute("aria-selected", b.dataset.view === name));
+    $$("section.view").forEach(s => s.hidden = s.dataset.view !== name);
+    try { localStorage.setItem("dt-view", name); } catch (e) {}
+  }
+  $$("[role=tab]").forEach(b => b.onclick = () => view(b.dataset.view));
+
+  // ══ PIPELINE ══
+  const ACTIVE = ["LOI Sent", "LOI Received", "Counter Sent", "PSA Negotiation", "Under Contract", "Closing Scheduled"];
+  const CONTRACT = ["PSA Negotiation", "Under Contract", "Closing Scheduled"];
+  const STEP = {"LOI Sent":0, "LOI Received":0, "Counter Sent":1, "PSA Negotiation":2, "Under Contract":3, "Closing Scheduled":4, "Closed":5};
+  const pc = s => CONTRACT.includes(s) ? "p-contract" : ACTIVE.includes(s) ? "p-active" : s === "Closed" ? "p-closed" : ["Terminated", "Declined"].includes(s) ? "p-dead" : "p-other";
+  const stage = s => s ? `<span class="pill ${pc(s)}">${esc(s)}</span>` : NG;
+  const track = s => STEP[s] == null ? "" : `<div class="track${s === "Closed" ? " done" : ""}" title="LOI, counter, PSA, contract, closing, closed">${[0,1,2,3,4,5].map(i => `<i class="${i <= STEP[s] ? "on" : ""}"></i>`).join("")}</div>`;
+  const pprice = d => typeof d.price === "number" ? money(d.price) : (d.price ? txt(d.price) : NG);
+  const when = d => {
+    if (!d.key_date) return NG;
+    let rel = "";
+    // Red only for a closing or due diligence date that has passed on a live deal; an LOI's date is history.
+    if (d.days_out != null) rel = !d.deadline ? `<span class="faint">${-d.days_out} days ago</span>`
+      : `<span class="${d.days_out < 0 ? "late" : d.days_out <= 30 ? "soon" : "muted"}">${d.days_out < 0 ? `${-d.days_out} days past` : d.days_out === 0 ? "today" : `in ${d.days_out} days`}</span>`;
+    return `<div class="nw">${esc(d.key_label)} ${fmtD(d.key_date)}</div>${rel ? `<div class="sub">${rel}</div>` : ""}`;
+  };
+  const acres = v => v == null ? "" : (typeof v === "number" ? `${v.toLocaleString("en-US")} ac` : txt(v));
+
+  if (P.length) {
+    const act = P.filter(d => ACTIVE.includes(d.stage));
+    const dl = act.filter(d => d.deadline && d.days_out != null);
+    const soon = dl.filter(d => d.key_label === "Close" && d.days_out >= 0 && d.days_out <= 30);
+    const late = dl.filter(d => d.days_out < 0);
+    const next = dl.filter(d => d.key_label === "Close" && d.days_out >= 0).sort((a, b) => a.days_out - b.days_out)[0];
+    const k = (cls, lab, val, sub, isTxt) => `<div class="kpi ${cls}"><span class="lab">${lab}</span><span class="val${isTxt ? " txt" : ""}">${val}</span>${sub ? `<span class="sub">${sub}</span>` : ""}</div>`;
+    $("#pk").innerHTML = [
+      k("accent", "Active acquisitions", act.filter(d => d.type === "Acquisition").length, "LOI through closing"),
+      k("", "Active dispositions", act.filter(d => d.type === "Disposition").length, `${P.filter(d => d.stage === "Listed").length} more listed`),
+      k("", "PSA or under contract", P.filter(d => CONTRACT.includes(d.stage)).length, "being negotiated, signed or closing"),
+      k("", "Closing in 30 days", soon.length, late.length ? `<span class="late">${late.length} with a date already past</span>` : "none overdue"),
+      k("", "Next closing", next ? fmtD(next.key_date) : "None set", next ? txt(next.property) : "", true),
+    ].join("");
+
+    const groups = [
+      ["acq", "Acquisitions", d => d.type === "Acquisition" && !["Terminated", "Declined", "Unconfirmed"].includes(d.stage), true],
+      ["dact", "Dispositions in progress", d => d.type === "Disposition" && ACTIVE.includes(d.stage), true],
+      ["dlist", "Listed for sale", d => d.type === "Disposition" && d.stage === "Listed", true],
+      ["dclosed", "Sold", d => d.type === "Disposition" && d.stage === "Closed", false],
+      ["unconf", "Status to confirm", d => d.stage === "Unconfirmed", true],
+      ["dead", "Terminated or declined", d => ["Terminated", "Declined"].includes(d.stage), false],
+      ["other", "Other", d => !d.stage, true],
+    ];
+    const terms = P.filter(d => d.terms && Object.keys(d.terms).length && !["Closed", "Terminated", "Declined"].includes(d.stage));
+    const TERMS = ["Document / Date", "Price", "Deposit", "DD / Feasibility", "Closing", "Key Condition", "Status"];
+    const row = d => `<tr class="click" data-pid="${d.id}">
+      <td><div class="main">${txt(d.property)}</div><div class="sub">${txt([d.parcel, d.location].filter(Boolean).join(" · "))}${d.acres != null ? ` · ${acres(d.acres)}` : ""}</div></td>
+      <td>${txt(d.counterparty) || NG}</td>
+      <td>${stage(d.stage)}${track(d.stage)}</td>
+      <td class="r"><div class="num">${pprice(d)}</div>${d.price_basis ? `<div class="sub" style="max-width:220px;margin-left:auto">${txt(d.price_basis)}</div>` : ""}</td>
+      <td>${when(d)}</td>
+      <td class="small">${txt(d.next_step) || ""}</td></tr>`;
+    function draw(){
+      const ty = $("#ptype").value, keep = P.filter(d => !ty || d.type === ty);
+      const used = groups.map(([id, t, f, open]) => [id, t, keep.filter(f), open]).filter(g => g[2].length);
+      $("#pjump").innerHTML = used.map(([id, t, l]) => `<a class="chip" href="#s-${id}">${t}<b>${l.length}</b></a>`).join("")
+        + (terms.length ? `<a class="chip" href="#s-terms">Offer terms<b>${terms.length}</b></a>` : "");
+      $("#psecs").innerHTML = used.map(([id, t, l, open]) => `<details class="sec box" id="s-${id}"${open ? " open" : ""}><summary><h2>${t}</h2><span class="n">${l.length}</span><span class="chev">›</span></summary>
+        <div style="overflow:auto"><table><thead><tr><th>Property</th><th>${id === "acq" ? "Seller" : ["dact", "dlist", "dclosed"].includes(id) ? "Buyer" : "Buyer or seller"}</th><th>Stage</th><th class="r">Price</th><th>Key date</th><th>Next step</th></tr></thead><tbody>${l.map(row).join("")}</tbody></table></div></details>`).join("")
+        + (terms.length ? `<details class="sec box" id="s-terms" open><summary><h2>Offer terms</h2><span class="n">${terms.length}</span><span class="small muted">latest paper on file</span><span class="chev">›</span></summary>
+          <div class="terms"><table><thead><tr><th class="k"></th>${terms.map(d => `<th>${txt(d.property)}</th>`).join("")}</tr></thead><tbody>${TERMS.map(t => `<tr><td class="k">${t}</td>${terms.map(d => `<td>${txt(d.terms[t]) || '<span class="faint">Not stated</span>'}</td>`).join("")}</tr>`).join("")}</tbody></table></div></details>` : "");
+      $$("tr[data-pid]").forEach(tr => tr.onclick = () => showP(tr.dataset.pid));
+    }
+    $("#ptype").addEventListener("input", draw);
+    draw();
+
+    const upcoming = dl.slice().sort((a, b) => a.days_out - b.days_out);
+    $("#coming").innerHTML = upcoming.length ? upcoming.map(d => `<div class="item" data-pid="${d.id}"><b>${txt(d.property)}</b><span class="small">${esc(d.key_label)} ${fmtD(d.key_date)} · <span class="${d.days_out < 0 ? "late" : d.days_out <= 30 ? "soon" : "muted"}">${d.days_out < 0 ? `${-d.days_out} days past` : `in ${d.days_out} days`}</span></span></div>`).join("") : '<p class="empty">No closing or due diligence dates set.</p>';
+    $$("#coming .item").forEach(el => el.onclick = () => showP(el.dataset.pid));
+  } else {
+    $("#pk").innerHTML = '<p class="muted">The pipeline has not been loaded yet.</p>';
+    $("#coming").innerHTML = '<p class="empty">Nothing yet.</p>';
+  }
+  const oi = DATA.open_items || [];
+  $("#oin").textContent = oi.length ? `${oi.length}` : "";
+  $("#open").innerHTML = oi.length ? oi.map(i => { const c = i.indexOf(": "); return `<div class="item" style="cursor:default">${c > 0 ? `<b>${txt(i.slice(0, c))}</b><span class="small muted">${txt(i.slice(c + 2))}</span>` : `<span class="small">${txt(i)}</span>`}</div>`; }).join("")
+    + '<p class="note">Tell Claude when one is resolved, or delete it on the Excel Open Items tab.</p>' : '<p class="empty">Nothing open.</p>';
+
+  function showP(id){
+    const d = P.find(x => x.id === id); if (!d) return;
+    const dt = k => d[k] ? fmtD(d[k]) : "";
+    const m = v => typeof v === "number" ? money(v) : (v ? txt(v) : "");
+    openDrawer(`<div class="small" style="opacity:.8">${txt(d.type)}</div><h2>${txt(d.property)}</h2><div style="margin-top:6px">${stage(d.stage)}</div>`,
+      `<div class="figs">${fig("Price", pprice(d))}${fig("Deposit", m(d.deposit) || NG)}${fig(d.key_label || "Key date", d.key_date ? fmtD(d.key_date) : NG)}${d.acres != null ? fig("Acres", txt(d.acres)) : ""}</div>
+      ${d.status || d.next_step ? `<div class="box"><div class="body">${d.status ? `<div><h3>Where it stands</h3>${txt(d.status)}</div>` : ""}${d.next_step ? `<div><h3>Next step</h3>${txt(d.next_step)}</div>` : ""}</div></div>` : ""}
+      <div><h3>The deal</h3><dl class="kv">${kv("Seller", txt(d.seller))}${kv("Buyer", txt(d.buyer))}${kv("Price basis", txt(d.price_basis))}${kv("Parcel / lot", txt(d.parcel))}${kv("APN", txt(d.apn))}${kv("Location", txt([d.city, d.county && d.county + " County", d.state].filter(Boolean).join(", ")))}${kv("Broker", txt(d.broker))}${kv("Escrow / title", txt(d.escrow))}</dl></div>
+      <div><h3>Dates</h3><dl class="kv">${kv("LOI", dt("loi_date"))}${kv("Counter", dt("counter_date"))}${kv("PSA", dt("psa_date"))}${kv("Due diligence ends", dt("dd_expires"))}${kv("Closing", dt("close_date"))}</dl></div>
+      ${d.orig_cost != null || d.gross_profit != null ? `<div><h3>Original purchase</h3><dl class="kv">${kv("Bought", dt("orig_acq_date"))}${kv("Original cost", m(d.orig_cost))}${kv("Gross profit", m(d.gross_profit))}${kv("Gross multiple", d.gross_multiple != null ? txt(d.gross_multiple) + "x" : "")}</dl></div>` : ""}
+      ${Object.keys(d.terms || {}).length ? `<div><h3>Offer terms, latest paper</h3><dl class="kv">${Object.entries(d.terms).map(([a, b]) => kv(txt(a), txt(b))).join("")}</dl></div>` : ""}
+      ${(d.documents || []).length ? `<div><h3>Papers read</h3><ul class="plain small" style="margin:0">${d.documents.map(x => `<li>${fmtD(x.filed)}: ${txt(x.name)}</li>`).join("")}</ul></div>` : ""}
+      ${srcList(d.sources)}`);
+  }
+
+  // ══ HISTORY ══
+  let years = 0, hstatus = "", sortKey = "acquired", sortDir = -1;
+  const since = () => { if (!years) return null; const d = new Date(today); d.setFullYear(d.getFullYear() - years); return d; };
+  const inP = iso => { const s = since(); if (!s) return true; if (!iso) return false; const v = String(iso).length === 4 ? iso + "-07-01" : iso; return new Date(v + "T00:00:00") >= s; };
+  const sum = (l, k) => l.reduce((a, d) => a + (d[k] || 0), 0);
+  const have = (l, k) => l.filter(d => d[k] != null);
+  const STATUSES = ["Owned", "Partially sold", "Being acquired", "Fully exited", "Lost"];
+  const hpc = s => ({"Owned":"p-active", "Partially sold":"p-contract", "Being acquired":"p-other", "Fully exited":"p-closed", "Lost":"p-dead"}[s] || "p-other");
+  [...new Set(H.map(d => d.state).filter(Boolean))].sort().forEach(s => $("#hstate").insertAdjacentHTML("beforeend", `<option>${esc(s)}</option>`));
+
+  function hk(){
+    const bought = H.filter(d => d.acquired && inP(d.acquired));
+    const exited = H.filter(d => d.status === "Fully exited" && d.last_sale && inP(d.last_sale));
+    const sales = []; H.forEach(d => d.sales.forEach(x => { if (x.date && inP(x.date)) sales.push(x); }));
+    const held = H.filter(d => ["Owned", "Partially sold", "Being acquired"].includes(d.status));
+    const prof = have(exited, "profit"), hold = have(exited, "hold");
+    const k = (cls, lab, val, rows, sub) => `<div class="kpi ${cls}"><span class="lab">${lab}</span><span class="val">${val}</span>${rows.length ? `<div class="rows">${rows.map(([a, b]) => `<div><span class="muted">${a}</span><span class="num">${b}</span></div>`).join("")}</div>` : ""}${sub ? `<span class="sub" style="margin-top:4px">${sub}</span>` : ""}</div>`;
+    $("#hk").innerHTML = [
+      k("accent", "Deals bought", bought.length, [["Equity put in", moneyT(sum(bought, "contributions"))], ["Purchase prices", moneyT(sum(bought, "purchase_price"))]], `${have(bought, "purchase_price").length} have a purchase price on record`),
+      k("", "Fully exited", exited.length, [["Returned", moneyT(sum(exited, "distributions"))], ["Profit", moneyT(sum(prof, "profit"))], ["Average hold", hold.length ? (sum(hold, "hold") / hold.length).toFixed(1) + " yrs" : "not given"]], `profit on the ${prof.length} with both figures`),
+      k("", "Sales closed", sales.length, [["Sale prices", moneyT(sales.reduce((a, x) => a + (x.price || 0), 0))]], "each closing, part sales included"),
+      k("", "Holding now", held.length, [["Acres", Math.round(sum(held, "acres")).toLocaleString("en-US")], ["Partly sold", held.filter(d => d.status === "Partially sold").length], ["Equity in", moneyT(sum(held, "contributions"))]], "today, whatever the period"),
+    ].join("");
+    const s = since();
+    $("#periodnote").textContent = s ? `Counting from ${s.toLocaleDateString("en-US", {year:"numeric", month:"long", day:"numeric"})}; the list shows deals bought or sold since.` : "";
+  }
+  const att = DATA.attention || [];
+  $("#attention").innerHTML = att.length ? `<details class="callout"><summary>Needs a person <span class="muted small">(${att.length})</span></summary><ul class="plain">${att.map(a => `<li>${txt(a)}</li>`).join("")}</ul><p class="note" style="margin-top:8px">Tell Claude the answer, for example "these two are the same deal".</p></details>` : "";
+
+  const cols = [["Deal", "name"], ["Status", "status"], ["Bought", "acquired"], ["Purchase price", "purchase_price", 1], ["Equity in", "contributions", 1], ["Returned", "distributions", 1], ["Profit", "profit", 1], ["Last sale", "last_sale"], ["Hold", "hold", 1]];
+  const inPeriod = d => !years || inP(d.acquired) || inP(d.last_sale) || d.sales.some(x => x.date && inP(x.date));
+  function hdraw(){
+    const base = H.filter(inPeriod), st = $("#hstate").value;
+    $("#hstatus").innerHTML = [["", "All", base.length], ...STATUSES.map(s => [s, s, base.filter(d => d.status === s).length]).filter(x => x[2])]
+      .map(([v, l, n]) => `<button type="button" class="chip" data-s="${v}" aria-pressed="${v === hstatus}">${l}<b>${n}</b></button>`).join("");
+    $$("#hstatus .chip").forEach(b => b.onclick = () => { hstatus = b.dataset.s; hdraw(); });
+    $("#hhead").innerHTML = cols.map(([l, k, r]) => `<th class="sort${r ? " r" : ""}" data-k="${k}">${l}${k === sortKey ? ` <span class="arr">${sortDir < 0 ? "↓" : "↑"}</span>` : ""}</th>`).join("");
+    $$("#hhead th").forEach(th => th.onclick = () => { const k = th.dataset.k; sortDir = k === sortKey ? -sortDir : -1; sortKey = k; hdraw(); });
+    const l = base.filter(d => (!hstatus || d.status === hstatus) && (!st || d.state === st)).sort((a, b) => { const x = a[sortKey], y = b[sortKey];
+      if (x == null || x === "") return 1; if (y == null || y === "") return -1; return (x > y ? 1 : x < y ? -1 : 0) * sortDir; });
+    $("#hcount").textContent = `${l.length} deals`;
+    $("#hrows").innerHTML = l.map(d => `<tr class="click" data-id="${d.id}">
+      <td><div class="main">${txt(d.name)}</div><div class="sub">${txt([d.state, d.size].filter(Boolean).join(" · "))}</div></td>
+      <td><span class="pill ${hpc(d.status)}">${d.status}</span>${d.stage && d.stage !== "Sold" ? `<div class="sub">${txt(d.stage)}</div>` : ""}</td>
+      <td class="nw small">${fmtD(d.acquired, d.acquired_approx)}</td>
+      <td class="r num">${money(d.purchase_price)}</td><td class="r num">${money(d.contributions)}</td>
+      <td class="r num">${d.lost ? '<span class="neg">lost</span>' : money(d.distributions)}</td>
+      <td class="r num ${d.profit == null ? "" : d.profit >= 0 ? "pos" : "neg"}">${money(d.profit)}</td>
+      <td class="nw small">${d.sold_in_parts && !d.last_sale ? "several dates" : fmtD(d.last_sale, d.last_sale_approx)}</td>
+      <td class="r num nw">${d.hold == null ? NG : d.hold + (d.hold_to_today ? '<span class="faint" title="still held, counted to today"> so far</span>' : " yrs")}</td></tr>`).join("")
+      || '<tr><td colspan="9" class="muted">No deal matches.</td></tr>';
+    $$("tr[data-id]").forEach(tr => tr.onclick = () => showH(tr.dataset.id));
+  }
+  function showH(id){
+    const d = H.find(x => x.id === id); if (!d) return;
+    openDrawer(`<div class="small" style="opacity:.8">${txt([d.state, d.type, d.size].filter(Boolean).join(" · ")) || "Deal"}</div><h2>${txt(d.name)}</h2><div style="margin-top:6px"><span class="pill ${hpc(d.status)}">${d.status}</span></div>`,
+      `${d.aliases.length ? `<p class="note">Also called ${txt(d.aliases.join("; "))}</p>` : ""}
+      <div class="figs">${fig("Equity put in", money(d.contributions))}${fig("Returned", d.lost ? '<span class="neg">Lost</span>' : money(d.distributions))}${fig("Profit", `<span class="${d.profit == null ? "" : d.profit >= 0 ? "pos" : "neg"}">${money(d.profit)}</span>`)}${fig("Hold", d.hold == null ? NG : `${d.hold} yrs${d.hold_to_today ? " so far" : ""}`)}</div>
+      <div><h3>Purchase</h3><dl class="kv">${kv("Bought (first money in)", fmtD(d.acquired, d.acquired_approx))}${kv("Purchase price", money(d.purchase_price))}${kv("Acquisition debt", money(d.debt))}${kv("Smartsheet stage", txt(d.stage))}</dl></div>
+      <div><h3>Returns</h3><dl class="kv">${kv("Multiple", d.multiple != null ? `${d.multiple}x what was put in` : NG)}${kv("Project IRR", d.irr == null ? NG : (d.irr * 100).toFixed(1) + '% <span class="faint">(old tracker)</span>')}${kv("Last sale", d.sold_in_parts && !d.last_sale ? "several dates" : fmtD(d.last_sale, d.last_sale_approx))}${d.excluded ? kv("Old tracker note", txt(d.excluded)) : ""}</dl></div>
+      <div><h3>Sales</h3>${d.sales.length ? `<table><thead><tr><th>Date</th><th class="r">Price</th><th>Buyer</th></tr></thead><tbody>${d.sales.map(s => `<tr><td class="nw">${fmtD(s.date, String(s.date).length === 4)}${s.final ? ' <span class="pill p-closed">final</span>' : ""}</td><td class="r num">${money(s.price)}</td><td class="small">${txt(s.other_party) || NG}<div class="sub">${txt(s.source)}</div></td></tr>`).join("")}</tbody></table>` : `<p class="note">${d.last_sale ? "The old tracker gives the last sale date only, not each sale." : "No sale recorded."}</p>`}</div>
+      ${d.notes.length ? `<div><h3>Notes</h3><ul class="plain small" style="margin:0">${d.notes.map(n => `<li>${txt(n)}</li>`).join("")}</ul></div>` : ""}
+      ${srcList(d.sources)}`);
+  }
+  $("#hstate").addEventListener("input", hdraw);
+  $$("#period button").forEach(b => b.onclick = () => {
+    years = Number(b.dataset.y); $$("#period button").forEach(x => x.setAttribute("aria-pressed", x === b));
+    try { localStorage.setItem("dt-years", years); } catch (e) {}
+    hk(); hdraw();
+  });
+  hk(); hdraw();
+
+  // ── One search across both tabs ──
+  const index = [...P.map(d => ({t:"Pipeline", id:d.id, name:d.property, sub:[d.type, d.counterparty, d.stage].filter(Boolean).join(" · "), hay:[d.property, d.parcel, d.buyer, d.seller, d.city].join(" ")})),
+                 ...H.map(d => ({t:"History", id:d.id, name:d.name, sub:[d.state, d.status].filter(Boolean).join(" · "), hay:[d.name, ...d.aliases].join(" ")}))];
+  const res = $("#results");
+  $("#q").addEventListener("input", e => {
+    const q = e.target.value.trim().toLowerCase();
+    if (q.length < 2) { res.hidden = true; return; }
+    const hits = index.filter(x => x.hay.toLowerCase().includes(q)).slice(0, 14);
+    res.innerHTML = hits.length ? hits.map(x => `<button type="button" data-t="${x.t}" data-id="${x.id}"><span><b>${txt(x.name)}</b><div class="sub small muted">${txt(x.sub)}</div></span><span class="pill ${x.t === "Pipeline" ? "p-active" : "p-other"}">${x.t}</span></button>`).join("") : '<p class="empty" style="padding:10px 12px">No deal matches.</p>';
+    res.hidden = false;
+    $$("#results button").forEach(b => b.onclick = () => { res.hidden = true; view(b.dataset.t === "Pipeline" ? "pipeline" : "history"); (b.dataset.t === "Pipeline" ? showP : showH)(b.dataset.id); });
+  });
+  document.addEventListener("click", e => { if (!e.target.closest(".search")) res.hidden = true; });
+
+  // Opens the REAL file beside this page in Excel (Excel's own link type), not a
+  // downloaded copy, so what is saved there comes back into the tracker.
+  $("#xlsx").onclick = () => {
+    const file = location.href.split("#")[0].replace(/\.html?(\?.*)?$/i, ".xlsx");
+    const n = $("#xlsxnote"); n.hidden = false;
+    n.innerHTML = "Opening <b>Deal Tracker.xlsx</b> in Excel. If nothing opens, open it from the same folder as this page. Edits you save there come back into this page the next time the tracker is opened through Claude.";
+    window.location.href = "ms-excel:ofe|u|" + file;
+  };
+  $("#theme").onclick = () => { const r = document.documentElement; const next = r.getAttribute("data-theme") === "dark" ? "light" : "dark"; r.setAttribute("data-theme", next); try { localStorage.setItem("dt-theme", next); } catch (e) {} };
+  try { const t = localStorage.getItem("dt-theme"); if (t) document.documentElement.setAttribute("data-theme", t);
+        const v = location.hash === "#history" ? "history" : location.hash === "#pipeline" ? "pipeline" : localStorage.getItem("dt-view"); if (v) view(v);
+        const y = Number(localStorage.getItem("dt-years") || 0); if (y) document.querySelector(`#period button[data-y="${y}"]`).click(); } catch (e) {}
+
+  $("#foot").innerHTML = `${P.length ? `<p>Pipeline from ${txt(DATA.pipeline_from)}; offer papers filed from ${fmtD(DATA.pipeline_watch_from)} on keep it current.</p>` : ""}
+    <p>History from ${txt(DATA.imported_from)}. From ${fmtD(DATA.watch_from)} on, new activity comes from Smartsheet, the property summaries, closing statements on the firm's drive and saved email attachments; ${DATA.read} documents read so far.</p>
+    <p>${DATA.file_list ? `New papers are found through the list of the drive's files, last rebuilt ${fmtD(DATA.file_list)}; anything filed after that is not seen yet.` : "The list of the drive's files could not be read, so new papers on the drive were not checked."}</p>
+    <p>Worked out, not typed in: days out, status, hold, profit (returned less put in) and the period views. Files whose names suggest accounting are never opened.</p>`;
+  window.__dt = {deals: H.length, pipeline: P.length};
+})();
+</script>
+</body>
+</html>

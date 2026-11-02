@@ -79,10 +79,19 @@ def read_document(rel_path: str, max_chars: int = 200_000) -> tuple[str, dict]:
     path = resolve_in_corpus(rel_path)
     if not path.is_file():
         raise FileNotFoundError(f"No such document in the library: {rel_path}")
+    return read_path(path, rel_path, max_chars)
 
+
+def read_path(path: Path, label: str, max_chars: int = 200_000) -> tuple[str, dict]:
+    """
+    The reading half of read_document, for a path the CALLER has already
+    checked. Only deal_tracker uses it directly, for a folder of saved email
+    attachments that is outside the library on purpose; everything else goes
+    through read_document and its scope guard.
+    """
     ext = path.suffix.lower()
     metadata = {
-        "path": rel_path,
+        "path": label,
         "filename": path.name,
         "file_type": ext,
         "size_bytes": path.stat().st_size,

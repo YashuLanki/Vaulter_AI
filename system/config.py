@@ -986,6 +986,17 @@ MINI_TERM_SHEETS_DIR = _named("Mini Term Sheets", "mini_term_sheets")
 JURISDICTIONS_DIR = _named("City Research", "jurisdictions")
 MINI_TERM_SHEETS_REFERENCE_DIR = MINI_TERM_SHEETS_DIR / "_reference"
 
+# The acquisition and disposition tracker (deal_tracker/, 2026-10-29): ONLY its
+# page and Excel copy in a top-level folder the team reads (owner: nothing else
+# there, since both rebuild themselves); its record and "do not open" word list
+# under system/. Both made on first use, never here.
+DEAL_TRACKER_DIR = SHARED_DIR / "Deal Tracker"
+DEAL_TRACKER_RECORD_FILE = SHARED_SYSTEM_DIR / "deal_tracker" / "record.json"
+# A folder of saved email attachments, set in ONE person's own .env only. Blank
+# everywhere else, so no other machine looks for it. Nothing in this system reads email.
+_deal_inbox = os.getenv("VAULTER_DEAL_INBOX_DIR", "").strip()
+DEAL_INBOX_DIR = Path(_deal_inbox).expanduser() if _deal_inbox else None
+
 # The firm's own portfolio data: the Smartsheet Project Master export, the
 # hand-verified coordinates table, and the property-details fallback list.
 #
