@@ -648,7 +648,7 @@ boundary is "is this your own computer, logged in as you." claude.ai (the web ap
 be used with this server: it runs in the cloud and can only reach a network address, never
 a process on someone's own machine. Claude Desktop or Claude Code are required.
 
-**35 tools.** Don't maintain this list by hand — it drifted to 19 entries with one duplicated
+**42 tools.** Don't maintain this list by hand — it drifted to 19 entries with one duplicated
 and two missing. Get the truth from the code:
 
 ```bash
@@ -679,6 +679,24 @@ to confirm the numbers after the person says yes. **Read `system/term_sheet/CLAU
 touching any of it** — every decision, the gold-standard check and the writing rules (which
 live in the team folder, not in code) are recorded there. `check_portfolio_comparison.py` §11
 holds its regression checks; `check_term_sheet_page.py` opens the dashboard in headless Edge.
+**Deal tracker** (`system/deal_tracker/`, built 2026-10-29, not yet shipped) — `open_deal_tracker`,
+`get_deal_tracker_documents`, `save_deal_tracker_update`, `save_deal_pipeline_update`,
+`edit_deal_tracker`, `import_deal_tracker`, `schedule_deal_tracker`. The firm's acquisitions and
+dispositions: the live pipeline (laid out like the team's own pipeline workbook) and every past
+deal, as `Deal Tracker.html` and `Deal Tracker.xlsx` in the team folder's `Deal Tracker/` and
+nothing else there (owner's rule); the record and the "do not open" word list sit under
+`system/deal_tracker/`. It updates itself from Smartsheet, the summary cards, closing statements
+and offer papers found by NAME in the file list (one offer folder = one pipeline deal, newest paper
+only), and a saved-attachments folder named only in one machine's `.env`
+(`VAULTER_DEAL_INBOX_DIR`); nothing reads email. Files whose names suggest accounting are never
+opened and never listed. The Excel copy is two-way: `excel.pull_edits` compares the saved file with
+a snapshot of what was written, so only a person's edits are applied. The daily run is a Windows
+scheduled task on ONE machine (`scripts/deal_tracker_daily.py`, registered by
+`schedule_deal_tracker`; the record names the machine and any other stands down). Three lessons
+from building it: a machine whose OneDrive stopped syncing the library (2026-10-19 reset) sees
+nothing new and cannot download cloud-only files, so the routine must run where sync works; two
+closings on one day at one price to two buyers are two sales; and Excel refuses a whole workbook
+over one unbalanced bracket, so check a generated workbook by opening it in Excel, not openpyxl.
 
 **A pending restart is detected and said out loud (`_restart_pending`, 2026-09-01).** Applying an
 update rewrites the `VERSION` file, and `_get_code_version()` reads that file — so between an

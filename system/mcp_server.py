@@ -4873,6 +4873,79 @@ for every listing.""".replace(
             return f"Could not change the deal tracker: {e}"
 
     @mcp.tool()
+    def schedule_deal_tracker(time: str = "09:00", turn_off: bool = False, move_here: bool = False) -> str:
+        """
+        Make the deal tracker update itself every day on THIS computer, with no
+        one opening it: a Windows scheduled task (the same way the morning
+        briefing runs). Use when the user asks to schedule the deal tracker,
+        run it daily, or stop the daily run. Only one computer runs it; the
+        tool refuses if another computer already has it unless move_here=true,
+        and the other computer then stands down by itself.
+
+        This computer should be one whose OneDrive is syncing the firm's
+        library; the computer holding the saved email attachments is best.
+
+        Args:
+            time: time of day, 24-hour HH:MM (default 09:00)
+            turn_off: remove the daily run from this computer
+            move_here: take the daily run over from another computer
+        """
+        import re as _re
+        import shutil
+        import subprocess
+        try:
+            from deal_tracker import tracker as T
+            if sys.platform != "win32":
+                return "The daily run uses Windows Task Scheduler; this computer is not Windows."
+            rec = T.load()
+            if rec is None:
+                return "There is no deal tracker yet; start it with import_deal_tracker first."
+            here, task = _where(), "Vaulter AI - Deal Tracker daily"
+            owner = (rec.get("scheduled_on") or {}).get("machine")
+            if turn_off:
+                subprocess.run(["schtasks", "/Delete", "/F", "/TN", task], capture_output=True, text=True,
+                               stdin=subprocess.DEVNULL, timeout=60)
+                if owner == here:
+                    rec.pop("scheduled_on", None)
+                    T.save(rec)
+                return f"The daily deal tracker run is off on {here}."
+            if owner and owner != here and not move_here:
+                return (f"The daily run is already scheduled on {owner}. Only one computer should run it. "
+                        "If the user wants it moved here, call again with move_here=true; that computer "
+                        "then stands down by itself.")
+            if not _re.fullmatch(r"([01]\d|2[0-3]):[0-5]\d", time.strip()):
+                return "time must be HH:MM on a 24-hour clock, e.g. 09:00."
+            script = Path(__file__).resolve().parent / "scripts" / "deal_tracker_daily.py"
+            runner = Path(sys.executable).with_name("pythonw.exe")
+            if not runner.exists():
+                runner = Path(sys.executable)
+            # Values reach PowerShell as environment variables, never spliced into the
+            # command text (the apostrophe lesson from the file-list refresh task).
+            ps = ("$a = New-ScheduledTaskAction -Execute $env:VLT_RUNNER -Argument ('\"{0}\"' -f $env:VLT_SCRIPT); "
+                  "$t = New-ScheduledTaskTrigger -Daily -At $env:VLT_TIME; "
+                  "$s = New-ScheduledTaskSettingsSet -StartWhenAvailable -ExecutionTimeLimit (New-TimeSpan -Minutes 45) "
+                  "-MultipleInstances IgnoreNew; "
+                  "Register-ScheduledTask -TaskName $env:VLT_TASK -Action $a -Trigger $t -Settings $s -Force | Out-Null")
+            env = dict(os.environ, VLT_RUNNER=str(runner), VLT_SCRIPT=str(script), VLT_TIME=time.strip(),
+                       VLT_TASK=task)
+            r = subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-Command", ps],
+                               capture_output=True, text=True, timeout=60, env=env, stdin=subprocess.DEVNULL)
+            if r.returncode != 0:
+                return f"Could not schedule the daily run: {(r.stderr or r.stdout).strip()[:300]}"
+            rec["scheduled_on"] = {"machine": here, "time": time.strip(),
+                                   "since": _dt_mod.date.today().isoformat()}
+            T.save(rec)
+            claude = "yes" if shutil.which("claude") else "no"
+            return (f"Scheduled: the deal tracker updates itself every day at {time.strip()} on {here} "
+                    f"(or as soon as the computer is next on). Claude Code installed here: {claude}"
+                    + ("; new papers are read in the daily run too." if claude == "yes" else
+                       "; the daily run updates everything except reading new papers, which happens when "
+                       "the tracker is next opened in Claude Desktop.")
+                    + " Its log is system/data/logs/deal_tracker_daily.log on this computer.")
+        except Exception as e:
+            return f"Could not schedule the daily run: {e}"
+
+    @mcp.tool()
     def import_deal_tracker(file_path: str = "", pipeline_file: str = "", replace: bool = False) -> str:
         """
         Start the deal tracker. file_path is the old acquisition/disposition
