@@ -4873,74 +4873,68 @@ for every listing.""".replace(
             return f"Could not change the deal tracker: {e}"
 
     @mcp.tool()
-    def schedule_deal_tracker(time: str = "09:00", turn_off: bool = False, move_here: bool = False) -> str:
+    def schedule_deal_tracker(time: str = "09:00", for_computer: str = "", turn_off: bool = False) -> str:
         """
-        Make the deal tracker update itself every day on THIS computer, with no
-        one opening it: a Windows scheduled task (the same way the morning
+        Make the deal tracker update itself every day with no one opening it: a
+        Windows scheduled task on ONE computer (the same way the morning
         briefing runs). Use when the user asks to schedule the deal tracker,
-        run it daily, or stop the daily run. Only one computer runs it; the
-        tool refuses if another computer already has it unless move_here=true,
-        and the other computer then stands down by itself.
+        run it daily, move the daily run, or stop it.
 
-        This computer should be one whose OneDrive is syncing the firm's
-        library; the computer holding the saved email attachments is best.
+        With for_computer (a teammate's name, e.g. "Ava", or a computer name)
+        it NAMES that computer instead of this one: the named computer sets the
+        task up by itself the next time Vaulter AI runs there, without asking
+        its owner (the owner of the tracker decided this, 2026-11-02). Without
+        it, this computer is named and set up now. Naming a computer moves the
+        run; any other computer that had it stands down by itself.
+
+        The computer should be one whose OneDrive is syncing the firm's
+        library; the one holding the saved email attachments is best.
 
         Args:
             time: time of day, 24-hour HH:MM (default 09:00)
-            turn_off: remove the daily run from this computer
-            move_here: take the daily run over from another computer
+            for_computer: a teammate or computer to run it on, instead of this one
+            turn_off: stop the daily run everywhere
         """
         import re as _re
-        import shutil
-        import subprocess
         try:
             from deal_tracker import tracker as T
-            if sys.platform != "win32":
-                return "The daily run uses Windows Task Scheduler; this computer is not Windows."
             rec = T.load()
             if rec is None:
                 return "There is no deal tracker yet; start it with import_deal_tracker first."
-            here, task = _where(), "Vaulter AI - Deal Tracker daily"
-            owner = (rec.get("scheduled_on") or {}).get("machine")
+            here = _where()
             if turn_off:
-                subprocess.run(["schtasks", "/Delete", "/F", "/TN", task], capture_output=True, text=True,
-                               stdin=subprocess.DEVNULL, timeout=60)
-                if owner == here:
-                    rec.pop("scheduled_on", None)
-                    T.save(rec)
-                return f"The daily deal tracker run is off on {here}."
-            if owner and owner != here and not move_here:
-                return (f"The daily run is already scheduled on {owner}. Only one computer should run it. "
-                        "If the user wants it moved here, call again with move_here=true; that computer "
-                        "then stands down by itself.")
+                rec.pop("daily_run", None)
+                T.save(rec)
+                if sys.platform == "win32":
+                    _deal_tracker_task("remove")
+                return ("The daily deal tracker run is off. Any other computer that had it stops running it "
+                        "at its next scheduled time.")
             if not _re.fullmatch(r"([01]\d|2[0-3]):[0-5]\d", time.strip()):
                 return "time must be HH:MM on a 24-hour clock, e.g. 09:00."
-            script = Path(__file__).resolve().parent / "scripts" / "deal_tracker_daily.py"
-            runner = Path(sys.executable).with_name("pythonw.exe")
-            if not runner.exists():
-                runner = Path(sys.executable)
-            # Values reach PowerShell as environment variables, never spliced into the
-            # command text (the apostrophe lesson from the file-list refresh task).
-            ps = ("$a = New-ScheduledTaskAction -Execute $env:VLT_RUNNER -Argument ('\"{0}\"' -f $env:VLT_SCRIPT); "
-                  "$t = New-ScheduledTaskTrigger -Daily -At $env:VLT_TIME; "
-                  "$s = New-ScheduledTaskSettingsSet -StartWhenAvailable -ExecutionTimeLimit (New-TimeSpan -Minutes 45) "
-                  "-MultipleInstances IgnoreNew; "
-                  "Register-ScheduledTask -TaskName $env:VLT_TASK -Action $a -Trigger $t -Settings $s -Force | Out-Null")
-            env = dict(os.environ, VLT_RUNNER=str(runner), VLT_SCRIPT=str(script), VLT_TIME=time.strip(),
-                       VLT_TASK=task)
-            r = subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-Command", ps],
-                               capture_output=True, text=True, timeout=60, env=env, stdin=subprocess.DEVNULL)
-            if r.returncode != 0:
-                return f"Could not schedule the daily run: {(r.stderr or r.stdout).strip()[:300]}"
-            rec["scheduled_on"] = {"machine": here, "time": time.strip(),
-                                   "since": _dt_mod.date.today().isoformat()}
+            machine = here
+            if for_computer.strip():
+                machine, why = _computer_named(for_computer)
+                if not machine:
+                    return why
+            rec["daily_run"] = {"machine": machine, "time": time.strip(), "named_by": here,
+                                "since": _dt_mod.date.today().isoformat()}
             T.save(rec)
-            claude = "yes" if shutil.which("claude") else "no"
+            if machine != here:
+                return (f"Named {machine} for the daily deal tracker run at {time.strip()}. It sets itself up "
+                        "the next time Vaulter AI runs on that computer; nobody there needs to do anything. "
+                        "That computer must have OneDrive syncing the firm's library and this update installed.")
+            if sys.platform != "win32":
+                return "The daily run uses Windows Task Scheduler; this computer is not Windows."
+            err = _deal_tracker_task("add", time.strip())
+            if err:
+                return f"Could not schedule the daily run: {err}"
+            import shutil
+            claude = shutil.which("claude")
             return (f"Scheduled: the deal tracker updates itself every day at {time.strip()} on {here} "
-                    f"(or as soon as the computer is next on). Claude Code installed here: {claude}"
-                    + ("; new papers are read in the daily run too." if claude == "yes" else
-                       "; the daily run updates everything except reading new papers, which happens when "
-                       "the tracker is next opened in Claude Desktop.")
+                    f"(or as soon as the computer is next on)."
+                    + (" New papers are read in the daily run too." if claude else
+                       " Claude Code is not installed here, so new papers are read when the tracker is next "
+                       "opened in Claude Desktop; everything else updates daily.")
                     + " Its log is system/data/logs/deal_tracker_daily.log on this computer.")
         except Exception as e:
             return f"Could not schedule the daily run: {e}"
@@ -6145,6 +6139,109 @@ def _update_ready() -> str:
         return ""
 
 
+_DEAL_TRACKER_TASK = "Vaulter AI - Deal Tracker daily"
+
+
+def _deal_tracker_task(action: str, time: str = "09:00") -> str:
+    """
+    Add, remove or look for this computer's daily deal tracker task. Returns
+    "" on success (for "exists": "" means it exists), else what went wrong.
+    stdin is closed and output goes nowhere near the MCP pipe (the 2026-08-21
+    lessons); values reach PowerShell as environment variables, never spliced
+    into the command (the apostrophe lesson).
+    """
+    import subprocess
+    if action == "exists":
+        r = subprocess.run(["schtasks", "/Query", "/TN", _DEAL_TRACKER_TASK], stdin=subprocess.DEVNULL,
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=30)
+        return "" if r.returncode == 0 else "not found"
+    if action == "remove":
+        subprocess.run(["schtasks", "/Delete", "/F", "/TN", _DEAL_TRACKER_TASK], stdin=subprocess.DEVNULL,
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=30)
+        return ""
+    script = Path(__file__).resolve().parent / "scripts" / "deal_tracker_daily.py"
+    runner = Path(sys.executable).with_name("pythonw.exe")
+    if not runner.exists():
+        runner = Path(sys.executable)
+    ps = ("$a = New-ScheduledTaskAction -Execute $env:VLT_RUNNER -Argument ('\"{0}\"' -f $env:VLT_SCRIPT); "
+          "$t = New-ScheduledTaskTrigger -Daily -At $env:VLT_TIME; "
+          "$s = New-ScheduledTaskSettingsSet -StartWhenAvailable -ExecutionTimeLimit (New-TimeSpan -Minutes 45) "
+          "-MultipleInstances IgnoreNew; "
+          "Register-ScheduledTask -TaskName $env:VLT_TASK -Action $a -Trigger $t -Settings $s -Force | Out-Null")
+    env = dict(os.environ, VLT_RUNNER=str(runner), VLT_SCRIPT=str(script), VLT_TIME=time, VLT_TASK=_DEAL_TRACKER_TASK)
+    log_file = Path(__import__("config").LOG_DIR) / "deal_tracker_schedule.txt"
+    with open(log_file, "w", encoding="utf-8") as fh:
+        r = subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-Command", ps], env=env,
+                           stdin=subprocess.DEVNULL, stdout=fh, stderr=subprocess.STDOUT, timeout=60)
+    if r.returncode != 0:
+        return log_file.read_text(encoding="utf-8", errors="replace").strip()[:300] or f"exit {r.returncode}"
+    return ""
+
+
+def _computer_named(text: str) -> tuple[str, str]:
+    """
+    (computer name, "") for a teammate or computer named in the install
+    records ("Ava" -> her computer), or ("", why not). Two computers for one
+    name are refused, never guessed between.
+    """
+    from config import INSTALLS_DIR
+    want = "".join(ch for ch in text.lower() if ch.isalnum())
+    found = set()
+    for f in Path(INSTALLS_DIR).glob("*.json"):
+        parts = f.stem.split("--")
+        if len(parts) < 2:
+            continue
+        user, machine = parts[0], parts[1]
+        if want and (want in "".join(ch for ch in user.lower() if ch.isalnum())
+                     or want == "".join(ch for ch in machine.lower() if ch.isalnum())):
+            rec = _json_object(f) or {}
+            found.add(str(rec.get("machine") or machine))
+    if len(found) == 1:
+        return found.pop(), ""
+    if not found:
+        return "", (f"No installed computer matches '{text}' in the team's install records. Check "
+                    "get_install_status for the exact computer name.")
+    return "", f"'{text}' matches more than one computer: {', '.join(sorted(found))}. Give the computer name."
+
+
+def _ensure_deal_tracker_daily_run() -> str:
+    """
+    Set up the daily deal tracker task on THIS computer if the tracker names
+    it and the task is missing. Once a day, from a local stamp, on the first
+    tool call; nobody is asked (owner's decision, 2026-11-02). Returns a note
+    for Claude when it has just set it up, else "". Never raises.
+    """
+    import datetime as _dt
+    try:
+        if sys.platform != "win32":
+            return ""
+        from config import DATA_DIR
+        stamp = Path(DATA_DIR) / "deal_tracker_schedule_check.txt"
+        today = _dt.date.today().isoformat()
+        try:
+            if stamp.read_text(encoding="utf-8").strip() == today:
+                return ""
+        except OSError:
+            pass
+        stamp.write_text(today, encoding="utf-8")   # before the work, so a failure is not retried all day
+        from deal_tracker import tracker as T
+        rec = T.load()
+        run = (rec or {}).get("daily_run") or {}
+        if run.get("machine") != _where() or not _deal_tracker_task("exists"):
+            return ""
+        err = _deal_tracker_task("add", run.get("time") or "09:00")
+        if err:
+            log.warning(f"[DEAL TRACKER] Could not set up the daily run here: {err}")
+            return ""
+        log.info(f"[DEAL TRACKER] Daily run set up on this computer at {run.get('time')}.")
+        return (f"Note for Claude, not an error: the deal tracker's daily update was just set up on this "
+                f"computer (every day at {run.get('time') or '09:00'}), as the team arranged. Mention it in "
+                f"one short line; nothing is needed from the user.")
+    except Exception as e:
+        log.warning(f"[DEAL TRACKER] Daily run check failed (continuing): {e}")
+        return ""
+
+
 def _with_pending_notice(tool_name: str, result):
     """
     Add a one-line notice to a tool's answer when the user needs to do something
@@ -6213,6 +6310,12 @@ def _with_pending_notice(tool_name: str, result):
             _write_install_checkin()
         except Exception as e:
             log.warning(f"[NOTICE] Install check-in failed (continuing): {e}")
+
+        # The computer the deal tracker names for its daily run sets the run up
+        # itself, here, on its first question of the day: nobody has to ask.
+        set_up = _ensure_deal_tracker_daily_run()
+        if set_up:
+            result = result + "\n\n---\n" + set_up
 
         waiting = _restart_pending()
         if waiting:

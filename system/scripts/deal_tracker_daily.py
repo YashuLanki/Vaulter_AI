@@ -54,9 +54,9 @@ def layer_one() -> int:
     # One machine runs this. If the schedule was moved elsewhere, this machine stands down,
     # so two computers never update the tracker at the same moment.
     here = platform.node().strip() or os.environ.get("COMPUTERNAME", "")
-    owner = (rec.get("scheduled_on") or {}).get("machine")
-    if owner and owner != here:
-        log.info(f"The daily run now belongs to {owner}; this machine ({here}) does nothing.")
+    owner = (rec.get("daily_run") or {}).get("machine")
+    if owner != here:
+        log.info(f"The daily run is {'on ' + owner if owner else 'switched off'}; this machine ({here}) does nothing.")
         return -1
     counts = tracker.refresh(rec)
     tracker.save(rec)
