@@ -435,9 +435,11 @@ footer{max-width:1320px;margin:0 auto;padding:16px 20px 32px;color:var(--muted);
   document.addEventListener("click", e => { if (!e.target.closest(".search")) res.hidden = true; });
 
   // Opens the REAL file beside this page in Excel (Excel's own link type), not a
-  // downloaded copy, so what is saved there comes back into the tracker.
+  // downloaded copy, so what is saved there comes back into the tracker. The
+  // SharePoint address first: Excel asks whether to trust a folder on this
+  // computer, never a SharePoint one. The file beside the page if there is none.
   $("#xlsx").onclick = () => {
-    const file = location.href.split("#")[0].replace(/\.html?(\?.*)?$/i, ".xlsx");
+    const file = DATA.book_url || location.href.split("#")[0].replace(/\.html?(\?.*)?$/i, ".xlsx");
     const n = $("#xlsxnote"); n.hidden = false;
     n.innerHTML = "Opening <b>Deal Tracker.xlsx</b> in Excel. If nothing opens, open it from the same folder as this page. Edits you save there come back into this page the next time the tracker is opened through Claude.";
     window.location.href = "ms-excel:ofe|u|" + file;

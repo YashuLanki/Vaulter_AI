@@ -56,6 +56,7 @@ python system/scripts/check_retrieval.py            # does summary search find t
 python system/scripts/check_find.py                 # does find-in-document find the right passage
 python system/scripts/check_report_page.py          # does the screening report page work in a browser
 python system/scripts/check_term_sheet_page.py      # does the mini term sheet dashboard work in a browser
+python system/scripts/check_deal_tracker.py         # 68 checks on the deal tracker, made-up data only (Excel + Edge parts skip if absent)
 ```
 
 There is no lint/test framework configured (no pytest, no linter config) — the three
@@ -697,6 +698,9 @@ from building it: a machine whose OneDrive stopped syncing the library (2026-10-
 nothing new and cannot download cloud-only files, so the routine must run where sync works; two
 closings on one day at one price to two buyers are two sales; and Excel refuses a whole workbook
 over one unbalanced bracket, so check a generated workbook by opening it in Excel, not openpyxl.
+`scripts/check_deal_tracker.py` (2026-11-02) found on its first run that **"k-1" and "w-9" never
+blocked anything**: file names had their dashes turned into spaces and the words did not, so
+`K-1 2025.pdf` would have been offered for reading. The word now goes through the same cleaning.
 
 **A pending restart is detected and said out loud (`_restart_pending`, 2026-09-01).** Applying an
 update rewrites the `VERSION` file, and `_get_code_version()` reads that file — so between an

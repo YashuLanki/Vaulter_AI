@@ -83,9 +83,44 @@ def _file_list_date() -> str:
         return ""
 
 
-def build_payload(rec: dict, today: _dt.date | None = None) -> dict:
+def web_address(path: Path) -> str:
+    r"""
+    The file's SharePoint address, from OneDrive's own map of synced folders
+    (the same records config._library_from_onedrive_records reads). Excel opens
+    a SharePoint address at once; handed a file on this computer it first asks
+    whether to trust the folder. "" when the file is not in a synced library.
+    """
+    import sys
+    from urllib.parse import quote
+    if sys.platform != "win32":
+        return ""
+    best = None
+    try:
+        import winreg
+        key = r"Software\SyncEngines\Providers\OneDrive"
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, key) as root:
+            for i in range(winreg.QueryInfoKey(root)[0]):
+                try:
+                    with winreg.OpenKey(root, winreg.EnumKey(root, i)) as sub:
+                        url = str(winreg.QueryValueEx(sub, "UrlNamespace")[0])
+                        mount = Path(str(winreg.QueryValueEx(sub, "MountPoint")[0])).resolve()
+                    rel = Path(path).resolve().relative_to(mount)
+                except (OSError, ValueError):
+                    continue
+                # The deepest mount wins: the account root also contains the library.
+                if url.lower().startswith("https://") and (best is None or len(mount.parts) > best[0]):
+                    best = (len(mount.parts), url, rel)
+    except Exception:
+        return ""
+    if not best:
+        return ""
+    _, url, rel = best
+    return quote(url.rstrip("/"), safe=":/%") + "/" + quote(rel.as_posix())
+
+
+def build_payload(rec: dict, today: _dt.date | None = None, book: Path | None = None) -> dict:
     today = today or _dt.date.today()
-    return {"built": today.isoformat(),
+    return {"built": today.isoformat(), "book_url": web_address(book) if book else "",
             "built_at": _dt.datetime.now().strftime("%B %d, %Y at %I:%M %p").replace(" 0", " "),
             "imported_from": rec.get("imported_from", ""), "watch_from": rec.get("watch_from", ""),
             "deals": [deal_row(d, today) for d in rec["deals"]], "attention": rec.get("attention", []),
@@ -107,7 +142,7 @@ def write(rec: dict, folder: Path | None = None, today: _dt.date | None = None) 
     book = folder / BOOK_NAME
     if X.pull_edits(rec, book):
         T.save(rec)
-    payload = build_payload(rec, today)
+    payload = build_payload(rec, today, book)
     html = TEMPLATE.read_text(encoding="utf-8")
     data = json.dumps(payload, separators=(",", ":"), ensure_ascii=False, default=str).replace("</", "<\\/")
     html = html.replace("/*__DATA__*/", "const DATA=" + data + ";")

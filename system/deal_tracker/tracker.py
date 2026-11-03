@@ -479,8 +479,10 @@ def do_not_open_words() -> list[str]:
 
 
 def blocked(name: str, words: list[str]) -> bool:
-    low = " " + re.sub(r"[_\-.]+", " ", name.lower()) + " "
-    return any(re.search(r"(?<![a-z0-9])" + re.escape(w) + r"(?![a-z0-9])", low) for w in words)
+    # The word goes through the same cleaning as the name: "k-1" once never matched "K-1 2025.pdf".
+    clean = lambda s: " ".join(re.sub(r"[_\-.]+", " ", s.lower()).split())
+    low = " " + clean(name) + " "
+    return any(re.search(r"(?<![a-z0-9])" + re.escape(clean(w)) + r"(?![a-z0-9])", low) for w in words if clean(w))
 
 
 def _closing_folder(path: str) -> str:
@@ -536,11 +538,14 @@ def drive_closings(rec: dict, words: list[str]) -> list[dict]:
         groups.setdefault(_closing_folder(path), []).append(path)
     # The same statement is often filed in two folders; once read under one, it is read.
     read_names = {k.rsplit("/", 1)[-1] for k in rec["processed"] if k.startswith("drive:")}
+    side_of = lambda folder: ("sale" if _SALE_PATH.search(folder + "/")
+                              else "purchase" if _BUY_PATH.search(folder + "/") else "unclear")
     out, offered = [], set()
-    for folder, files in sorted(groups.items()):
+    # A folder that says sale or purchase first, so a copy filed in both is offered from that one.
+    for folder, files in sorted(groups.items(), key=lambda g: (side_of(g[0]) == "unclear", g[0])):
         if all(("drive:" + f) in rec["processed"] for f in files):
             continue
-        side = "sale" if _SALE_PATH.search(folder + "/") else ("purchase" if _BUY_PATH.search(folder + "/") else "unclear")
+        side = side_of(folder)
         best = _best(files, side)
         name = best.rsplit("/", 1)[-1]
         if name in read_names or name in offered:
