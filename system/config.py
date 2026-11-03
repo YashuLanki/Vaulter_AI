@@ -967,8 +967,19 @@ GEO_CACHE_DIR.mkdir(parents=True, exist_ok=True)
 # Readable names (owner, 2026-10-20) are used once a folder by that name exists. The rename
 # waits until every machine runs code that knows both names: an older one would re-create the
 # old folder empty and save write-ups into it.
+# The team's reference material (write-ups, city research, the portfolio) may also sit inside
+# a "Data" folder (owner, 2026-11-03), so the top level shows only what people work in. Data
+# is looked in first; a folder at the top level still works, so moving one is safe once every
+# machine runs code that knows this.
+DATA_SUBFOLDER = "Data"
+
+
 def _named(readable: str, current: str) -> Path:
-    return SHARED_DIR / readable if (SHARED_DIR / readable).is_dir() else SHARED_DIR / current
+    for base in (SHARED_DIR / DATA_SUBFOLDER, SHARED_DIR):
+        for name in (readable, current):
+            if (base / name).is_dir():
+                return base / name
+    return SHARED_DIR / current
 
 
 PROPERTY_SUMMARIES_DIR = _named("Property Summaries", "property_summaries")
@@ -1001,7 +1012,7 @@ MINI_TERM_SHEETS_REFERENCE_DIR = MINI_TERM_SHEETS_DIR / "_reference"
 # Local copies under DATA_DIR/project_master still win (see portfolio.py's
 # _portfolio_dirs) -- this is the fallback that makes a fresh install useful,
 # not a replacement for a file someone deliberately put on their own machine.
-SMARTSHEET_PORTFOLIO_DIR = SHARED_DIR / "Smartsheet Portfolio"
+SMARTSHEET_PORTFOLIO_DIR = _named("Smartsheet Portfolio", "Smartsheet Portfolio")
 SMARTSHEET_PORTFOLIO_DIR.mkdir(parents=True, exist_ok=True)
 
 # The Project Master's filename in that folder. Excel, not CSV, on purpose: the
