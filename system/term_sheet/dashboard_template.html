@@ -36,6 +36,8 @@ p{margin:0}
 .small{font-size:12px}
 header.deal{background:var(--slate);color:var(--slate-ink);border-radius:12px;padding:18px 22px;border-bottom:4px solid var(--gold);display:flex;align-items:center;gap:22px}
 header.deal>div{display:grid;gap:8px}
+header.deal .site{justify-self:start;font-size:13px;font-weight:600;color:var(--gold);text-decoration:none;border:1px solid rgba(255,255,255,.35);border-radius:8px;padding:5px 12px}
+header.deal .site:hover{background:rgba(255,255,255,.1)}
 header .logo{height:84px;width:auto;border:0;outline:0;display:block}
 header .eyebrow{font-size:11px;letter-spacing:.08em;text-transform:uppercase;opacity:.8}
 header .meta{display:flex;flex-wrap:wrap;gap:10px 18px;align-items:center;opacity:.95}
@@ -86,7 +88,6 @@ details.fold[open] summary{border-bottom:1px solid var(--line)}
 .hits{display:grid;gap:8px}
 .hit{border:1px solid var(--line);border-radius:10px;padding:10px 12px;background:var(--surface)}
 mark{background:var(--gold-soft);color:inherit;padding:0 2px;border-radius:3px}
-.copybox{width:100%;min-height:90px;margin-top:8px;font:12px var(--mono);border:1px solid var(--line);border-radius:8px;padding:8px;background:var(--surface-2);color:var(--ink)}
 footer{color:var(--muted);font-size:12px;border-top:1px solid var(--line);padding-top:12px;display:grid;gap:4px}
 @media print{nav.tabs,.toolbar{display:none} section.tab[hidden]{display:block} .panel,.card{break-inside:avoid}}
 </style>
@@ -99,9 +100,7 @@ footer{color:var(--muted);font-size:12px;border-top:1px solid var(--line);paddin
     <input id="q" type="search" placeholder="Search every tab: a word, a date, a dollar figure" aria-label="Search">
     <div>
       <button class="btn" id="xlsx" type="button">Open the Excel file</button>
-      <button class="btn" id="copy" type="button">Copy a summary</button>
       <button class="btn" id="theme" type="button">Dark or light</button>
-      <button class="btn" type="button" onclick="window.print()">Print</button>
     </div>
   </div>
   <div id="search" class="hits" hidden></div>
@@ -128,7 +127,8 @@ footer{color:var(--muted);font-size:12px;border-top:1px solid var(--line);paddin
   $("#head").innerHTML = `
     ${DATA.logo ? `<img class="logo" src="${DATA.logo}" alt="">` : ""}
     <div><div class="eyebrow">Mini term sheet</div><h1>${txt(DATA.name)}</h1>
-    ${since ? `<div class="small" style="opacity:.85">${txt(since)}</div>` : ""}</div>`;
+    ${since ? `<div class="small" style="opacity:.85">${txt(since)}</div>` : ""}
+    ${DATA.site ? `<a class="site" href="${esc(DATA.site.url)}" target="_blank" rel="noopener" title="Opens Google Earth${DATA.site.rough ? "; only the town is known" : ""}">${DATA.site.rough ? "View area" : "View site"} ↗</a>` : ""}</div>`;
   // A page opened from a file cannot open another file in Excel: the browser
   // downloads a copy at best, and edits to a copy never reach the team's sheet.
   // So the button says how to open the real one, through Claude.
@@ -226,17 +226,6 @@ footer{color:var(--muted);font-size:12px;border-top:1px solid var(--line);paddin
     box.hidden = false;
   });
 
-  // Copy: the text always appears in a box too, because a copy button that
-  // silently does nothing is worse than one that shows its text.
-  $("#copy").onclick = () => {
-    const lines = [DATA.name, since, ...DATA.figures.map(f => `${f.label}: ${f.value}`), "",
-      "Needs attention:", ...(DATA.attention.length ? DATA.attention.map(a => `- ${a.what}`) : ["nothing"]), "",
-      `From ${DATA.file}, built ${fmtDate(DATA.built)}.`];
-    const text = nodash(lines.join("\n"));
-    let box = $("#copybox"); if (!box) { box = document.createElement("textarea"); box.id = "copybox"; box.className = "copybox"; box.readOnly = true; $(".toolbar").after(box); }
-    box.value = text;
-    try { navigator.clipboard && navigator.clipboard.writeText(text); } catch (e) {}
-  };
   $("#theme").onclick = () => { const r = document.documentElement; const cur = r.getAttribute("data-theme"); const next = cur === "dark" ? "light" : "dark"; r.setAttribute("data-theme", next); try { localStorage.setItem("mts-theme", next); } catch (e) {} };
   try { const t = localStorage.getItem("mts-theme"); if (t) document.documentElement.setAttribute("data-theme", t); const tab = localStorage.getItem("mts-tab"); if (tab && order.includes(tab)) show(tab); } catch (e) {}
 

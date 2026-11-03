@@ -172,8 +172,8 @@ going wrong.
   cards, key dates, deal at a glance, needs attention, how complete), Timeline (every date on the
   Legal tab), Site & Title, Due Diligence (verdict counts, folded by section with the source
   column), Legal and Proforma (folded, empty steps greyed), Onboarding. A search box covers every
-  row of every tab. The copied summary always appears in a box, since headless Edge never answers
-  a clipboard request. For an owned property the key dates are the purchase's, earliest first;
+  row of every tab. The Copy a summary and Print buttons were removed at the owner's request
+  (2026-11-03). For an owned property the key dates are the purchase's, earliest first;
   the first build led with the newest title commitment, which is not a key date of anything.
   `scripts/check_term_sheet_page.py` drives a page in headless Edge; §11 asserts a page is built
   beside the synthetic workbook with no external resources. It holds real deal data and is never

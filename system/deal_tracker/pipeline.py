@@ -27,6 +27,15 @@ STAGES = ["LOI Sent", "LOI Received", "Counter Sent", "PSA Negotiation", "Under 
           "Closing Scheduled", "Closed", "Listed", "Unconfirmed", "Terminated", "Declined"]
 ACTIVE = {"LOI Sent", "LOI Received", "Counter Sent", "PSA Negotiation", "Under Contract", "Closing Scheduled"}
 DONE = {"Closed", "Terminated", "Declined"}
+# What each stage is called on the page and in "What changed"; the record keeps the team's own names.
+PLAIN_STAGE = {"LOI Sent": "Offer sent", "LOI Received": "Offer received", "Counter Sent": "Counter offer sent",
+               "PSA Negotiation": "Contract being written", "Under Contract": "Contract signed",
+               "Closing Scheduled": "Closing date set", "Closed": "Closed", "Terminated": "Fell through",
+               "Declined": "We said no", "Listed": "For sale", "Unconfirmed": "Needs an update"}
+# The changes worth a line in "What changed", and what to call them.
+WATCHED = {"stage": "Stage", "price": "Price", "deposit": "Deposit", "acres": "Acres", "buyer": "Buyer",
+           "seller": "Seller", "loi_date": "First offer", "counter_date": "Counter offer", "psa_date": "Contract",
+           "dd_expires": "Study period ends", "close_date": "Closing"}
 
 FIELDS = {  # workbook heading -> record key
     "Type": "type", "Property": "property", "Parcel / Lot": "parcel", "APN": "apn", "City": "city",
@@ -255,9 +264,21 @@ def find_entry(rec: dict, ident: str, deal_type: str = "") -> list[dict]:
     return live or out
 
 
-def apply(rec: dict, d: dict, fields: dict, source: str) -> list[str]:
-    """Set what the paper states. A blank never erases."""
-    said = []
+def _plain(k: str, v) -> str:
+    if v in (None, ""):
+        return ""
+    if k == "stage":
+        return PLAIN_STAGE.get(v, v)
+    if k in ("price", "deposit"):
+        return T.plain_money(v)
+    if k.endswith("_date") or k == "dd_expires":
+        return T.plain_date(v)
+    return f"{v:g}" if isinstance(v, float) else str(v)
+
+
+def apply(rec: dict, d: dict, fields: dict, source: str, why: str = "") -> list[str]:
+    """Set what the paper states. A blank never erases. What changed goes in "What changed"."""
+    said, changes = [], []
     for k, v in fields.items():
         if k not in set(FIELDS.values()) | {"terms"} or v in (None, "", {}):
             continue
@@ -269,10 +290,14 @@ def apply(rec: dict, d: dict, fields: dict, source: str) -> list[str]:
             continue
         v = T._num(v) if k in NUM_FIELDS and T._num(v) is not None else v
         if d.get(k) != v:
+            if k in WATCHED:
+                old = _plain(k, d.get(k))
+                changes.append(f"{WATCHED[k]} {old} → {_plain(k, v)}" if old else f"{WATCHED[k]} {_plain(k, v)}")
             d[k] = v
             d.setdefault("sources", {})[k] = source
             said.append(k.replace("_", " "))
     d["updated"] = _dt.date.today().isoformat()
+    T.log_update(rec, d.get("property", ""), "; ".join(changes), why, source)
     return said
 
 

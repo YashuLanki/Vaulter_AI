@@ -189,6 +189,8 @@ def run(tmp: Path) -> None:
           any('"Oak Ridge"' in a for a in rec["attention"]) and "Oak Ridge" not in new, rec["attention"])
     check("a struck-through name marks the old deal sold", by["Willow Flat"]["smartsheet_sold"])
     check("a summary card fills an empty purchase price", by["Pine Flat 12 Investors, LLC"]["purchase_price"] == 750_000)
+    check("the first Smartsheet read is the starting point, not news",
+          not any(u["source"] == "Smartsheet" for u in rec.get("updates", [])), rec.get("updates"))
 
     section("Accounting files are never offered or listed")
     words = T.do_not_open_words()
@@ -264,6 +266,78 @@ def run(tmp: Path) -> None:
     T.record_event(rec, o80, "sale", "2026-10-20", 900_000, 80, "Aspen Co", True, None, None, "SS 3")
     check("a final sale reads fully exited", T.status(o80) == "Fully exited")
 
+    section("What changed, and why")
+    portfolio.load_all_properties = lambda: (
+        [{"name": "Oak Ridge 40", "category": "Final Engineering", "state": "Arizona"},
+         {"name": "Cedar Bluff 40", "category": "Rezone", "state": "Arizona"},
+         {"name": "Oak Ridge", "category": "Rezone", "state": "Arizona"}],
+        [{"name": "Willow Flat", "state": "Colorado"}])
+    T.refresh(rec)
+    ups = rec.get("updates", [])
+    check("a stage changed in Smartsheet is logged, old to new",
+          any(u["deal"] == "Oak Ridge 40" and "Disposition → Final Engineering" in u["what"] for u in ups), ups[:3])
+    maple_d = pl["Maple Draw"]
+    old_price = maple_d.get("price")
+    P.apply(rec, maple_d, {"price": 1_450_000, "close_date": "2026-12-01"}, "Offer paper 261020 Counter.pdf",
+            "the seller countered at a higher price")
+    u = rec["updates"][0]
+    check("a paper's change is logged with the price and date, old to new, and the reason",
+          u["deal"] == "Maple Draw" and "Price" in u["what"] and "$1,450,000" in u["what"] and "Dec 1, 2026" in u["what"]
+          and (old_price is None or "→" in u["what"]) and u["why"] == "the seller countered at a higher price", u)
+    n = len(rec["updates"])
+    P.apply(rec, maple_d, {"price": 1_450_000}, "the same paper again")
+    check("nothing is logged when nothing changed", len(rec["updates"]) == n)
+    check("a closing statement's sale is logged",
+          any(u["deal"] == "Oak Ridge 80" and u["what"].startswith("Sold the last of it") and "$900,000" in u["what"]
+              for u in rec["updates"]), [u["what"] for u in rec["updates"][:5]])
+
+    section("Smartsheet project dashboards")
+    from deal_tracker import smartsheet_dashboards as SD
+    cell = lambda label, v: {"label": label, "cell": {"displayValue": v}}
+    sight = {"name": "7. Pine Flat 12 Dashboard", "widgets": [
+        {"title": "Project Name", "contents": {"cellData": [cell("", "Pine Flat 12")]}},
+        {"title": "Project Overview", "contents": {"cellData": [
+            cell("Entity Name:", "Holdings VII, LLC"), cell("Investors:", "Made Up Investor A"),
+            cell("City/State/County:", "Cottonwood/AZ/Yavapai"), cell("Cross-streets:", "Elm & 5th"),
+            cell("Assessor Parcel No:", "100-01-001\n100-01-002"), cell("Zoning:", "R-1"),
+            cell("Acreage:", "+/- 12.3"), cell("Lot Count:", "48")]}},
+        {"title": "Current Phase Budget", "contents": {"cellData": [cell("Spent to Date", "$123,456")]}}]}
+    got = SD.read_one(sight)
+    check("a dashboard's investors and budget are never read",
+          "Made Up Investor A" not in json.dumps(got) and "123,456" not in json.dumps(got), got)
+    check("two parcel numbers stay apart", got.get("apn") == "100-01-001; 100-01-002", got.get("apn"))
+    pine["lots"] = 50
+    SD.apply(rec, [got])
+    check("the dashboard fills the right deal, under the project's own name",
+          pine["name"] == "Pine Flat 12" and pine["county"] == "Yavapai" and pine["zoning"] == "R-1"
+          and "Pine Flat 12 Investors, LLC" in pine["aliases"] and "Holdings VII, LLC" in pine["aliases"], pine["name"])
+    check("an acreage within rounding is left alone, a different lot count is asked about",
+          pine["acres"] == 12.0 and pine["lots"] == 50 and any("lot count 48" in a for a in rec["attention"]),
+          (pine["acres"], pine["lots"]))
+    SD.apply(rec, [{**got, "zoning": "R-2"}])
+    check("a rezoning on the dashboard shows in what changed",
+          rec["updates"][0]["deal"] == "Pine Flat 12" and "Zoning R-1 → R-2" in rec["updates"][0]["what"], rec["updates"][0])
+    check("a dashboard that fits no deal is asked about",
+          SD.apply(rec, [{"dashboard": "9. Nowhere 5 Dashboard", "project": "Nowhere 5"}]) == 0
+          and any("Nowhere 5" in a for a in rec["attention"]))
+
+    section("View site links")
+    from pipeline import property_coordinates as PCO
+    real_load = PCO.load_coordinates
+    PCO.load_coordinates = lambda _d: {
+        "Aspen Draw": {"lat": 33.1, "lon": -111.1, "precision": "parcel"},
+        "Birch Flat": {"lat": 33.2, "lon": -111.2, "precision": "city"}}
+    try:
+        rows = [{"name": "Aspen Draw – Lot 2", "aliases": []}, {"name": "Aspen Draw – Lot 4", "aliases": []},
+                {"name": "Mission Flat - NEC of Elm & Birch Rd", "aliases": []}, {"name": "Birch Flat", "aliases": []}]
+        DB.add_sites(rows, "name")
+        check("two lots of one site both get its link", all(r.get("site") for r in rows[:2])
+              and rows[0]["site"]["url"].endswith("33.1,-111.1"), rows[:2])
+        check("a name holding the site's words apart gets no link", "site" not in rows[2], rows[2])
+        check("a site known only to its town says so", rows[3].get("site", {}).get("rough") is True, rows[3])
+    finally:
+        PCO.load_coordinates = real_load
+
     section("The page and the Excel copy")
     folder = tmp / "Deal Tracker"
     T.save(rec)
@@ -290,15 +364,17 @@ def run(tmp: Path) -> None:
     maple = next(d for d in rec["pipeline"] if d["property"] == "Maple Draw")
     mrow = next(r for r in range(head_row + 1, ws.max_row + 1) if ws.cell(r, idc).value == maple["id"])
     ws.cell(mrow, X.COL["Next Step"], "Send a counter")
-    ws.cell(mrow, X.COL["Days Out"], 999)        # a worked-out column: must be ignored
+    ws.cell(mrow, X.COL["Days to Close"], 999)        # a worked-out column: must be ignored
     band = next(r for r in range(1, ws.max_row + 1) if str(ws.cell(r, 1).value or "").startswith("ADD NEW DEALS"))
     ws.cell(band + 1, X.COL["Type"], "Acquisition")
     ws.cell(band + 1, X.COL["Property"], "Aspen Mesa")
-    hs = wb["History"]
-    hh = [c.value for c in hs[1]]
-    hrow = next(r for r in range(2, hs.max_row + 1) if hs.cell(r, hh.index(X.ID_HEAD) + 1).value == o80["id"])
+    hs = wb[X.HISTORY_SHEET]
+    hr = next(r for r in range(1, 40) if hs.cell(r, 1).value == "Deal")
+    hh = [c.value for c in hs[hr]]
+    hrow = next(r for r in range(hr + 1, hs.max_row + 1) if hs.cell(r, hh.index(X.ID_HEAD) + 1).value == o80["id"])
     hs.cell(hrow, hh.index("Equity put in") + 1, 3_100_000)
-    wb["Open Items"].delete_rows(2)
+    oi = wb["Open Items"]
+    oi.delete_rows(next(r for r in range(1, 40) if oi.cell(r, 1).value == X.ITEMS_HEAD) + 1)
     wb.save(xl)
     st = xl.stat()
     os.utime(xl, (st.st_atime, st.st_mtime + 5))   # a save within the same second would look unchanged
@@ -312,6 +388,16 @@ def run(tmp: Path) -> None:
                                   "open items"]), said)
     DB.write(rec, folder)
     check("an unchanged copy brings nothing back", X.pull_edits(rec, xl) == [])
+    wb = openpyxl.load_workbook(xl)
+    check("the tabs are the expected ones, with no About tab",
+          wb.sheetnames == ["Dashboard", "Deal Detail", X.CHANGES_SHEET, "Offer Terms", "Open Items", X.HISTORY_SHEET, "Sales",
+                            X.QUESTIONS_SHEET, "Lists"] and wb["Lists"].sheet_state == "hidden", wb.sheetnames)
+    check("every tab a person sees says what it is and what can be changed",
+          all(str(wb[n]["A2"].value or "").startswith("What this is:") and str(wb[n]["A3"].value or "").startswith("What you can do:")
+              for n in wb.sheetnames if n not in ("Dashboard", "Lists")))
+    check("the questions for a person are on their own tab",
+          [c.value for c in wb[X.QUESTIONS_SHEET]["B"][4:]] == rec["attention"] and rec["attention"], rec["attention"])
+    wb.close()
 
     excel_check(xl)
     edge_check(folder / "Deal Tracker.html")
@@ -364,11 +450,17 @@ TEST = """
   const o = {errors: window.__errs || []};
   try {
     const $ = s => document.querySelector(s), $$ = s => [...document.querySelectorAll(s)];
-    o.tabs = $$("[role=tab]").length;
+    o.tabs = $$(".side .sh").length;
     o.prows = $$("tr[data-pid]").length;
     o.kpis = $$("#pk .kpi").length;
+    o.csub = $("#csub").textContent;
     o.open = $$("#open .item").length;
-    $$("[role=tab]")[1].click();
+    o.changes = $$("#changes .ch").length;
+    $$("#snav-p button")[1].click();
+    o.oneGroup = $$("#psecs details.sec").length;
+    $$("#snav-p button")[0].click();
+    o.allGroups = $$("#psecs details.sec").length;
+    $("#snav-h button").click();
     o.histShown = !$('section[data-view="history"]').hidden;
     o.hrows = $$("tr[data-id]").length;
     $('#period button[data-y="1"]').click();
@@ -379,7 +471,6 @@ TEST = """
     $("#results button").click();
     o.drawer = $("#drawer").classList.contains("on");
     o.dashes = /\\s[\\u2014\\u2013-]\\s/.test(document.body.innerText);
-    o.attention = !!$("#attention details");
   } catch (e) { o.exception = String(e); }
   document.title = "TESTOUT" + JSON.stringify(o);
 })();
@@ -410,16 +501,18 @@ def edge_check(page_path: Path) -> None:
     o = json.loads(html.unescape(m.group(1)))
     check("the page draws with no script error", o.get("errors") == [] and "exception" not in o,
           o.get("exception") or o.get("errors"))
-    check("two tabs; pipeline rows, figures and open items drawn",
-          o.get("tabs") == 2 and o.get("prows", 0) >= 3 and o.get("kpis") == 5 and o.get("open") == 1, o)
+    check("two sidebar lists; pipeline rows, coming up and open items drawn, no duplicate count cards",
+          o.get("tabs") == 2 and o.get("prows", 0) >= 3 and o.get("kpis") == 0 and o.get("csub") and o.get("open") == 1, o)
+    check("a group in the sidebar shows that group alone", o.get("oneGroup") == 1 and o.get("allGroups", 0) > 1, o)
     check("the History tab opens and lists every deal", o.get("histShown") and o.get("hrows") == 6, o)
     check("the last-12-months view narrows the list", 0 < o.get("hrows1", 0) < o.get("hrows", 0), o)
     check("the search finds both tabs' deals and opens one", o.get("hits", 0) >= 3 and o.get("drawer"), o)
     check("no dash between words anywhere on the page", o.get("dashes") is False)
-    check("the things needing a person are shown", o.get("attention"))
+    check("what changed is shown on the page", o.get("changes", 0) >= 3, o.get("changes"))
 
 
 def main() -> int:
+    sys.stdout.reconfigure(encoding="utf-8")
     tmp = Path(tempfile.mkdtemp(prefix="deal_tracker_check_"))
     try:
         run(tmp)

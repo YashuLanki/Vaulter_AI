@@ -2,8 +2,7 @@
 Does the mini term sheet dashboard page work in a browser?
 
 Opens a generated page in headless Microsoft Edge and drives it: it draws with
-no script error, the tabs and rows are there, the search finds a row, the
-copy button shows its text in a box. Exists for the same reason
+no script error, the tabs and rows are there, the search finds a row. Exists for the same reason
 check_report_page.py does: this JavaScript is run by nothing else.
 
     python system/scripts/check_term_sheet_page.py            # the newest page in the team folder
@@ -40,8 +39,7 @@ TEST = """
     o.hits = document.querySelectorAll("#search .hit").length;
     document.querySelectorAll("nav.tabs button")[4].click();
     o.legalShown = !document.querySelector('section[data-tab="Legal"]').hidden;
-    document.getElementById("copy").click();
-    o.copyBox = (document.getElementById("copybox") || {value: ""}).value.length;
+    o.siteOk = !!document.querySelector("header.deal .site") === !!DATA.site;
     document.getElementById("xlsx").click();
     o.xlsxBox = (document.getElementById("xlsxbox") || {textContent: ""}).textContent;
     o.counts = window.__mts;
@@ -100,7 +98,7 @@ def main() -> int:
         ("no dash between words anywhere on the page", o.get("dashes") is False, o.get("dashes")),
         ("the search finds rows", o.get("hits", 0) > 0, o.get("hits")),
         ("a tab click shows that tab", o.get("legalShown") is True, o.get("legalShown")),
-        ("the copy button shows its text in a box", o.get("copyBox", 0) > 20, o.get("copyBox")),
+        ("a View site link shows when the site's location is known", o.get("siteOk") is True, o.get("siteOk")),
         # A page opened from a file cannot open the workbook in Excel (2026-10-29: the browser
         # only downloads a copy), so the button must say how to open the real one.
         ("the Excel button says how to open the real file", "open the Excel file" in o.get("xlsxBox", ""),

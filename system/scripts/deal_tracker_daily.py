@@ -59,6 +59,8 @@ def layer_one() -> int:
         log.info(f"The daily run is {'on ' + owner if owner else 'switched off'}; this machine ({here}) does nothing.")
         return -1
     counts = tracker.refresh(rec)
+    from deal_tracker import smartsheet_dashboards   # needs this machine's Smartsheet key; skips without one
+    counts["dashboards"] = smartsheet_dashboards.refresh(rec)
     tracker.save(rec)
     page = dashboard.write(rec)
     waiting = len(tracker.pending(rec))

@@ -6,7 +6,7 @@
 <title>Deal Tracker</title>
 <style>
 /* The mini term sheet's palette (slate, gold, serif headings, mono figures),
-   laid out for finding things: one search, jump links, a rail of what is coming
+   laid out for finding things: one search, a sidebar of every group, what is coming
    up, and a side panel for a deal. No external fonts or scripts: the page opens
    from the team folder with no network. */
 :root{
@@ -35,7 +35,7 @@ h1,h2,h3{margin:0} p{margin:0}
 button{font:inherit;color:inherit}
 
 .top{background:var(--slate);color:var(--slate-ink);border-bottom:3px solid var(--gold)}
-.top .in{max-width:1320px;margin:0 auto;padding:16px 20px;display:flex;flex-wrap:wrap;gap:12px 20px;align-items:center}
+.top .in{max-width:1400px;margin:0 auto;padding:16px 20px;display:flex;flex-wrap:wrap;gap:12px 20px;align-items:center}
 .brand{display:grid;gap:2px;margin-right:auto}
 .brand .eyebrow{font-size:11px;letter-spacing:.1em;text-transform:uppercase;opacity:.75}
 .brand h1{font-family:var(--display);font-size:26px;font-weight:700;line-height:1.1}
@@ -52,11 +52,6 @@ button{font:inherit;color:inherit}
 .ibtn{border:1px solid rgba(255,255,255,.25);background:transparent;color:#fff;border-radius:8px;padding:8px 11px;cursor:pointer;font-size:13px}
 .ibtn:hover{background:rgba(255,255,255,.1)}
 
-.tabbar{position:sticky;top:0;z-index:20;background:color-mix(in srgb,var(--bg) 92%,transparent);backdrop-filter:blur(6px);border-bottom:1px solid var(--line)}
-.tabbar .in{max-width:1320px;margin:0 auto;padding:0 20px;display:flex;gap:4px;align-items:center}
-.tabbar button[role=tab]{border:0;background:none;padding:13px 16px 11px;font-weight:600;color:var(--muted);border-bottom:3px solid transparent;cursor:pointer}
-.tabbar button[aria-selected=true]{color:var(--ink);border-bottom-color:var(--gold)}
-.tabbar .count{font-weight:400;color:var(--faint);margin-left:4px}
 
 .wrap{max-width:1320px;margin:0 auto;padding:20px 20px 56px}
 section.view[hidden]{display:none}
@@ -68,26 +63,17 @@ section.view[hidden]{display:none}
 .kpi .sub{font-size:12px;color:var(--muted)}
 .kpi .rows{display:grid;gap:3px;margin-top:6px;border-top:1px solid var(--line);padding-top:6px}
 .kpi .rows div{display:flex;justify-content:space-between;gap:8px;font-size:12px}
-.kpi.accent{border-top:3px solid var(--gold)}
+.kpi.accent{}
 
-.layout{display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:20px;align-items:start}
-@media (max-width:1040px){.layout{grid-template-columns:1fr}.rail{position:static!important}}
-.rail{position:sticky;top:64px;display:grid;gap:14px}
 .box{background:var(--surface);border:1px solid var(--line);border-radius:12px;box-shadow:var(--shadow)}
 .box>header{display:flex;justify-content:space-between;align-items:baseline;gap:8px;padding:12px 14px;border-bottom:1px solid var(--line)}
 .box>header h2{font-family:var(--display);font-size:16px;font-weight:600}
 .box .body{padding:10px 14px;display:grid;gap:8px}
-.rail .item{display:grid;gap:1px;padding:7px 0;border-top:1px solid var(--line);cursor:pointer}
-.rail .item:first-child{border-top:0}
-.rail .item:hover b{text-decoration:underline}
+.box .item{display:grid;gap:1px;padding:7px 0;border-top:1px solid var(--line);cursor:pointer}
+.box .item:first-child{border-top:0}
+.box .item:hover b{text-decoration:underline}
 .empty{color:var(--muted);font-size:13px;padding:4px 0}
 
-.chips{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:14px}
-.chip{border:1px solid var(--line);background:var(--surface);border-radius:999px;padding:6px 12px;font-size:13px;cursor:pointer;text-decoration:none;color:var(--ink)}
-.chip:hover{background:var(--surface-2)}
-.chip b{font-family:var(--mono);margin-left:4px;color:var(--muted);font-weight:600}
-.chip[aria-pressed=true]{background:var(--slate);border-color:var(--slate);color:#fff}
-.chip[aria-pressed=true] b{color:var(--gold)}
 
 details.sec{margin-bottom:14px}
 details.sec>summary{list-style:none;cursor:pointer;display:flex;align-items:center;gap:10px;padding:12px 16px}
@@ -112,13 +98,13 @@ td .sub{font-size:12px;color:var(--muted);margin-top:1px}
 th.sort{cursor:pointer} th.sort:hover{color:var(--ink)} th .arr{opacity:.6}
 
 .pill{display:inline-block;border-radius:999px;padding:2px 9px;font-size:12px;font-weight:600;white-space:nowrap}
-.p-active{background:var(--info-soft);color:var(--info)} .p-contract{background:var(--gold-soft);color:var(--gold-ink)}
-.p-closed{background:var(--ok-soft);color:var(--ok)} .p-dead{background:var(--risk-soft);color:var(--risk)} .p-other{background:var(--surface-3);color:var(--muted)}
+.p-active,.p-contract{background:var(--surface-3);color:var(--ink)}
+.p-closed,.p-other{background:var(--surface-3);color:var(--muted)} .p-dead{background:var(--risk-soft);color:var(--risk)}
 .track{display:flex;gap:3px;margin-top:6px}
 .track i{height:4px;width:16px;border-radius:2px;background:var(--surface-3)}
-.track i.on{background:var(--gold)} .track.done i.on{background:var(--ok)}
-.late{color:var(--risk);font-weight:600} .soon{color:var(--warn);font-weight:600}
-.pos{color:var(--ok)} .neg{color:var(--risk)}
+.track i.on{background:var(--slate)} .track.done i.on{background:var(--faint)}
+.late{color:var(--risk);font-weight:600} .soon{color:var(--ink);font-weight:600}
+.pos{color:inherit} .neg{color:var(--risk)}
 .terms{overflow:auto}
 .terms td{min-width:180px;font-size:13px}
 .terms td.k,.terms th.k{position:sticky;left:0;background:var(--surface);min-width:130px;color:var(--muted);font-weight:600;font-size:12px}
@@ -149,8 +135,33 @@ aside.drawer.on{transform:none}
 .fig .lab{font-size:11px;color:var(--muted);font-weight:600}
 .fig .v{font-family:var(--mono);font-size:17px;font-weight:600}
 .note{font-size:12px;color:var(--muted)}
-footer{max-width:1320px;margin:0 auto;padding:16px 20px 32px;color:var(--muted);font-size:12px;display:grid;gap:4px;border-top:1px solid var(--line)}
-@media print{.top .tools,.search,.tabbar,.rail,.chips,.bar{display:none!important} section.view[hidden]{display:block} .scroll{max-height:none;overflow:visible} details.sec{break-inside:avoid}}
+.site{display:inline-block;margin-top:4px;font-size:12px;font-weight:600;color:var(--info);text-decoration:none}
+.site:hover{text-decoration:underline}
+.drawer .site{font-size:13px;border:1px solid var(--line);border-radius:8px;padding:6px 12px;background:var(--surface)}
+.app{max-width:1400px;margin:0 auto;padding:22px 20px 56px;display:grid;grid-template-columns:232px minmax(0,1fr);gap:24px;align-items:start}
+.side{position:sticky;top:16px;background:var(--surface);border:1px solid var(--line);border-radius:14px;box-shadow:var(--shadow);padding:10px}
+.side .sh{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--faint);font-weight:700;padding:12px 10px 6px}
+.side .sh:first-child{padding-top:4px}
+.navlist{display:grid;gap:2px}
+.navlist button{display:grid;grid-template-columns:1fr auto;align-items:center;gap:10px;width:100%;border:0;background:none;padding:8px 10px;border-radius:9px;cursor:pointer;text-align:left;color:var(--ink);font-size:14px}
+.navlist button:hover{background:var(--surface-2)}
+.navlist button[aria-current=true]{background:var(--slate);color:#fff}
+.navlist button[aria-current=true] .c{background:var(--gold);color:var(--gold-ink)}
+.navlist .c{min-width:30px;text-align:center;font-family:var(--mono);font-size:12px;font-weight:600;background:var(--surface-3);color:var(--muted);border-radius:999px;padding:1px 8px}
+.navlist .all{font-weight:600}
+.main{min-width:0}
+.changes{margin-bottom:18px}
+.changes .body{gap:0}
+.ch{display:grid;grid-template-columns:92px minmax(140px,220px) 1fr;gap:4px 16px;padding:9px 0;border-top:1px solid var(--line)}
+.ch:first-child{border-top:0}
+.ch .when{color:var(--muted);font-size:12px;padding-top:2px}
+.ch .why{color:var(--muted);font-size:13px}
+.more{border:0;background:none;color:var(--info);font-weight:600;cursor:pointer;padding:8px 0 2px;text-align:left}
+@media (max-width:700px){.ch{grid-template-columns:1fr}}
+.pair{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:18px}
+.pair .body{max-height:260px;overflow:auto}
+@media (max-width:1000px){.app{grid-template-columns:1fr}.side{position:static}.navlist{grid-template-columns:repeat(auto-fill,minmax(190px,1fr))}.pair{grid-template-columns:1fr}}
+@media print{.side,.top .tools,.search,.bar{display:none!important} section.view[hidden]{display:block} .scroll{max-height:none;overflow:visible} details.sec{break-inside:avoid}}
 </style>
 </head>
 <body>
@@ -164,55 +175,40 @@ footer{max-width:1320px;margin:0 auto;padding:16px 20px 32px;color:var(--muted);
   <div class="tools">
     <button class="ibtn" id="xlsx" type="button">Open in Excel</button>
     <button class="ibtn" id="theme" type="button" aria-label="Dark or light">Dark / light</button>
-    <button class="ibtn" type="button" onclick="window.print()">Print</button>
   </div>
 </div></header>
 
-<nav class="tabbar"><div class="in" role="tablist">
-  <button role="tab" data-view="pipeline" aria-selected="true">Pipeline<span class="count" id="c-pipe"></span></button>
-  <button role="tab" data-view="history" aria-selected="false">History<span class="count" id="c-hist"></span></button>
-</div></nav>
-
-<div class="wrap">
-  <p class="note" id="xlsxnote" hidden style="margin-bottom:12px"></p>
-
-  <section class="view" data-view="pipeline">
-    <div class="kpis" id="pk"></div>
-    <div class="layout">
-      <div>
-        <div class="bar">
-          <div class="chips" id="pjump" style="margin:0"></div>
-          <select id="ptype" aria-label="Type"><option value="">Acquisitions and dispositions</option><option>Acquisition</option><option>Disposition</option></select>
-        </div>
-        <div id="psecs"></div>
-      </div>
-      <div class="rail">
-        <div class="box"><header><h2>Coming up</h2><span class="small muted">closings and due diligence</span></header><div class="body" id="coming"></div></div>
+<div class="app">
+  <aside class="side" aria-label="Deal groups">
+    <p class="sh">Deals in progress</p>
+    <div class="navlist" id="snav-p"></div>
+    <p class="sh">Past deals</p>
+    <div class="navlist" id="snav-h"></div>
+  </aside>
+  <main class="main">
+    <p class="note" id="xlsxnote" hidden style="margin-bottom:12px"></p>
+    <section class="view" data-view="pipeline">
+      <div class="box changes"><header><h2>What changed</h2><span class="small muted" id="chn"></span></header><div class="body" id="changes"></div></div>
+      <div class="pair">
+        <div class="box"><header><h2>Coming up</h2><span class="small muted" id="csub"></span></header><div class="body" id="coming"></div></div>
         <div class="box"><header><h2>Open items</h2><span class="small muted" id="oin"></span></header><div class="body" id="open"></div></div>
       </div>
-    </div>
-  </section>
-
-  <section class="view" data-view="history" hidden>
-    <div class="bar">
-      <div class="seg" id="period" role="group" aria-label="Period">
-        <button type="button" data-y="0" aria-pressed="true">All time</button>
-        <button type="button" data-y="5" aria-pressed="false">Last 5 years</button>
-        <button type="button" data-y="1" aria-pressed="false">Last 12 months</button>
+      <div id="psecs"></div>
+    </section>
+    <section class="view" data-view="history" hidden>
+      <div class="bar">
+        <div class="seg" id="period" role="group" aria-label="Period">
+          <button type="button" data-y="0" aria-pressed="true">All time</button>
+          <button type="button" data-y="5" aria-pressed="false">Last 5 years</button>
+          <button type="button" data-y="1" aria-pressed="false">Last 12 months</button>
+        </div>
+        <div style="display:flex;gap:10px;align-items:center"><span class="small muted" id="periodnote"></span><select id="hstate" aria-label="State"><option value="">All states</option></select><span class="small muted" id="hcount"></span></div>
       </div>
-      <span class="small muted" id="periodnote"></span>
-    </div>
-    <div class="kpis" id="hk"></div>
-    <div id="attention"></div>
-    <div class="bar">
-      <div class="chips" id="hstatus" style="margin:0"></div>
-      <div style="display:flex;gap:8px;align-items:center"><select id="hstate" aria-label="State"><option value="">Every state</option></select><span class="small muted" id="hcount"></span></div>
-    </div>
-    <div class="box scroll"><table><thead><tr id="hhead"></tr></thead><tbody id="hrows"></tbody></table></div>
-  </section>
+      <div class="kpis" id="hk"></div>
+      <div class="box scroll"><table><thead><tr id="hhead"></tr></thead><tbody id="hrows"></tbody></table></div>
+    </section>
+  </main>
 </div>
-
-<footer id="foot"></footer>
 <div class="veil" id="veil"></div>
 <aside class="drawer" id="drawer" aria-hidden="true"><div class="dh"><div id="dtitle"></div><button class="x" id="dclose" type="button">Close</button></div><div class="db" id="dbody"></div></aside>
 
@@ -232,8 +228,6 @@ footer{max-width:1320px;margin:0 auto;padding:16px 20px 32px;color:var(--muted);
   const today = new Date(DATA.built + "T00:00:00");
   const H = DATA.deals, P = DATA.pipeline || [];
   $("#when").textContent = `Refreshed ${DATA.built_at}`;
-  $("#c-pipe").textContent = P.length ? P.length : "";
-  $("#c-hist").textContent = H.length;
 
   // ── Side panel ──
   function openDrawer(title, html){
@@ -249,20 +243,30 @@ footer{max-width:1320px;margin:0 auto;padding:16px 20px 32px;color:var(--muted);
   const srcList = s => Object.keys(s || {}).length ? `<details><summary class="small muted" style="cursor:pointer">Where each figure came from</summary><ul class="plain small">${Object.entries(s).map(([k, v]) => `<li><b>${txt(k.replace(/_/g, " "))}:</b> ${txt(v)}</li>`).join("")}</ul></details>` : "";
 
   // ── Tabs ──
+  let pgroup = "", hstatus = "";
   function view(name){
-    $$("[role=tab]").forEach(b => b.setAttribute("aria-selected", b.dataset.view === name));
     $$("section.view").forEach(s => s.hidden = s.dataset.view !== name);
+    mark(name);
     try { localStorage.setItem("dt-view", name); } catch (e) {}
   }
-  $$("[role=tab]").forEach(b => b.onclick = () => view(b.dataset.view));
+  function mark(name){
+    $$(".navlist button").forEach(b => b.setAttribute("aria-current",
+      b.dataset.view === name && (name === "pipeline" ? b.dataset.k === pgroup : b.dataset.k === hstatus)));
+  }
+  const navBtn = (v, k, label, n, dot, all) => `<button type="button" data-view="${v}" data-k="${k}"${all ? ' class="all"' : ""}><span>${label}</span><span class="c">${n}</span></button>`;
 
   // ══ PIPELINE ══
+  // What each stage, date and term is called on the page. The record keeps the team's own names.
+  const SW = DATA.stage_words || {};
+  const KW = {"Close":"Closing", "DD ends":"Study period ends", "PSA":"Contract", "Counter":"Counter offer", "LOI":"Offer"};
+  const TW = {"Document / Date":"Latest paper", "DD / Feasibility":"Study period", "Key Condition":"Conditions", "Status":"Where it stands"};
+  const site = d => d.site ? `<a class="site" href="${esc(d.site.url)}" target="_blank" rel="noopener" onclick="event.stopPropagation()" title="Opens Google Earth${d.site.rough ? "; only the town is known" : ""}">${d.site.rough ? "View area" : "View site"} ↗</a>` : "";
   const ACTIVE = ["LOI Sent", "LOI Received", "Counter Sent", "PSA Negotiation", "Under Contract", "Closing Scheduled"];
   const CONTRACT = ["PSA Negotiation", "Under Contract", "Closing Scheduled"];
   const STEP = {"LOI Sent":0, "LOI Received":0, "Counter Sent":1, "PSA Negotiation":2, "Under Contract":3, "Closing Scheduled":4, "Closed":5};
   const pc = s => CONTRACT.includes(s) ? "p-contract" : ACTIVE.includes(s) ? "p-active" : s === "Closed" ? "p-closed" : ["Terminated", "Declined"].includes(s) ? "p-dead" : "p-other";
-  const stage = s => s ? `<span class="pill ${pc(s)}">${esc(s)}</span>` : NG;
-  const track = s => STEP[s] == null ? "" : `<div class="track${s === "Closed" ? " done" : ""}" title="LOI, counter, PSA, contract, closing, closed">${[0,1,2,3,4,5].map(i => `<i class="${i <= STEP[s] ? "on" : ""}"></i>`).join("")}</div>`;
+  const stage = s => s ? `<span class="pill ${pc(s)}">${esc(SW[s] || s)}</span>` : NG;
+  const track = s => STEP[s] == null ? "" : `<div class="track${s === "Closed" ? " done" : ""}" title="Offer, counter offer, contract written, contract signed, closing date set, closed">${[0,1,2,3,4,5].map(i => `<i class="${i <= STEP[s] ? "on" : ""}"></i>`).join("")}</div>`;
   const pprice = d => typeof d.price === "number" ? money(d.price) : (d.price ? txt(d.price) : NG);
   const when = d => {
     if (!d.key_date) return NG;
@@ -270,91 +274,98 @@ footer{max-width:1320px;margin:0 auto;padding:16px 20px 32px;color:var(--muted);
     // Red only for a closing or due diligence date that has passed on a live deal; an LOI's date is history.
     if (d.days_out != null) rel = !d.deadline ? `<span class="faint">${-d.days_out} days ago</span>`
       : `<span class="${d.days_out < 0 ? "late" : d.days_out <= 30 ? "soon" : "muted"}">${d.days_out < 0 ? `${-d.days_out} days past` : d.days_out === 0 ? "today" : `in ${d.days_out} days`}</span>`;
-    return `<div class="nw">${esc(d.key_label)} ${fmtD(d.key_date)}</div>${rel ? `<div class="sub">${rel}</div>` : ""}`;
+    return `<div class="nw">${esc(KW[d.key_label] || d.key_label)} ${fmtD(d.key_date)}</div>${rel ? `<div class="sub">${rel}</div>` : ""}`;
   };
   const acres = v => v == null ? "" : (typeof v === "number" ? `${v.toLocaleString("en-US")} ac` : txt(v));
 
   if (P.length) {
     const act = P.filter(d => ACTIVE.includes(d.stage));
     const dl = act.filter(d => d.deadline && d.days_out != null);
-    const soon = dl.filter(d => d.key_label === "Close" && d.days_out >= 0 && d.days_out <= 30);
+    // The counts are in the sidebar; the one thing worth a flag here is a date that has passed.
     const late = dl.filter(d => d.days_out < 0);
-    const next = dl.filter(d => d.key_label === "Close" && d.days_out >= 0).sort((a, b) => a.days_out - b.days_out)[0];
-    const k = (cls, lab, val, sub, isTxt) => `<div class="kpi ${cls}"><span class="lab">${lab}</span><span class="val${isTxt ? " txt" : ""}">${val}</span>${sub ? `<span class="sub">${sub}</span>` : ""}</div>`;
-    $("#pk").innerHTML = [
-      k("accent", "Active acquisitions", act.filter(d => d.type === "Acquisition").length, "LOI through closing"),
-      k("", "Active dispositions", act.filter(d => d.type === "Disposition").length, `${P.filter(d => d.stage === "Listed").length} more listed`),
-      k("", "PSA or under contract", P.filter(d => CONTRACT.includes(d.stage)).length, "being negotiated, signed or closing"),
-      k("", "Closing in 30 days", soon.length, late.length ? `<span class="late">${late.length} with a date already past</span>` : "none overdue"),
-      k("", "Next closing", next ? fmtD(next.key_date) : "None set", next ? txt(next.property) : "", true),
-    ].join("");
+    $("#csub").innerHTML = late.length ? `<span class="late">${late.length} past due</span>` : "closings and deadlines";
 
     const groups = [
-      ["acq", "Acquisitions", d => d.type === "Acquisition" && !["Terminated", "Declined", "Unconfirmed"].includes(d.stage), true],
-      ["dact", "Dispositions in progress", d => d.type === "Disposition" && ACTIVE.includes(d.stage), true],
-      ["dlist", "Listed for sale", d => d.type === "Disposition" && d.stage === "Listed", true],
-      ["dclosed", "Sold", d => d.type === "Disposition" && d.stage === "Closed", false],
-      ["unconf", "Status to confirm", d => d.stage === "Unconfirmed", true],
-      ["dead", "Terminated or declined", d => ["Terminated", "Declined"].includes(d.stage), false],
-      ["other", "Other", d => !d.stage, true],
+      ["acq", "Buying", d => d.type === "Acquisition" && !["Terminated", "Declined", "Unconfirmed"].includes(d.stage), "d-active"],
+      ["dact", "Selling", d => d.type === "Disposition" && ACTIVE.includes(d.stage), "d-contract"],
+      ["dlist", "Listed for sale", d => d.type === "Disposition" && d.stage === "Listed", ""],
+      ["dclosed", "Sold", d => d.type === "Disposition" && d.stage === "Closed", "d-closed"],
+      ["unconf", "Needs an update", d => d.stage === "Unconfirmed", ""],
+      ["dead", "Fell through", d => ["Terminated", "Declined"].includes(d.stage), "d-dead"],
+      ["other", "No stage set", d => !d.stage, ""],
     ];
     const terms = P.filter(d => d.terms && Object.keys(d.terms).length && !["Closed", "Terminated", "Declined"].includes(d.stage));
     const TERMS = ["Document / Date", "Price", "Deposit", "DD / Feasibility", "Closing", "Key Condition", "Status"];
     const row = d => `<tr class="click" data-pid="${d.id}">
-      <td><div class="main">${txt(d.property)}</div><div class="sub">${txt([d.parcel, d.location].filter(Boolean).join(" · "))}${d.acres != null ? ` · ${acres(d.acres)}` : ""}</div></td>
+      <td><div class="main">${txt(d.property)}</div><div class="sub">${txt([d.parcel, d.location].filter(Boolean).join(" · "))}${d.acres != null ? ` · ${acres(d.acres)}` : ""}</div>${site(d)}</td>
       <td>${txt(d.counterparty) || NG}</td>
       <td>${stage(d.stage)}${track(d.stage)}</td>
       <td class="r"><div class="num">${pprice(d)}</div>${d.price_basis ? `<div class="sub" style="max-width:220px;margin-left:auto">${txt(d.price_basis)}</div>` : ""}</td>
       <td>${when(d)}</td>
       <td class="small">${txt(d.next_step) || ""}</td></tr>`;
     function draw(){
-      const ty = $("#ptype").value, keep = P.filter(d => !ty || d.type === ty);
-      const used = groups.map(([id, t, f, open]) => [id, t, keep.filter(f), open]).filter(g => g[2].length);
-      $("#pjump").innerHTML = used.map(([id, t, l]) => `<a class="chip" href="#s-${id}">${t}<b>${l.length}</b></a>`).join("")
-        + (terms.length ? `<a class="chip" href="#s-terms">Offer terms<b>${terms.length}</b></a>` : "");
-      $("#psecs").innerHTML = used.map(([id, t, l, open]) => `<details class="sec box" id="s-${id}"${open ? " open" : ""}><summary><h2>${t}</h2><span class="n">${l.length}</span><span class="chev">›</span></summary>
-        <div style="overflow:auto"><table><thead><tr><th>Property</th><th>${id === "acq" ? "Seller" : ["dact", "dlist", "dclosed"].includes(id) ? "Buyer" : "Buyer or seller"}</th><th>Stage</th><th class="r">Price</th><th>Key date</th><th>Next step</th></tr></thead><tbody>${l.map(row).join("")}</tbody></table></div></details>`).join("")
-        + (terms.length ? `<details class="sec box" id="s-terms" open><summary><h2>Offer terms</h2><span class="n">${terms.length}</span><span class="small muted">latest paper on file</span><span class="chev">›</span></summary>
-          <div class="terms"><table><thead><tr><th class="k"></th>${terms.map(d => `<th>${txt(d.property)}</th>`).join("")}</tr></thead><tbody>${TERMS.map(t => `<tr><td class="k">${t}</td>${terms.map(d => `<td>${txt(d.terms[t]) || '<span class="faint">Not stated</span>'}</td>`).join("")}</tr>`).join("")}</tbody></table></div></details>` : "");
+      const used = groups.map(([id, t, f, dot]) => [id, t, P.filter(f), dot]).filter(g => g[2].length);
+      $("#snav-p").innerHTML = navBtn("pipeline", "", "All", P.length, "", true)
+        + used.map(([id, t, l, dot]) => navBtn("pipeline", id, t, l.length, dot)).join("")
+        + (terms.length ? navBtn("pipeline", "terms", "Offer details", terms.length, "") : "");
+      const show = used.filter(g => !pgroup || g[0] === pgroup);
+      $("#psecs").innerHTML = (pgroup === "terms" ? "" : show.map(([id, t, l]) => `<details class="sec box" id="s-${id}" open><summary><h2>${t}</h2><span class="n">${l.length}</span><span class="chev">›</span></summary>
+        <div style="overflow:auto"><table><thead><tr><th>Property</th><th>${id === "acq" ? "Seller" : ["dact", "dlist", "dclosed"].includes(id) ? "Buyer" : "Buyer or seller"}</th><th>Stage</th><th class="r">Price</th><th>Next date</th><th>Next step</th></tr></thead><tbody>${l.map(row).join("")}</tbody></table></div></details>`).join(""))
+        + (terms.length && (!pgroup || pgroup === "terms") ? `<details class="sec box" id="s-terms" open><summary><h2>Offer details</h2><span class="n">${terms.length}</span><span class="small muted">latest paper on each deal</span><span class="chev">›</span></summary>
+          <div class="terms"><table><thead><tr><th class="k"></th>${terms.map(d => `<th>${txt(d.property)}</th>`).join("")}</tr></thead><tbody>${TERMS.map(t => `<tr><td class="k">${TW[t] || t}</td>${terms.map(d => `<td>${txt(d.terms[t]) || '<span class="faint">Not stated</span>'}</td>`).join("")}</tr>`).join("")}</tbody></table></div></details>` : "");
       $$("tr[data-pid]").forEach(tr => tr.onclick = () => showP(tr.dataset.pid));
+      mark($('section[data-view="pipeline"]').hidden ? "history" : "pipeline");
     }
-    $("#ptype").addEventListener("input", draw);
+    $("#snav-p").addEventListener("click", e => { const b = e.target.closest("button"); if (!b) return; pgroup = b.dataset.k; view("pipeline"); draw(); });
     draw();
 
     const upcoming = dl.slice().sort((a, b) => a.days_out - b.days_out);
-    $("#coming").innerHTML = upcoming.length ? upcoming.map(d => `<div class="item" data-pid="${d.id}"><b>${txt(d.property)}</b><span class="small">${esc(d.key_label)} ${fmtD(d.key_date)} · <span class="${d.days_out < 0 ? "late" : d.days_out <= 30 ? "soon" : "muted"}">${d.days_out < 0 ? `${-d.days_out} days past` : `in ${d.days_out} days`}</span></span></div>`).join("") : '<p class="empty">No closing or due diligence dates set.</p>';
+    $("#coming").innerHTML = upcoming.length ? upcoming.map(d => `<div class="item" data-pid="${d.id}"><b>${txt(d.property)}</b><span class="small">${esc(KW[d.key_label] || d.key_label)} ${fmtD(d.key_date)} · <span class="${d.days_out < 0 ? "late" : d.days_out <= 30 ? "soon" : "muted"}">${d.days_out < 0 ? `${-d.days_out} days past` : `in ${d.days_out} days`}</span></span></div>`).join("") : '<p class="empty">No closing or study period dates set.</p>';
     $$("#coming .item").forEach(el => el.onclick = () => showP(el.dataset.pid));
   } else {
-    $("#pk").innerHTML = '<p class="muted">The pipeline has not been loaded yet.</p>';
+    $("#psecs").innerHTML = '<p class="muted">The pipeline has not been loaded yet.</p>';
     $("#coming").innerHTML = '<p class="empty">Nothing yet.</p>';
   }
+  const UP = DATA.updates || [];
+  let allChanges = false;
+  function drawChanges(){
+    const l = allChanges ? UP : UP.slice(0, 6);
+    $("#chn").textContent = UP.length ? `newest first` : "";
+    $("#changes").innerHTML = UP.length ? l.map(u => `<div class="ch"><span class="when">${fmtD(u.date)}</span><b>${txt(u.deal)}</b><div><div>${txt(u.what)}</div>${u.why ? `<div class="why">Why: ${txt(u.why)}</div>` : ""}</div></div>`).join("")
+      + (UP.length > 6 ? `<button class="more" id="morech" type="button">${allChanges ? "Show fewer" : `Show all ${UP.length}`}</button>` : "")
+      : '<p class="empty">Nothing new yet.</p>';
+    if ($("#morech")) $("#morech").onclick = () => { allChanges = !allChanges; drawChanges(); };
+  }
+  drawChanges();
   const oi = DATA.open_items || [];
   $("#oin").textContent = oi.length ? `${oi.length}` : "";
   $("#open").innerHTML = oi.length ? oi.map(i => { const c = i.indexOf(": "); return `<div class="item" style="cursor:default">${c > 0 ? `<b>${txt(i.slice(0, c))}</b><span class="small muted">${txt(i.slice(c + 2))}</span>` : `<span class="small">${txt(i)}</span>`}</div>`; }).join("")
-    + '<p class="note">Tell Claude when one is resolved, or delete it on the Excel Open Items tab.</p>' : '<p class="empty">Nothing open.</p>';
+ : '<p class="empty">Nothing open.</p>';
 
   function showP(id){
     const d = P.find(x => x.id === id); if (!d) return;
     const dt = k => d[k] ? fmtD(d[k]) : "";
     const m = v => typeof v === "number" ? money(v) : (v ? txt(v) : "");
     openDrawer(`<div class="small" style="opacity:.8">${txt(d.type)}</div><h2>${txt(d.property)}</h2><div style="margin-top:6px">${stage(d.stage)}</div>`,
-      `<div class="figs">${fig("Price", pprice(d))}${fig("Deposit", m(d.deposit) || NG)}${fig(d.key_label || "Key date", d.key_date ? fmtD(d.key_date) : NG)}${d.acres != null ? fig("Acres", txt(d.acres)) : ""}</div>
+      `${site(d)}`+
+      `<div class="figs">${fig("Price", pprice(d))}${fig("Deposit", m(d.deposit) || NG)}${fig(KW[d.key_label] || "Next date", d.key_date ? fmtD(d.key_date) : NG)}${d.acres != null ? fig("Acres", txt(d.acres)) : ""}</div>
       ${d.status || d.next_step ? `<div class="box"><div class="body">${d.status ? `<div><h3>Where it stands</h3>${txt(d.status)}</div>` : ""}${d.next_step ? `<div><h3>Next step</h3>${txt(d.next_step)}</div>` : ""}</div></div>` : ""}
-      <div><h3>The deal</h3><dl class="kv">${kv("Seller", txt(d.seller))}${kv("Buyer", txt(d.buyer))}${kv("Price basis", txt(d.price_basis))}${kv("Parcel / lot", txt(d.parcel))}${kv("APN", txt(d.apn))}${kv("Location", txt([d.city, d.county && d.county + " County", d.state].filter(Boolean).join(", ")))}${kv("Broker", txt(d.broker))}${kv("Escrow / title", txt(d.escrow))}</dl></div>
-      <div><h3>Dates</h3><dl class="kv">${kv("LOI", dt("loi_date"))}${kv("Counter", dt("counter_date"))}${kv("PSA", dt("psa_date"))}${kv("Due diligence ends", dt("dd_expires"))}${kv("Closing", dt("close_date"))}</dl></div>
-      ${d.orig_cost != null || d.gross_profit != null ? `<div><h3>Original purchase</h3><dl class="kv">${kv("Bought", dt("orig_acq_date"))}${kv("Original cost", m(d.orig_cost))}${kv("Gross profit", m(d.gross_profit))}${kv("Gross multiple", d.gross_multiple != null ? txt(d.gross_multiple) + "x" : "")}</dl></div>` : ""}
-      ${Object.keys(d.terms || {}).length ? `<div><h3>Offer terms, latest paper</h3><dl class="kv">${Object.entries(d.terms).map(([a, b]) => kv(txt(a), txt(b))).join("")}</dl></div>` : ""}
+      <div><h3>The deal</h3><dl class="kv">${kv("Seller", txt(d.seller))}${kv("Buyer", txt(d.buyer))}${kv("How the price works", txt(d.price_basis))}${kv("Parcel / lot", txt(d.parcel))}${kv("County parcel number", txt(d.apn))}${kv("Location", txt([d.city, d.county && d.county + " County", d.state].filter(Boolean).join(", ")))}${kv("Broker", txt(d.broker))}${kv("Title company", txt(d.escrow))}</dl></div>
+      <div><h3>Dates</h3><dl class="kv">${kv("First offer", dt("loi_date"))}${kv("Counter offer", dt("counter_date"))}${kv("Contract", dt("psa_date"))}${kv("Study period ends", dt("dd_expires"))}${kv("Closing", dt("close_date"))}</dl></div>
+      ${d.orig_cost != null || d.gross_profit != null ? `<div><h3>When we bought it</h3><dl class="kv">${kv("Bought", dt("orig_acq_date"))}${kv("What we paid", m(d.orig_cost))}${kv("Profit", m(d.gross_profit))}${kv("Multiple", d.gross_multiple != null ? txt(d.gross_multiple) + "x" : "")}</dl></div>` : ""}
+      ${Object.keys(d.terms || {}).length ? `<div><h3>Offer details, latest paper</h3><dl class="kv">${Object.entries(d.terms).map(([a, b]) => kv(txt(TW[a] || a), txt(b))).join("")}</dl></div>` : ""}
       ${(d.documents || []).length ? `<div><h3>Papers read</h3><ul class="plain small" style="margin:0">${d.documents.map(x => `<li>${fmtD(x.filed)}: ${txt(x.name)}</li>`).join("")}</ul></div>` : ""}
       ${srcList(d.sources)}`);
   }
 
   // ══ HISTORY ══
-  let years = 0, hstatus = "", sortKey = "acquired", sortDir = -1;
+  let years = 0, sortKey = "acquired", sortDir = -1;
   const since = () => { if (!years) return null; const d = new Date(today); d.setFullYear(d.getFullYear() - years); return d; };
   const inP = iso => { const s = since(); if (!s) return true; if (!iso) return false; const v = String(iso).length === 4 ? iso + "-07-01" : iso; return new Date(v + "T00:00:00") >= s; };
   const sum = (l, k) => l.reduce((a, d) => a + (d[k] || 0), 0);
   const have = (l, k) => l.filter(d => d[k] != null);
-  const STATUSES = ["Owned", "Partially sold", "Being acquired", "Fully exited", "Lost"];
+  const STATUSES = [["Owned", "Owned", "d-active"], ["Partially sold", "Partly sold", "d-contract"], ["Being acquired", "Being bought", ""], ["Fully exited", "Fully sold", "d-closed"], ["Lost", "Lost money", "d-dead"]];
+  const HW = {"Partially sold":"Partly sold", "Being acquired":"Being bought", "Fully exited":"Fully sold", "Lost":"Lost money"};
   const hpc = s => ({"Owned":"p-active", "Partially sold":"p-contract", "Being acquired":"p-other", "Fully exited":"p-closed", "Lost":"p-dead"}[s] || "p-other");
   [...new Set(H.map(d => d.state).filter(Boolean))].sort().forEach(s => $("#hstate").insertAdjacentHTML("beforeend", `<option>${esc(s)}</option>`));
 
@@ -366,32 +377,31 @@ footer{max-width:1320px;margin:0 auto;padding:16px 20px 32px;color:var(--muted);
     const prof = have(exited, "profit"), hold = have(exited, "hold");
     const k = (cls, lab, val, rows, sub) => `<div class="kpi ${cls}"><span class="lab">${lab}</span><span class="val">${val}</span>${rows.length ? `<div class="rows">${rows.map(([a, b]) => `<div><span class="muted">${a}</span><span class="num">${b}</span></div>`).join("")}</div>` : ""}${sub ? `<span class="sub" style="margin-top:4px">${sub}</span>` : ""}</div>`;
     $("#hk").innerHTML = [
-      k("accent", "Deals bought", bought.length, [["Equity put in", moneyT(sum(bought, "contributions"))], ["Purchase prices", moneyT(sum(bought, "purchase_price"))]], `${have(bought, "purchase_price").length} have a purchase price on record`),
-      k("", "Fully exited", exited.length, [["Returned", moneyT(sum(exited, "distributions"))], ["Profit", moneyT(sum(prof, "profit"))], ["Average hold", hold.length ? (sum(hold, "hold") / hold.length).toFixed(1) + " yrs" : "not given"]], `profit on the ${prof.length} with both figures`),
-      k("", "Sales closed", sales.length, [["Sale prices", moneyT(sales.reduce((a, x) => a + (x.price || 0), 0))]], "each closing, part sales included"),
-      k("", "Holding now", held.length, [["Acres", Math.round(sum(held, "acres")).toLocaleString("en-US")], ["Partly sold", held.filter(d => d.status === "Partially sold").length], ["Equity in", moneyT(sum(held, "contributions"))]], "today, whatever the period"),
+      k("accent", "Deals bought", bought.length, [["Money put in", moneyT(sum(bought, "contributions"))], ["Purchase prices", moneyT(sum(bought, "purchase_price"))]], `${have(bought, "purchase_price").length} with a purchase price`),
+      k("", "Fully sold", exited.length, [["Paid back", moneyT(sum(exited, "distributions"))], ["Profit", moneyT(sum(prof, "profit"))], ["Average years held", hold.length ? (sum(hold, "hold") / hold.length).toFixed(1) + " yrs" : "not given"]], ""),
+      k("", "Sales closed", sales.length, [["Sale prices", moneyT(sales.reduce((a, x) => a + (x.price || 0), 0))]], "part sales included"),
+      k("", "Owned today", held.length, [["Acres", Math.round(sum(held, "acres")).toLocaleString("en-US")], ["Partly sold", held.filter(d => d.status === "Partially sold").length], ["Money put in", moneyT(sum(held, "contributions"))]], ""),
     ].join("");
     const s = since();
-    $("#periodnote").textContent = s ? `Counting from ${s.toLocaleDateString("en-US", {year:"numeric", month:"long", day:"numeric"})}; the list shows deals bought or sold since.` : "";
+    $("#periodnote").textContent = s ? `Since ${s.toLocaleDateString("en-US", {year:"numeric", month:"short", day:"numeric"})}` : "";
   }
-  const att = DATA.attention || [];
-  $("#attention").innerHTML = att.length ? `<details class="callout"><summary>Needs a person <span class="muted small">(${att.length})</span></summary><ul class="plain">${att.map(a => `<li>${txt(a)}</li>`).join("")}</ul><p class="note" style="margin-top:8px">Tell Claude the answer, for example "these two are the same deal".</p></details>` : "";
 
-  const cols = [["Deal", "name"], ["Status", "status"], ["Bought", "acquired"], ["Purchase price", "purchase_price", 1], ["Equity in", "contributions", 1], ["Returned", "distributions", 1], ["Profit", "profit", 1], ["Last sale", "last_sale"], ["Hold", "hold", 1]];
+  const cols = [["Deal", "name"], ["Status", "status"], ["Bought", "acquired"], ["Purchase price", "purchase_price", 1], ["Put in", "contributions", 1], ["Paid back", "distributions", 1], ["Profit", "profit", 1], ["Last sale", "last_sale"], ["Years held", "hold", 1]];
   const inPeriod = d => !years || inP(d.acquired) || inP(d.last_sale) || d.sales.some(x => x.date && inP(x.date));
   function hdraw(){
     const base = H.filter(inPeriod), st = $("#hstate").value;
-    $("#hstatus").innerHTML = [["", "All", base.length], ...STATUSES.map(s => [s, s, base.filter(d => d.status === s).length]).filter(x => x[2])]
-      .map(([v, l, n]) => `<button type="button" class="chip" data-s="${v}" aria-pressed="${v === hstatus}">${l}<b>${n}</b></button>`).join("");
-    $$("#hstatus .chip").forEach(b => b.onclick = () => { hstatus = b.dataset.s; hdraw(); });
-    $("#hhead").innerHTML = cols.map(([l, k, r]) => `<th class="sort${r ? " r" : ""}" data-k="${k}">${l}${k === sortKey ? ` <span class="arr">${sortDir < 0 ? "↓" : "↑"}</span>` : ""}</th>`).join("");
+    $("#snav-h").innerHTML = navBtn("history", "", "All", base.length, "", true)
+      + STATUSES.map(([v, l, dot]) => [v, l, dot, base.filter(d => d.status === v).length]).filter(x => x[3]).map(([v, l, dot, n]) => navBtn("history", v, l, n, dot)).join("");
+    const tip = {status: "Owned, partly sold, fully sold, being bought or money lost", acquired: "When the first money went in", contributions: "Money investors put in",
+      distributions: "Money paid back to investors", profit: "Paid back less put in", last_sale: "Date of the last sale", hold: "Years from first money in to the last sale, or to today"};
+    $("#hhead").innerHTML = cols.map(([l, k, r]) => `<th class="sort${r ? " r" : ""}" data-k="${k}" title="${tip[k] ? tip[k] + ". " : ""}Click to sort">${l}${k === sortKey ? ` <span class="arr">${sortDir < 0 ? "↓" : "↑"}</span>` : ""}</th>`).join("");
     $$("#hhead th").forEach(th => th.onclick = () => { const k = th.dataset.k; sortDir = k === sortKey ? -sortDir : -1; sortKey = k; hdraw(); });
     const l = base.filter(d => (!hstatus || d.status === hstatus) && (!st || d.state === st)).sort((a, b) => { const x = a[sortKey], y = b[sortKey];
       if (x == null || x === "") return 1; if (y == null || y === "") return -1; return (x > y ? 1 : x < y ? -1 : 0) * sortDir; });
     $("#hcount").textContent = `${l.length} deals`;
     $("#hrows").innerHTML = l.map(d => `<tr class="click" data-id="${d.id}">
-      <td><div class="main">${txt(d.name)}</div><div class="sub">${txt([d.state, d.size].filter(Boolean).join(" · "))}</div></td>
-      <td><span class="pill ${hpc(d.status)}">${d.status}</span>${d.stage && d.stage !== "Sold" ? `<div class="sub">${txt(d.stage)}</div>` : ""}</td>
+      <td><div class="main">${txt(d.name)}</div><div class="sub">${txt([d.state, d.size].filter(Boolean).join(" · "))}</div>${site(d)}</td>
+      <td><span class="pill ${hpc(d.status)}">${HW[d.status] || d.status}</span></td>
       <td class="nw small">${fmtD(d.acquired, d.acquired_approx)}</td>
       <td class="r num">${money(d.purchase_price)}</td><td class="r num">${money(d.contributions)}</td>
       <td class="r num">${d.lost ? '<span class="neg">lost</span>' : money(d.distributions)}</td>
@@ -400,15 +410,19 @@ footer{max-width:1320px;margin:0 auto;padding:16px 20px 32px;color:var(--muted);
       <td class="r num nw">${d.hold == null ? NG : d.hold + (d.hold_to_today ? '<span class="faint" title="still held, counted to today"> so far</span>' : " yrs")}</td></tr>`).join("")
       || '<tr><td colspan="9" class="muted">No deal matches.</td></tr>';
     $$("tr[data-id]").forEach(tr => tr.onclick = () => showH(tr.dataset.id));
+    mark($('section[data-view="history"]').hidden ? "pipeline" : "history");
   }
+  $("#snav-h").addEventListener("click", e => { const b = e.target.closest("button"); if (!b) return; hstatus = b.dataset.k; view("history"); hdraw(); });
   function showH(id){
     const d = H.find(x => x.id === id); if (!d) return;
-    openDrawer(`<div class="small" style="opacity:.8">${txt([d.state, d.type, d.size].filter(Boolean).join(" · ")) || "Deal"}</div><h2>${txt(d.name)}</h2><div style="margin-top:6px"><span class="pill ${hpc(d.status)}">${d.status}</span></div>`,
+    openDrawer(`<div class="small" style="opacity:.8">${txt([d.state, d.type, d.size].filter(Boolean).join(" · ")) || "Deal"}</div><h2>${txt(d.name)}</h2><div style="margin-top:6px"><span class="pill ${hpc(d.status)}">${HW[d.status] || d.status}</span></div>`,
+      `${site(d)}`+
       `${d.aliases.length ? `<p class="note">Also called ${txt(d.aliases.join("; "))}</p>` : ""}
-      <div class="figs">${fig("Equity put in", money(d.contributions))}${fig("Returned", d.lost ? '<span class="neg">Lost</span>' : money(d.distributions))}${fig("Profit", `<span class="${d.profit == null ? "" : d.profit >= 0 ? "pos" : "neg"}">${money(d.profit)}</span>`)}${fig("Hold", d.hold == null ? NG : `${d.hold} yrs${d.hold_to_today ? " so far" : ""}`)}</div>
-      <div><h3>Purchase</h3><dl class="kv">${kv("Bought (first money in)", fmtD(d.acquired, d.acquired_approx))}${kv("Purchase price", money(d.purchase_price))}${kv("Acquisition debt", money(d.debt))}${kv("Smartsheet stage", txt(d.stage))}</dl></div>
-      <div><h3>Returns</h3><dl class="kv">${kv("Multiple", d.multiple != null ? `${d.multiple}x what was put in` : NG)}${kv("Project IRR", d.irr == null ? NG : (d.irr * 100).toFixed(1) + '% <span class="faint">(old tracker)</span>')}${kv("Last sale", d.sold_in_parts && !d.last_sale ? "several dates" : fmtD(d.last_sale, d.last_sale_approx))}${d.excluded ? kv("Old tracker note", txt(d.excluded)) : ""}</dl></div>
-      <div><h3>Sales</h3>${d.sales.length ? `<table><thead><tr><th>Date</th><th class="r">Price</th><th>Buyer</th></tr></thead><tbody>${d.sales.map(s => `<tr><td class="nw">${fmtD(s.date, String(s.date).length === 4)}${s.final ? ' <span class="pill p-closed">final</span>' : ""}</td><td class="r num">${money(s.price)}</td><td class="small">${txt(s.other_party) || NG}<div class="sub">${txt(s.source)}</div></td></tr>`).join("")}</tbody></table>` : `<p class="note">${d.last_sale ? "The old tracker gives the last sale date only, not each sale." : "No sale recorded."}</p>`}</div>
+      <div class="figs">${fig("Money put in", money(d.contributions))}${fig("Paid back", d.lost ? '<span class="neg">Lost</span>' : money(d.distributions))}${fig("Profit", `<span class="${d.profit == null ? "" : d.profit >= 0 ? "pos" : "neg"}">${money(d.profit)}</span>`)}${fig("Years held", d.hold == null ? NG : `${d.hold} yrs${d.hold_to_today ? " so far" : ""}`)}</div>
+      ${[d.location, d.cross_streets, d.apn, d.zoning, d.lots, d.lot_sizes].some(Boolean) ? `<div><h3>The land</h3><dl class="kv">${kv("Where", txt(d.location))}${kv("Cross streets", txt(d.cross_streets))}${kv("Parcel numbers", txt(d.apn))}${kv("Zoning", txt(d.zoning))}${kv("Homes per acre", txt(d.density))}${kv("Lots", d.lots == null ? "" : txt(d.lots))}${kv("Lot sizes", txt(d.lot_sizes))}</dl></div>` : ""}
+      <div><h3>Purchase</h3><dl class="kv">${kv("First money in", fmtD(d.acquired, d.acquired_approx))}${kv("Purchase price", money(d.purchase_price))}${kv("Loan to buy it", money(d.debt))}${kv("Smartsheet stage", txt(d.stage))}</dl></div>
+      <div><h3>How it did</h3><dl class="kv">${kv("Multiple", d.multiple != null ? `${d.multiple}x what was put in` : NG)}${kv("Yearly return", d.irr == null ? NG : (d.irr * 100).toFixed(1) + '% <span class="faint">(old spreadsheet)</span>')}${kv("Last sale", d.sold_in_parts && !d.last_sale ? "several dates" : fmtD(d.last_sale, d.last_sale_approx))}${d.excluded ? kv("Note from the old spreadsheet", txt(d.excluded)) : ""}</dl></div>
+      <div><h3>Sales</h3>${d.sales.length ? `<table><thead><tr><th>Date</th><th class="r">Price</th><th>Buyer</th></tr></thead><tbody>${d.sales.map(s => `<tr><td class="nw">${fmtD(s.date, String(s.date).length === 4)}${s.final ? ' <span class="pill p-closed">final</span>' : ""}</td><td class="r num">${money(s.price)}</td><td class="small">${txt(s.other_party) || NG}<div class="sub">${txt(s.source)}</div></td></tr>`).join("")}</tbody></table>` : `<p class="note">${d.last_sale ? "The old spreadsheet gives only the last sale date." : "No sale recorded."}</p>`}</div>
       ${d.notes.length ? `<div><h3>Notes</h3><ul class="plain small" style="margin:0">${d.notes.map(n => `<li>${txt(n)}</li>`).join("")}</ul></div>` : ""}
       ${srcList(d.sources)}`);
   }
@@ -428,7 +442,7 @@ footer{max-width:1320px;margin:0 auto;padding:16px 20px 32px;color:var(--muted);
     const q = e.target.value.trim().toLowerCase();
     if (q.length < 2) { res.hidden = true; return; }
     const hits = index.filter(x => x.hay.toLowerCase().includes(q)).slice(0, 14);
-    res.innerHTML = hits.length ? hits.map(x => `<button type="button" data-t="${x.t}" data-id="${x.id}"><span><b>${txt(x.name)}</b><div class="sub small muted">${txt(x.sub)}</div></span><span class="pill ${x.t === "Pipeline" ? "p-active" : "p-other"}">${x.t}</span></button>`).join("") : '<p class="empty" style="padding:10px 12px">No deal matches.</p>';
+    res.innerHTML = hits.length ? hits.map(x => `<button type="button" data-t="${x.t}" data-id="${x.id}"><span><b>${txt(x.name)}</b><div class="sub small muted">${txt(x.sub)}</div></span><span class="pill ${x.t === "Pipeline" ? "p-active" : "p-other"}">${x.t === "Pipeline" ? "In progress" : "Past deal"}</span></button>`).join("") : '<p class="empty" style="padding:10px 12px">No deal matches.</p>';
     res.hidden = false;
     $$("#results button").forEach(b => b.onclick = () => { res.hidden = true; view(b.dataset.t === "Pipeline" ? "pipeline" : "history"); (b.dataset.t === "Pipeline" ? showP : showH)(b.dataset.id); });
   });
@@ -449,10 +463,6 @@ footer{max-width:1320px;margin:0 auto;padding:16px 20px 32px;color:var(--muted);
         const v = location.hash === "#history" ? "history" : location.hash === "#pipeline" ? "pipeline" : localStorage.getItem("dt-view"); if (v) view(v);
         const y = Number(localStorage.getItem("dt-years") || 0); if (y) document.querySelector(`#period button[data-y="${y}"]`).click(); } catch (e) {}
 
-  $("#foot").innerHTML = `${P.length ? `<p>Pipeline from ${txt(DATA.pipeline_from)}; offer papers filed from ${fmtD(DATA.pipeline_watch_from)} on keep it current.</p>` : ""}
-    <p>History from ${txt(DATA.imported_from)}. From ${fmtD(DATA.watch_from)} on, new activity comes from Smartsheet, the property summaries, closing statements on the firm's drive and saved email attachments; ${DATA.read} documents read so far.</p>
-    <p>${DATA.file_list ? `New papers are found through the list of the drive's files, last rebuilt ${fmtD(DATA.file_list)}; anything filed after that is not seen yet.` : "The list of the drive's files could not be read, so new papers on the drive were not checked."}</p>
-    <p>Worked out, not typed in: days out, status, hold, profit (returned less put in) and the period views. Files whose names suggest accounting are never opened.</p>`;
   window.__dt = {deals: H.length, pipeline: P.length};
 })();
 </script>

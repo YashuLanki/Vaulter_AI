@@ -114,6 +114,32 @@ def _note(rec: dict, text: str) -> None:
         rec["attention"].append(text)
 
 
+MAX_UPDATES = 300
+
+
+def log_update(rec: dict, deal: str, what: str, why: str = "", source: str = "") -> None:
+    """
+    One line for "What changed", newest first (owner, 2026-11-03: keep the
+    company told what is going on and why). `why` is only ever what a paper or
+    a person said; blank when nobody did, never a guess.
+    """
+    if what:
+        rec.setdefault("updates", []).insert(0, {"date": _dt.date.today().isoformat(), "deal": deal,
+                                                 "what": what, "why": (why or "").strip(), "source": source})
+        del rec["updates"][MAX_UPDATES:]
+
+
+def plain_money(v) -> str:
+    return f"${v:,.0f}" if isinstance(v, (int, float)) and not isinstance(v, bool) else str(v)
+
+
+def plain_date(v) -> str:
+    try:
+        return _dt.date.fromisoformat(str(v)[:10]).strftime("%b %d, %Y").replace(" 0", " ")
+    except ValueError:
+        return str(v)
+
+
 # ─── Importing the old spreadsheet ────────────────────────────────────────────
 
 def _num(v):
@@ -301,7 +327,14 @@ def likely_same(rec: dict, name: str) -> dict | None:
 
 
 def merge(rec: dict, keep: dict, drop: dict) -> None:
-    """Join a deal added from Smartsheet into the tracker deal it turned out to be."""
+    """
+    Join a deal added from Smartsheet into the tracker deal it turned out to be.
+    The tracker's record is kept, under the Smartsheet name: that is the project
+    name people use ("Oak Ridge 40"), and the old spreadsheet's company
+    name becomes another name for it.
+    """
+    if drop.get("stage") and keep["section"] != "new":
+        keep["name"], drop["name"] = drop["name"], keep["name"]
     keep["aliases"] = sorted({*keep["aliases"], drop["name"], *drop["aliases"]} - {keep["name"]})
     for k in ("stage", "smartsheet_sold"):
         keep[k] = drop.get(k) or keep.get(k)
@@ -318,7 +351,8 @@ def merge(rec: dict, keep: dict, drop: dict) -> None:
     for p in rec["processed"].values():
         if p.get("deal") == drop["id"]:
             p["deal"] = keep["id"]
-    rec["attention"] = [a for a in rec["attention"] if f'"{drop["name"]}"' not in a]
+    rec["attention"] = [a for a in rec["attention"]
+                        if f'"{drop["name"]}"' not in a and f'"{keep["name"]}"' not in a]
 
 
 def find_deal(rec: dict, ident: str) -> list[dict]:
@@ -369,25 +403,32 @@ def sync_smartsheet(rec: dict) -> int:
     rows = [(p["name"], known(p.get("category")), known(p.get("state")), False) for p in active]
     rows += [(p["name"], "Sold", known(p.get("state")), True) for p in sold]
     changes = 0
+    first_read = not any(d.get("stage") for d in rec["deals"])   # the first read is the starting point, not news
     for name, category, state, struck in rows:
         # A project Smartsheet lists as live is never one of the old sold deals,
         # however alike the names; only a struck-through one can be.
         current = [d for d in rec["deals"] if d["section"] != "sold"]
         hits = matches(rec, name, current) or (matches(rec, name) if struck else [])
         if len(hits) > 1:
-            _note(rec, f'Smartsheet lists "{name}", which could be any of: '
-                       + "; ".join(h["name"] for h in hits[:5]) + ". Say which, and it will be linked.")
+            _note(rec, f'Smartsheet has a project called "{name}", and more than one deal in the tracker could be it: '
+                       + "; ".join(h["name"] for h in hits[:5]) + ". Which one is it?")
             continue
         if not hits:
             guess = likely_same(rec, name)
             d = new_deal(rec, name, "Smartsheet Project Master", state=_state_code(state))
-            _note(rec, f'Added "{name}" from Smartsheet as a new deal.'
-                       + (f' It may be "{guess["name"]}" in the old tracker; if so, say so and the two '
-                          f'will be joined.' if guess else ""))
+            _note(rec, f'Smartsheet has a project called "{name}" that the old spreadsheet does not list '
+                       f'under that name, so it was added as a new deal. '
+                       + (f'Is it the same deal as "{guess["name"]}"?' if guess else
+                          'If the old spreadsheet has it under another name, which one?'))
             hits = [d]
             changes += 1
+            if not first_read:
+                log_update(rec, name, "New project in Smartsheet", source="Smartsheet")
         d = hits[0]
         if d.get("stage") != category or d.get("smartsheet_sold") != struck:
+            if d.get("stage") and not first_read:
+                log_update(rec, d["name"], "Marked sold in Smartsheet" if struck and not d.get("smartsheet_sold")
+                           else f"Stage {d['stage']} → {category}", "Changed in Smartsheet", "Smartsheet")
             d["stage"], d["smartsheet_sold"] = category, struck
             d["sources"]["stage"] = "Smartsheet Project Master"
             changes += 1
@@ -661,6 +702,16 @@ def record_event(rec: dict, d: dict, kind: str, date: str, price, acres, other_p
             if date and (not d.get("last_sale") or date > d["last_sale"]):
                 d["last_sale"] = date
             said.append("sale added" + (", marked as the final sale" if final else ""))
+            log_update(rec, d["name"], " ".join(x for x in (
+                "Sold" + (" the last of it" if final else " part"),
+                f"{ev['acres']:g} acres" if ev["acres"] else "", f"for {plain_money(ev['price'])}" if ev["price"] else "",
+                f"to {ev['other_party']}" if ev["other_party"] else "", f"on {plain_date(date)}" if date else "") if x),
+                "Closing statement filed", source)
+    if kind == "purchase" and any(s.endswith(" set") for s in said):
+        log_update(rec, d["name"], " ".join(x for x in (
+            "Bought", f"for {plain_money(d['purchase_price'])}" if d.get("purchase_price") else "",
+            f"on {plain_date(d['acquired'])}" if d.get("acquired") and len(str(d["acquired"])) == 10 else "") if x),
+            "Closing statement filed", source)
     for field, val in (("contributions", contributions), ("distributions", distributions)):
         val = _num(val)
         if val is None:

@@ -590,7 +590,8 @@ the API showed otherwise. **Verify against the source, not against the copy.**
 
 The pull is the one exception to "there are no API keys", and a deliberate one: the token
 costs nothing (it comes with the firm's Smartsheet subscription) but it is a secret, so it lives
-in **one** machine's own `confidentials/.env` and is never packaged; `SMARTSHEET_ACCESS_TOKEN`
+in **one** machine's own `confidentials/.env` (two since 2026-11-03: the deal tracker's daily-run
+machine reads the project dashboards with it) and is never packaged; `SMARTSHEET_ACCESS_TOKEN`
 stays blank on every teammate's machine and they read the result from the shared folder exactly
 as before. Read-only, always. The sheet is pinned by numeric id (`SMARTSHEET_PROJECT_MASTER_ID`)
 because the maintainer's own account sees two same-named copies. The file is validated, written
@@ -634,6 +635,15 @@ up to ~0.7 miles off, immaterial at a 5-mile radius — but the label overstated
 known. Added `section` as its own precision level rather than silently leaving this as `parcel`,
 and `proximity_tool.py` now says so out loud: two properties in the same section return
 byte-identical results, and a user comparing them needs to know why.
+
+**A regression check wrote made-up parcels into the team's real coordinates table (found
+2026-11-03).** `check_portfolio_comparison.py` saved test coordinates to a throwaway folder, but
+`coords_path()` falls through to the TEAM copy when a folder has no table of its own, so any
+machine without a local copy (a git worktree, say) wrote the test rows into the shared file. Three
+real properties were found sitting at the test's round coordinates and were restored from
+`system/data/backups/SHARED_property_coordinates_20260811.csv`. The throwaway folder now gets its
+own empty table and a check asserts it. **Any check that writes through a local-then-shared
+lookup must give its scratch folder a local copy first.**
 
 ### MCP server (`system/mcp_server.py`)
 The production entry point. `create_mcp_server()` registers all `@mcp.tool()`-decorated
@@ -701,6 +711,13 @@ over one unbalanced bracket, so check a generated workbook by opening it in Exce
 `scripts/check_deal_tracker.py` (2026-11-02) found on its first run that **"k-1" and "w-9" never
 blocked anything**: file names had their dashes turned into spaces and the words did not, so
 `K-1 2025.pdf` would have been offered for reading. The word now goes through the same cleaning.
+Since 2026-11-03 the daily run also reads each project's **Smartsheet dashboard**
+(`deal_tracker/smartsheet_dashboards.py`): place, cross streets, parcel numbers, zoning, acreage, lots,
+from an ALLOWLIST of labels, so budget and investor boxes are never read. That puts the read-only
+Smartsheet key on a SECOND machine, the daily run's (owner's choice, 2026-11-03), and the dashboards
+must be shared as Viewer with the key's account (only one was, that day). Every change the tracker
+makes now goes into "What changed" (`tracker.log_update`): old to new, and a reason only when a
+paper or a person gave one, never a guess.
 
 **A pending restart is detected and said out loud (`_restart_pending`, 2026-09-01).** Applying an
 update rewrites the `VERSION` file, and `_get_code_version()` reads that file — so between an

@@ -1358,7 +1358,15 @@ def main() -> int:
         from pipeline import property_coordinates as _pcoord
 
         _d = Path(_tfc.mkdtemp())
+        # The throwaway folder needs its OWN table: with none, coords_path() falls
+        # through to the team's shared copy, and these made-up parcels were being
+        # written into the team's real list on every run (found 2026-11-03).
+        (_d / "project_master").mkdir()
+        (_d / "project_master" / _pcoord.COORDS_FILENAME).write_text(
+            ",".join(_pcoord.FIELDNAMES) + "\n", encoding="utf-8")
         try:
+            check("the made-up parcels go to the throwaway table, not the team's",
+                  _pcoord.coords_path(_d) == _d / "project_master" / _pcoord.COORDS_FILENAME)
             _pcoord.save_coordinate(_d, "Cedar Flat 12", "CA", 34.5, -117.2,
                                     precision="section")
             _pcoord.save_coordinate(_d, "Juniper Mesa 10", "AZ", 33.0, -111.4,

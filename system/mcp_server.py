@@ -4731,7 +4731,7 @@ for every listing.""".replace(
     @mcp.tool()
     def save_deal_pipeline_update(deal: str, fields: dict, document_key: str = "", deal_type: str = "",
                                   create_new: bool = False, not_a_deal: bool = False,
-                                  open_item_done: str = "", new_open_item: str = "") -> str:
+                                  open_item_done: str = "", new_open_item: str = "", why: str = "") -> str:
         """
         Update one LIVE pipeline deal: from an offer paper given by
         get_deal_tracker_documents (pass its document_key), or because the user
@@ -4750,6 +4750,10 @@ for every listing.""".replace(
             not_a_deal: true if the paper is not about a deal; marks it read
             open_item_done: words from an open item that is now resolved
             new_open_item: something a person needs to check
+            why: one short plain sentence on why it changed, as the paper or the
+                 user says it ("the seller countered at a higher price", "closing
+                 moved by the second amendment"). It is shown to the whole team in
+                 "What changed". Leave it blank when nothing says why; never guess.
         """
         try:
             from deal_tracker import tracker as T
@@ -4781,7 +4785,9 @@ for every listing.""".replace(
                 d = P.new_entry(rec, deal_type, deal, source)
             else:
                 d = hits[0]
-            said = P.apply(rec, d, fields or {}, source)
+            if not hits:
+                T.log_update(rec, d["property"], f"New {d['type'].lower()} added", why, source)
+            said = P.apply(rec, d, fields or {}, source, why)
             if item:
                 if item["key"].startswith("paper:"):
                     folder = item["key"][len("paper:"):]

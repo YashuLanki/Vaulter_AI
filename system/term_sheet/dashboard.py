@@ -145,9 +145,10 @@ def read_workbook(path: Path) -> dict:
     import openpyxl
     rows = _sheet.template_rows()
     wb = openpyxl.load_workbook(path, read_only=True)
-    # The page is named after the property's folder, as the file is (owner,
-    # 2026-10-13: "the title should be simplified"), and carries the workbook's
-    # own logo so it looks like the sheet.
+    # The page is named after the site (its Property / Project Name row), falling
+    # back to the property's folder (owner, 2026-10-13: "the title should be
+    # simplified"; 2026-11-03: "should be the name of the site"), and carries the
+    # workbook's own logo so it looks like the sheet.
     out = {"tabs": {}, "title": "", "file": path.name, "folder": path.parent.name, "logo": _logo(path)}
     try:
         ov = wb["Overview"]
@@ -272,7 +273,10 @@ def build_payload(book: dict, today: _dt.date | None = None) -> dict:
     pf_filled = sum(1 for r in pf if r["state"] not in ("blank", "unknown"))
 
     return {
-        "name": book.get("folder") or name, "title": book["title"], "file": book["file"],
+        # The site's own name from the sheet (owner, 2026-11-03: a page saved in a test folder
+        # was titled after the folder); the folder only when the sheet has none or it runs long.
+        "name": name if name and len(name) <= 45 else (book.get("folder") or name),
+        "title": book["title"], "file": book["file"], "site": _site(name, book.get("folder", "")),
         "logo": book.get("logo", ""), "status": status, "since": since,
         "built": today.isoformat(), "figures": figures, "glance": glance, "events": events,
         "key_dates": key_dates, "key_dates_title": "Next dates" if ahead else "How the purchase ran",
@@ -285,6 +289,17 @@ def build_payload(book: dict, today: _dt.date | None = None) -> dict:
         ],
         "tabs": book["tabs"],
     }
+
+
+def _site(name: str, folder: str) -> dict | None:
+    """A Google Earth link from the team's checked locations, matched as the deal tracker matches; never guessed."""
+    try:
+        from deal_tracker.dashboard import add_sites
+        row = [{"name": name or folder, "aliases": [folder] if folder and name else []}]
+        add_sites(row, "name")
+        return row[0].get("site")
+    except Exception:
+        return None
 
 
 def write_dashboard(xlsx: Path, today: _dt.date | None = None) -> Path:

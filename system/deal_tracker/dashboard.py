@@ -16,10 +16,12 @@ from __future__ import annotations
 
 import datetime as _dt
 import json
+import re
 from pathlib import Path
 
 import config
 from deal_tracker import excel as X
+from deal_tracker import pipeline as P
 from deal_tracker import tracker as T
 
 TEMPLATE = Path(__file__).with_name("dashboard_template.html")
@@ -60,11 +62,13 @@ def deal_row(d: dict, today: _dt.date) -> dict:
         "sold_in_parts": d.get("sold_in_parts", False), "hold": hold, "hold_to_today": status not in ("Fully exited", "Lost"),
         "sales": d["sales"], "excluded": d.get("excluded", ""), "notes": d.get("notes", []),
         "sources": d.get("sources", {}), "lost": d.get("lost", False),
+        # The land, from the Smartsheet project dashboards (smartsheet_dashboards.py).
+        "location": ", ".join(x for x in (d.get("city"), d.get("county") and d["county"] + " County", d.get("state")) if x),
+        **{k: d.get(k, "") for k in ("cross_streets", "apn", "zoning", "density", "lot_sizes")},
     }
 
 
 def pipeline_row(d: dict, today: _dt.date) -> dict:
-    from deal_tracker import pipeline as P
     label, when = P.key_date(d, today)
     days = (_dt.date.fromisoformat(when) - today).days if when else None
     loc = ", ".join(x for x in (d.get("city"), d.get("state")) if x)
@@ -118,13 +122,56 @@ def web_address(path: Path) -> str:
     return quote(url.rstrip("/"), safe=":/%") + "/" + quote(rel.as_posix())
 
 
+def add_sites(rows: list[dict], name_key: str) -> None:
+    """
+    A Google Earth link on each row whose site is in the team's hand-checked
+    locations (property_coordinates.csv, the table proximity uses). Never a
+    location worked out from a name: that was measured wrong 5 times in 8. A
+    location matching more than one deal, or a deal matching two locations, gets
+    no link. "rough" marks a location known only to the town.
+    """
+    try:
+        from pipeline import property_coordinates as PC
+        coords = PC.load_coordinates(config.DATA_DIR)
+    except Exception:
+        return
+    pool = [{"name": r.get(name_key) or "", "aliases": r.get("aliases") or [], "i": i} for i, r in enumerate(rows)]
+    # The site's name as a PHRASE in the deal's name: "Cedar Draw" must not match
+    # "Mission Flat - NEC of Elm & Cedar Draw Rd" unless the words sit together.
+    phrase = lambda s: " " + " ".join(re.findall(r"[a-z]+|\d+", str(s).lower().replace("&", " and "))) + " "
+    part_of = lambda key, r: any(phrase(key) in phrase(n) for n in [r["name"], *r["aliases"]])
+    found: dict[int, list] = {}
+    for key, c in coords.items():
+        want = T._tokens(key)
+        hits = T.matches({"deals": pool}, key, pool)
+        if len(want) >= 2:   # an exact match stops matches() early; the site's other parts count too
+            hits += [r for r in pool if r not in hits and part_of(key, r)]
+        # Several rows share one site only when each is a part of it: its name holds the
+        # site's whole name ("<site> – Lot 2", "<site> – Lot 4"). Otherwise one row or none.
+        if len(hits) > 1 and not all(part_of(key, h) or want in T._deal_tokens(h) for h in hits):
+            continue
+        for h in hits:
+            shared = max(len(want & t) for t in T._deal_tokens(h))
+            found.setdefault(h["i"], []).append((shared, c["lat"], c["lon"], c["precision"] == "city"))
+    for i, sites in found.items():
+        # A row matching two sites takes the one sharing more of its name; a tie gets no link.
+        sites.sort(reverse=True)
+        if len(sites) == 1 or sites[0][0] > sites[1][0] or sites[0][1:] == sites[1][1:]:
+            _, lat, lon, rough = sites[0]
+            rows[i]["site"] = {"url": f"https://earth.google.com/web/search/{lat},{lon}", "rough": rough}
+
+
 def build_payload(rec: dict, today: _dt.date | None = None, book: Path | None = None) -> dict:
     today = today or _dt.date.today()
+    deals = [deal_row(d, today) for d in rec["deals"]]
+    pipeline = [pipeline_row(d, today) for d in rec.get("pipeline") or []]
+    add_sites(deals, "name")
+    add_sites(pipeline, "property")
     return {"built": today.isoformat(), "book_url": web_address(book) if book else "",
             "built_at": _dt.datetime.now().strftime("%B %d, %Y at %I:%M %p").replace(" 0", " "),
             "imported_from": rec.get("imported_from", ""), "watch_from": rec.get("watch_from", ""),
-            "deals": [deal_row(d, today) for d in rec["deals"]], "attention": rec.get("attention", []),
-            "pipeline": [pipeline_row(d, today) for d in rec.get("pipeline") or []],
+            "deals": deals, "attention": rec.get("attention", []), "pipeline": pipeline,
+            "updates": rec.get("updates", []), "stage_words": P.PLAIN_STAGE,
             "pipeline_from": rec.get("pipeline_from", ""), "pipeline_watch_from": rec.get("pipeline_watch_from", ""),
             "open_items": rec.get("open_items", []), "file_list": _file_list_date(),
             "read": sum(1 for p in rec.get("processed", {}).values()
