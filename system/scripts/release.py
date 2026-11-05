@@ -68,6 +68,11 @@ EXTRA_TOP_LEVEL = ("quick_start", ".claude")
 # two exclusions build_handoff.py already makes, for the same reasons.
 EXCLUDED_EXTRA_PATHS = (
     Path(".claude") / "hooks",
+    # A second working copy of the repo that Claude Code keeps for a branch in
+    # progress. Its .md files passed every rule above, so 36 of them -- that
+    # branch's own CLAUDE.md and docs/ -- were packaged on 2026-10-29 and caught
+    # on canary before promotion.
+    Path(".claude") / "worktrees",
 )
 EXCLUDED_EXTRA_FILE_NAMES = ("settings.json", "settings.local.json")
 
