@@ -4612,7 +4612,7 @@ for every listing.""".replace(
                     out.append(f"[Could not read it: {e}. Skip it: record nothing, and it will be offered "
                                "again next time.]")
                 out.append("")
-            if any(w["key"].startswith(("paper:", "inbox:")) for w in batch):
+            if any(w["key"].startswith(("paper:", "inbox:", "drop:")) for w in batch):
                 out.append(
                     "For an OFFER PAPER call save_deal_pipeline_update(document_key=..., deal=<pipeline id, "
                     "or the property>, deal_type='Acquisition' or 'Disposition', fields={...}) with only what "
@@ -4709,7 +4709,7 @@ for every listing.""".replace(
             else:
                 d = hits[0]
             name = item["document"].rsplit("/", 1)[-1]
-            source = ("Closing statement " if item["source"] == "drive" else "Email attachment ") + name
+            source = {"drive": "Closing statement ", "drop folder": "Dropped in "}.get(item["source"], "Email attachment ") + name
             said = T.record_event(rec, d, kind, date, price, acres, other_party, final_sale,
                                   contributions, distributions, source)
             if rec.get("pipeline"):
@@ -4776,7 +4776,7 @@ for every listing.""".replace(
                 return ("That fits more than one pipeline deal; call again with deal set to one id: "
                         + "; ".join(f"{h['id']} = {h.get('type')} {h.get('property')} "
                                     f"({h.get('buyer') or h.get('seller')}, {h.get('stage')})" for h in hits[:10]))
-            source = (f"{'Offer paper' if document_key.startswith('paper:') else 'Email attachment'} "
+            source = (f"{'Offer paper' if document_key.startswith('paper:') else 'Dropped in' if document_key.startswith('drop:') else 'Email attachment'} "
                       f"{item['document'].rsplit('/', 1)[-1]}") if item else "Told by a teammate"
             if not hits:
                 if not create_new or deal_type.title() not in ("Acquisition", "Disposition"):

@@ -694,9 +694,21 @@ holds its regression checks; `check_term_sheet_page.py` opens the dashboard in h
 `get_deal_tracker_documents`, `save_deal_tracker_update`, `save_deal_pipeline_update`,
 `edit_deal_tracker`, `import_deal_tracker`, `schedule_deal_tracker`. The firm's acquisitions and
 dispositions: the live pipeline (laid out like the team's own pipeline workbook) and every past
-deal, as `Deal Tracker.html` and `Deal Tracker.xlsx` in the team folder's `Deal Tracker/` and
-nothing else there (owner's rule); the record and the "do not open" word list sit under
-`system/deal_tracker/`. It updates itself from Smartsheet, the summary cards, closing statements
+deal, as `Deal Tracker.html` and `Deal Tracker.xlsx` in the team folder's `Deal Tracker/`, plus a
+`Drop papers here/` folder (2026-11-05) where anyone can hand in a paper by hand, which is moved
+into its `Read/` folder once recorded, and nothing else there (owner's rule); the record and the
+"do not open" word list sit under `system/deal_tracker/`. **Ava's flow is Microsoft's stock "save email
+attachments" template, so the TRACKER does the filtering** (owner, 2026-11-05: setup must be easy for a
+non-technical person). Every handed-in file is SCREENED in code on Ava's laptop before Claude sees
+it (`tracker._screen`): the opening text is read, any `CONFIDENTIAL_TEXT` phrase stops it there and
+it is left out, and only a file named as a deal paper (`PAPER_WORDS`), a `Calendar - <title>.txt` note
+of one colleague's meetings whose title names a date, or a file whose text carries two `DEAL_SIGNALS` is offered.
+Screened-out files are kept in the TEAM record by a fingerprint, never by name. The confidential list
+deliberately leaves out 1099 and W-9, which ordinary PSAs mention. A folder quiet for 30 days puts a
+warning on the page (`note_inbox`, daily run only). **Papers in the library are read where
+they are filed, never copied in**: the team folder is open to everyone while the library has
+folder permissions, so a copy would show a restricted paper to the whole team. "What changed"
+names each paper, which is the history. It updates itself from Smartsheet, the summary cards, closing statements
 and offer papers found by NAME in the file list (one offer folder = one pipeline deal, newest paper
 only), and a saved-attachments folder named only in one machine's `.env`
 (`VAULTER_DEAL_INBOX_DIR`); nothing reads email. Files whose names suggest accounting are never

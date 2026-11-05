@@ -187,6 +187,7 @@ aside.drawer.on{transform:none}
   </aside>
   <main class="main">
     <p class="note" id="xlsxnote" hidden style="margin-bottom:12px"></p>
+    <p class="note neg" id="inwarn" hidden style="margin-bottom:12px"></p>
     <section class="view" data-view="pipeline">
       <div class="box changes"><header><h2>What changed</h2><span class="small muted" id="chn"></span></header><div class="body" id="changes"></div></div>
       <div class="pair">
@@ -205,6 +206,7 @@ aside.drawer.on{transform:none}
         <div style="display:flex;gap:10px;align-items:center"><span class="small muted" id="periodnote"></span><select id="hstate" aria-label="State"><option value="">All states</option></select><span class="small muted" id="hcount"></span></div>
       </div>
       <div class="kpis" id="hk"></div>
+      <div class="box"><header><h2>Returns on sold deals</h2><span class="small muted">deals fully exited in each period</span></header><div class="body scroll"><table><thead><tr><th>Period</th><th class="r">Deals</th><th class="r">Contributions</th><th class="r">Distributions</th><th class="r" title="Distributions divided by contributions">Cash multiple</th><th class="r" title="Each deal's IRR weighted by its share of the profit, as in the old spreadsheet">IRR</th></tr></thead><tbody id="ret"></tbody></table></div></div>
       <div class="box scroll"><table><thead><tr id="hhead"></tr></thead><tbody id="hrows"></tbody></table></div>
     </section>
   </main>
@@ -228,6 +230,7 @@ aside.drawer.on{transform:none}
   const today = new Date(DATA.built + "T00:00:00");
   const H = DATA.deals, P = DATA.pipeline || [];
   $("#when").textContent = `Refreshed ${DATA.built_at}`;
+  if (DATA.inbox_warning) { $("#inwarn").textContent = DATA.inbox_warning; $("#inwarn").hidden = false; }
 
   // ── Side panel ──
   function openDrawer(title, html){
@@ -258,8 +261,8 @@ aside.drawer.on{transform:none}
   // ══ PIPELINE ══
   // What each stage, date and term is called on the page. The record keeps the team's own names.
   const SW = DATA.stage_words || {};
-  const KW = {"Close":"Closing", "DD ends":"Study period ends", "PSA":"Contract", "Counter":"Counter offer", "LOI":"Offer"};
-  const TW = {"Document / Date":"Latest paper", "DD / Feasibility":"Study period", "Key Condition":"Conditions", "Status":"Where it stands"};
+  const KW = {"Close":"Closing", "DD ends":"DD expiration", "PSA":"PSA", "Counter":"Counter", "LOI":"LOI"};
+  const TW = {"Document / Date":"Latest document", "DD / Feasibility":"Due diligence", "Key Condition":"Key conditions"};
   const site = d => d.site ? `<a class="site" href="${esc(d.site.url)}" target="_blank" rel="noopener" onclick="event.stopPropagation()" title="Opens Google Earth${d.site.rough ? "; only the town is known" : ""}">${d.site.rough ? "View area" : "View site"} ↗</a>` : "";
   const ACTIVE = ["LOI Sent", "LOI Received", "Counter Sent", "PSA Negotiation", "Under Contract", "Closing Scheduled"];
   const CONTRACT = ["PSA Negotiation", "Under Contract", "Closing Scheduled"];
@@ -286,13 +289,13 @@ aside.drawer.on{transform:none}
     $("#csub").innerHTML = late.length ? `<span class="late">${late.length} past due</span>` : "closings and deadlines";
 
     const groups = [
-      ["acq", "Buying", d => d.type === "Acquisition" && !["Terminated", "Declined", "Unconfirmed"].includes(d.stage), "d-active"],
-      ["dact", "Selling", d => d.type === "Disposition" && ACTIVE.includes(d.stage), "d-contract"],
-      ["dlist", "Listed for sale", d => d.type === "Disposition" && d.stage === "Listed", ""],
+      ["acq", "Acquisitions", d => d.type === "Acquisition" && !["Terminated", "Declined", "Unconfirmed"].includes(d.stage), "d-active"],
+      ["dact", "Dispositions", d => d.type === "Disposition" && ACTIVE.includes(d.stage), "d-contract"],
+      ["dlist", "Listed", d => d.type === "Disposition" && d.stage === "Listed", ""],
       ["dclosed", "Sold", d => d.type === "Disposition" && d.stage === "Closed", "d-closed"],
-      ["unconf", "Needs an update", d => d.stage === "Unconfirmed", ""],
-      ["dead", "Fell through", d => ["Terminated", "Declined"].includes(d.stage), "d-dead"],
-      ["other", "No stage set", d => !d.stage, ""],
+      ["unconf", "Status unconfirmed", d => d.stage === "Unconfirmed", ""],
+      ["dead", "Terminated", d => ["Terminated", "Declined"].includes(d.stage), "d-dead"],
+      ["other", "Unassigned", d => !d.stage, ""],
     ];
     const terms = P.filter(d => d.terms && Object.keys(d.terms).length && !["Closed", "Terminated", "Declined"].includes(d.stage));
     const TERMS = ["Document / Date", "Price", "Deposit", "DD / Feasibility", "Closing", "Key Condition", "Status"];
@@ -307,11 +310,11 @@ aside.drawer.on{transform:none}
       const used = groups.map(([id, t, f, dot]) => [id, t, P.filter(f), dot]).filter(g => g[2].length);
       $("#snav-p").innerHTML = navBtn("pipeline", "", "All", P.length, "", true)
         + used.map(([id, t, l, dot]) => navBtn("pipeline", id, t, l.length, dot)).join("")
-        + (terms.length ? navBtn("pipeline", "terms", "Offer details", terms.length, "") : "");
+        + (terms.length ? navBtn("pipeline", "terms", "Deal terms", terms.length, "") : "");
       const show = used.filter(g => !pgroup || g[0] === pgroup);
       $("#psecs").innerHTML = (pgroup === "terms" ? "" : show.map(([id, t, l]) => `<details class="sec box" id="s-${id}" open><summary><h2>${t}</h2><span class="n">${l.length}</span><span class="chev">›</span></summary>
         <div style="overflow:auto"><table><thead><tr><th>Property</th><th>${id === "acq" ? "Seller" : ["dact", "dlist", "dclosed"].includes(id) ? "Buyer" : "Buyer or seller"}</th><th>Stage</th><th class="r">Price</th><th>Next date</th><th>Next step</th></tr></thead><tbody>${l.map(row).join("")}</tbody></table></div></details>`).join(""))
-        + (terms.length && (!pgroup || pgroup === "terms") ? `<details class="sec box" id="s-terms" open><summary><h2>Offer details</h2><span class="n">${terms.length}</span><span class="small muted">latest paper on each deal</span><span class="chev">›</span></summary>
+        + (terms.length && (!pgroup || pgroup === "terms") ? `<details class="sec box" id="s-terms" open><summary><h2>Deal terms</h2><span class="n">${terms.length}</span><span class="small muted">latest document on each deal</span><span class="chev">›</span></summary>
           <div class="terms"><table><thead><tr><th class="k"></th>${terms.map(d => `<th>${txt(d.property)}</th>`).join("")}</tr></thead><tbody>${TERMS.map(t => `<tr><td class="k">${TW[t] || t}</td>${terms.map(d => `<td>${txt(d.terms[t]) || '<span class="faint">Not stated</span>'}</td>`).join("")}</tr>`).join("")}</tbody></table></div></details>` : "");
       $$("tr[data-pid]").forEach(tr => tr.onclick = () => showP(tr.dataset.pid));
       mark($('section[data-view="pipeline"]').hidden ? "history" : "pipeline");
@@ -348,13 +351,13 @@ aside.drawer.on{transform:none}
     const m = v => typeof v === "number" ? money(v) : (v ? txt(v) : "");
     openDrawer(`<div class="small" style="opacity:.8">${txt(d.type)}</div><h2>${txt(d.property)}</h2><div style="margin-top:6px">${stage(d.stage)}</div>`,
       `${site(d)}`+
-      `<div class="figs">${fig("Price", pprice(d))}${fig("Deposit", m(d.deposit) || NG)}${fig(KW[d.key_label] || "Next date", d.key_date ? fmtD(d.key_date) : NG)}${d.acres != null ? fig("Acres", txt(d.acres)) : ""}</div>
-      ${d.status || d.next_step ? `<div class="box"><div class="body">${d.status ? `<div><h3>Where it stands</h3>${txt(d.status)}</div>` : ""}${d.next_step ? `<div><h3>Next step</h3>${txt(d.next_step)}</div>` : ""}</div></div>` : ""}
-      <div><h3>The deal</h3><dl class="kv">${kv("Seller", txt(d.seller))}${kv("Buyer", txt(d.buyer))}${kv("How the price works", txt(d.price_basis))}${kv("Parcel / lot", txt(d.parcel))}${kv("County parcel number", txt(d.apn))}${kv("Location", txt([d.city, d.county && d.county + " County", d.state].filter(Boolean).join(", ")))}${kv("Broker", txt(d.broker))}${kv("Title company", txt(d.escrow))}</dl></div>
-      <div><h3>Dates</h3><dl class="kv">${kv("First offer", dt("loi_date"))}${kv("Counter offer", dt("counter_date"))}${kv("Contract", dt("psa_date"))}${kv("Study period ends", dt("dd_expires"))}${kv("Closing", dt("close_date"))}</dl></div>
-      ${d.orig_cost != null || d.gross_profit != null ? `<div><h3>When we bought it</h3><dl class="kv">${kv("Bought", dt("orig_acq_date"))}${kv("What we paid", m(d.orig_cost))}${kv("Profit", m(d.gross_profit))}${kv("Multiple", d.gross_multiple != null ? txt(d.gross_multiple) + "x" : "")}</dl></div>` : ""}
-      ${Object.keys(d.terms || {}).length ? `<div><h3>Offer details, latest paper</h3><dl class="kv">${Object.entries(d.terms).map(([a, b]) => kv(txt(TW[a] || a), txt(b))).join("")}</dl></div>` : ""}
-      ${(d.documents || []).length ? `<div><h3>Papers read</h3><ul class="plain small" style="margin:0">${d.documents.map(x => `<li>${fmtD(x.filed)}: ${txt(x.name)}</li>`).join("")}</ul></div>` : ""}
+      `<div class="figs">${fig("Price", pprice(d))}${fig("Earnest money", m(d.deposit) || NG)}${fig(KW[d.key_label] || "Next date", d.key_date ? fmtD(d.key_date) : NG)}${d.acres != null ? fig("Acres", txt(d.acres)) : ""}</div>
+      ${d.status || d.next_step ? `<div class="box"><div class="body">${d.status ? `<div><h3>Status</h3>${txt(d.status)}</div>` : ""}${d.next_step ? `<div><h3>Next step</h3>${txt(d.next_step)}</div>` : ""}</div></div>` : ""}
+      <div><h3>The deal</h3><dl class="kv">${kv("Seller", txt(d.seller))}${kv("Buyer", txt(d.buyer))}${kv("Price basis", txt(d.price_basis))}${kv("Parcel / lot", txt(d.parcel))}${kv("APN", txt(d.apn))}${kv("Location", txt([d.city, d.county && d.county + " County", d.state].filter(Boolean).join(", ")))}${kv("Broker", txt(d.broker))}${kv("Escrow / title", txt(d.escrow))}</dl></div>
+      <div><h3>Dates</h3><dl class="kv">${kv("LOI date", dt("loi_date"))}${kv("Counter date", dt("counter_date"))}${kv("PSA date", dt("psa_date"))}${kv("DD expiration", dt("dd_expires"))}${kv("Closing date", dt("close_date"))}</dl></div>
+      ${d.orig_cost != null || d.gross_profit != null ? `<div><h3>Original acquisition</h3><dl class="kv">${kv("Acquisition date", dt("orig_acq_date"))}${kv("Cost basis", m(d.orig_cost))}${kv("Gross profit", m(d.gross_profit))}${kv("Gross multiple", d.gross_multiple != null ? txt(d.gross_multiple) + "x" : "")}</dl></div>` : ""}
+      ${Object.keys(d.terms || {}).length ? `<div><h3>Deal terms, latest document</h3><dl class="kv">${Object.entries(d.terms).map(([a, b]) => kv(txt(TW[a] || a), txt(b))).join("")}</dl></div>` : ""}
+      ${(d.documents || []).length ? `<div><h3>Documents reviewed</h3><ul class="plain small" style="margin:0">${d.documents.map(x => `<li>${fmtD(x.filed)}: ${txt(x.name)}</li>`).join("")}</ul></div>` : ""}
       ${srcList(d.sources)}`);
   }
 
@@ -364,9 +367,12 @@ aside.drawer.on{transform:none}
   const inP = iso => { const s = since(); if (!s) return true; if (!iso) return false; const v = String(iso).length === 4 ? iso + "-07-01" : iso; return new Date(v + "T00:00:00") >= s; };
   const sum = (l, k) => l.reduce((a, d) => a + (d[k] || 0), 0);
   const have = (l, k) => l.filter(d => d[k] != null);
-  const STATUSES = [["Owned", "Owned", "d-active"], ["Partially sold", "Partly sold", "d-contract"], ["Being acquired", "Being bought", ""], ["Fully exited", "Fully sold", "d-closed"], ["Lost", "Lost money", "d-dead"]];
-  const HW = {"Partially sold":"Partly sold", "Being acquired":"Being bought", "Fully exited":"Fully sold", "Lost":"Lost money"};
-  const hpc = s => ({"Owned":"p-active", "Partially sold":"p-contract", "Being acquired":"p-other", "Fully exited":"p-closed", "Lost":"p-dead"}[s] || "p-other");
+  const STATUSES = [["Owned", "Held", "d-active"], ["Partially sold", "Partially exited", "d-contract"], ["Being acquired", "Pending acquisition", ""], ["Fully exited", "Fully exited", "d-closed"]];
+  const HW = {"Owned":"Held", "Partially sold":"Partially exited", "Being acquired":"Pending acquisition"};
+  const LONG = 5, isLong = d => d.hold != null && d.hold > LONG;
+  const HFILTER = {long: isLong, recession: d => d.recession === true};
+  $("#ret").innerHTML = (DATA.returns || []).map(x => `<tr><td class="nw">${x.years ? `Last ${x.years} years` : "All time"}</td><td class="r num">${x.deals}</td><td class="r num">${money(x.contributions)}</td><td class="r num">${money(x.distributions)}</td><td class="r num">${x.multiple == null ? NG : x.multiple.toFixed(2) + "x"}</td><td class="r num">${x.irr == null ? NG : (x.irr * 100).toFixed(1) + "%"}</td></tr>`).join("");
+  const hpc = s => ({"Owned":"p-active", "Partially sold":"p-contract", "Being acquired":"p-other", "Fully exited":"p-closed"}[s] || "p-other");
   [...new Set(H.map(d => d.state).filter(Boolean))].sort().forEach(s => $("#hstate").insertAdjacentHTML("beforeend", `<option>${esc(s)}</option>`));
 
   function hk(){
@@ -377,26 +383,28 @@ aside.drawer.on{transform:none}
     const prof = have(exited, "profit"), hold = have(exited, "hold");
     const k = (cls, lab, val, rows, sub) => `<div class="kpi ${cls}"><span class="lab">${lab}</span><span class="val">${val}</span>${rows.length ? `<div class="rows">${rows.map(([a, b]) => `<div><span class="muted">${a}</span><span class="num">${b}</span></div>`).join("")}</div>` : ""}${sub ? `<span class="sub" style="margin-top:4px">${sub}</span>` : ""}</div>`;
     $("#hk").innerHTML = [
-      k("accent", "Deals bought", bought.length, [["Money put in", moneyT(sum(bought, "contributions"))], ["Purchase prices", moneyT(sum(bought, "purchase_price"))]], `${have(bought, "purchase_price").length} with a purchase price`),
-      k("", "Fully sold", exited.length, [["Paid back", moneyT(sum(exited, "distributions"))], ["Profit", moneyT(sum(prof, "profit"))], ["Average years held", hold.length ? (sum(hold, "hold") / hold.length).toFixed(1) + " yrs" : "not given"]], ""),
-      k("", "Sales closed", sales.length, [["Sale prices", moneyT(sales.reduce((a, x) => a + (x.price || 0), 0))]], "part sales included"),
-      k("", "Owned today", held.length, [["Acres", Math.round(sum(held, "acres")).toLocaleString("en-US")], ["Partly sold", held.filter(d => d.status === "Partially sold").length], ["Money put in", moneyT(sum(held, "contributions"))]], ""),
+      k("accent", "Acquisitions", bought.length, [["Contributions", moneyT(sum(bought, "contributions"))], ["Aggregate purchase price", moneyT(sum(bought, "purchase_price"))]], `${have(bought, "purchase_price").length} with a purchase price`),
+      k("", "Full exits", exited.length, [["Distributions", moneyT(sum(exited, "distributions"))], ["Net profit", moneyT(sum(prof, "profit"))], ["Average hold period", hold.length ? (sum(hold, "hold") / hold.length).toFixed(1) + " yrs" : "not given"]], ""),
+      k("", "Closed sales", sales.length, [["Gross sale proceeds", moneyT(sales.reduce((a, x) => a + (x.price || 0), 0))]], "part sales included"),
+      k("", "Current holdings", held.length, [["Acres", Math.round(sum(held, "acres")).toLocaleString("en-US")], ["Partially exited", held.filter(d => d.status === "Partially sold").length], ["Contributions", moneyT(sum(held, "contributions"))]], ""),
     ].join("");
     const s = since();
     $("#periodnote").textContent = s ? `Since ${s.toLocaleDateString("en-US", {year:"numeric", month:"short", day:"numeric"})}` : "";
   }
 
-  const cols = [["Deal", "name"], ["Status", "status"], ["Bought", "acquired"], ["Purchase price", "purchase_price", 1], ["Put in", "contributions", 1], ["Paid back", "distributions", 1], ["Profit", "profit", 1], ["Last sale", "last_sale"], ["Years held", "hold", 1]];
+  const cols = [["Deal", "name"], ["Status", "status"], ["Acquired", "acquired"], ["Purchase price", "purchase_price", 1], ["Contributions", "contributions", 1], ["Distributions", "distributions", 1], ["Net profit", "profit", 1], ["Last sale", "last_sale"], ["Hold period", "hold", 1]];
   const inPeriod = d => !years || inP(d.acquired) || inP(d.last_sale) || d.sales.some(x => x.date && inP(x.date));
   function hdraw(){
     const base = H.filter(inPeriod), st = $("#hstate").value;
     $("#snav-h").innerHTML = navBtn("history", "", "All", base.length, "", true)
-      + STATUSES.map(([v, l, dot]) => [v, l, dot, base.filter(d => d.status === v).length]).filter(x => x[3]).map(([v, l, dot, n]) => navBtn("history", v, l, n, dot)).join("");
-    const tip = {status: "Owned, partly sold, fully sold, being bought or money lost", acquired: "When the first money went in", contributions: "Money investors put in",
-      distributions: "Money paid back to investors", profit: "Paid back less put in", last_sale: "Date of the last sale", hold: "Years from first money in to the last sale, or to today"};
+      + STATUSES.map(([v, l, dot]) => [v, l, dot, base.filter(d => d.status === v).length]).filter(x => x[3]).map(([v, l, dot, n]) => navBtn("history", v, l, n, dot)).join("")
+      + navBtn("history", "long", `Held over ${LONG} years`, base.filter(isLong).length, "")
+      + navBtn("history", "recession", "Owned in 2008 recession", base.filter(HFILTER.recession).length, "");
+    const tip = {status: "Held, partially exited, fully exited or pending acquisition", acquired: "Date of the initial investment", contributions: "Capital contributed by investors",
+      distributions: "Capital returned to investors", profit: "Distributions less contributions", last_sale: "Date of the last sale", hold: "Years from the initial investment to the last sale, or to today"};
     $("#hhead").innerHTML = cols.map(([l, k, r]) => `<th class="sort${r ? " r" : ""}" data-k="${k}" title="${tip[k] ? tip[k] + ". " : ""}Click to sort">${l}${k === sortKey ? ` <span class="arr">${sortDir < 0 ? "↓" : "↑"}</span>` : ""}</th>`).join("");
     $$("#hhead th").forEach(th => th.onclick = () => { const k = th.dataset.k; sortDir = k === sortKey ? -sortDir : -1; sortKey = k; hdraw(); });
-    const l = base.filter(d => (!hstatus || d.status === hstatus) && (!st || d.state === st)).sort((a, b) => { const x = a[sortKey], y = b[sortKey];
+    const l = base.filter(d => (!hstatus || (HFILTER[hstatus] ? HFILTER[hstatus](d) : d.status === hstatus)) && (!st || d.state === st)).sort((a, b) => { const x = a[sortKey], y = b[sortKey];
       if (x == null || x === "") return 1; if (y == null || y === "") return -1; return (x > y ? 1 : x < y ? -1 : 0) * sortDir; });
     $("#hcount").textContent = `${l.length} deals`;
     $("#hrows").innerHTML = l.map(d => `<tr class="click" data-id="${d.id}">
@@ -404,7 +412,7 @@ aside.drawer.on{transform:none}
       <td><span class="pill ${hpc(d.status)}">${HW[d.status] || d.status}</span></td>
       <td class="nw small">${fmtD(d.acquired, d.acquired_approx)}</td>
       <td class="r num">${money(d.purchase_price)}</td><td class="r num">${money(d.contributions)}</td>
-      <td class="r num">${d.lost ? '<span class="neg">lost</span>' : money(d.distributions)}</td>
+      <td class="r num">${money(d.distributions)}</td>
       <td class="r num ${d.profit == null ? "" : d.profit >= 0 ? "pos" : "neg"}">${money(d.profit)}</td>
       <td class="nw small">${d.sold_in_parts && !d.last_sale ? "several dates" : fmtD(d.last_sale, d.last_sale_approx)}</td>
       <td class="r num nw">${d.hold == null ? NG : d.hold + (d.hold_to_today ? '<span class="faint" title="still held, counted to today"> so far</span>' : " yrs")}</td></tr>`).join("")
@@ -418,10 +426,10 @@ aside.drawer.on{transform:none}
     openDrawer(`<div class="small" style="opacity:.8">${txt([d.state, d.type, d.size].filter(Boolean).join(" · ")) || "Deal"}</div><h2>${txt(d.name)}</h2><div style="margin-top:6px"><span class="pill ${hpc(d.status)}">${HW[d.status] || d.status}</span></div>`,
       `${site(d)}`+
       `${d.aliases.length ? `<p class="note">Also called ${txt(d.aliases.join("; "))}</p>` : ""}
-      <div class="figs">${fig("Money put in", money(d.contributions))}${fig("Paid back", d.lost ? '<span class="neg">Lost</span>' : money(d.distributions))}${fig("Profit", `<span class="${d.profit == null ? "" : d.profit >= 0 ? "pos" : "neg"}">${money(d.profit)}</span>`)}${fig("Years held", d.hold == null ? NG : `${d.hold} yrs${d.hold_to_today ? " so far" : ""}`)}</div>
+      <div class="figs">${fig("Contributions", money(d.contributions))}${fig("Distributions", money(d.distributions))}${fig("Net profit", `<span class="${d.profit == null ? "" : d.profit >= 0 ? "pos" : "neg"}">${money(d.profit)}</span>`)}${fig("Hold period", d.hold == null ? NG : `${d.hold} yrs${d.hold_to_today ? " so far" : ""}`)}</div>
       ${[d.location, d.cross_streets, d.apn, d.zoning, d.lots, d.lot_sizes].some(Boolean) ? `<div><h3>The land</h3><dl class="kv">${kv("Where", txt(d.location))}${kv("Cross streets", txt(d.cross_streets))}${kv("Parcel numbers", txt(d.apn))}${kv("Zoning", txt(d.zoning))}${kv("Homes per acre", txt(d.density))}${kv("Lots", d.lots == null ? "" : txt(d.lots))}${kv("Lot sizes", txt(d.lot_sizes))}</dl></div>` : ""}
-      <div><h3>Purchase</h3><dl class="kv">${kv("First money in", fmtD(d.acquired, d.acquired_approx))}${kv("Purchase price", money(d.purchase_price))}${kv("Loan to buy it", money(d.debt))}${kv("Smartsheet stage", txt(d.stage))}</dl></div>
-      <div><h3>How it did</h3><dl class="kv">${kv("Multiple", d.multiple != null ? `${d.multiple}x what was put in` : NG)}${kv("Yearly return", d.irr == null ? NG : (d.irr * 100).toFixed(1) + '% <span class="faint">(old spreadsheet)</span>')}${kv("Last sale", d.sold_in_parts && !d.last_sale ? "several dates" : fmtD(d.last_sale, d.last_sale_approx))}${d.excluded ? kv("Note from the old spreadsheet", txt(d.excluded)) : ""}</dl></div>
+      <div><h3>Acquisition</h3><dl class="kv">${kv("Initial investment", fmtD(d.acquired, d.acquired_approx))}${kv("Purchase price", money(d.purchase_price))}${kv("Acquisition debt", money(d.debt))}${kv("Smartsheet stage", txt(d.stage))}</dl></div>
+      <div><h3>Performance</h3><dl class="kv">${kv("Equity multiple", d.multiple != null ? `${d.multiple}x` : NG)}${kv("IRR", d.irr == null ? NG : (d.irr * 100).toFixed(1) + '% <span class="faint">(old spreadsheet)</span>')}${kv("Last sale", d.sold_in_parts && !d.last_sale ? "several dates" : fmtD(d.last_sale, d.last_sale_approx))}${kv("Owned in 2008 recession", d.recession == null ? NG : d.recession ? "Yes" : "No")}${d.excluded ? kv("Note from the old spreadsheet", txt(d.excluded)) : ""}</dl></div>
       <div><h3>Sales</h3>${d.sales.length ? `<table><thead><tr><th>Date</th><th class="r">Price</th><th>Buyer</th></tr></thead><tbody>${d.sales.map(s => `<tr><td class="nw">${fmtD(s.date, String(s.date).length === 4)}${s.final ? ' <span class="pill p-closed">final</span>' : ""}</td><td class="r num">${money(s.price)}</td><td class="small">${txt(s.other_party) || NG}<div class="sub">${txt(s.source)}</div></td></tr>`).join("")}</tbody></table>` : `<p class="note">${d.last_sale ? "The old spreadsheet gives only the last sale date." : "No sale recorded."}</p>`}</div>
       ${d.notes.length ? `<div><h3>Notes</h3><ul class="plain small" style="margin:0">${d.notes.map(n => `<li>${txt(n)}</li>`).join("")}</ul></div>` : ""}
       ${srcList(d.sources)}`);

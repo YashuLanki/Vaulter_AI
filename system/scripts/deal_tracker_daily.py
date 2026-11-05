@@ -61,6 +61,7 @@ def layer_one() -> int:
     counts = tracker.refresh(rec)
     from deal_tracker import smartsheet_dashboards   # needs this machine's Smartsheet key; skips without one
     counts["dashboards"] = smartsheet_dashboards.refresh(rec)
+    tracker.note_inbox(rec)
     tracker.save(rec)
     page = dashboard.write(rec)
     waiting = len(tracker.pending(rec))

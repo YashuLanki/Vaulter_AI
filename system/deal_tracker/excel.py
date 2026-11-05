@@ -38,23 +38,23 @@ CHANGES_SHEET = "What Changed"
 
 # Deal Detail, most-used first. A key of None is worked out by Excel.
 DETAIL = [("Type", "type"), ("Property", "property"), ("Stage", "stage"), ("Next Step", "next_step"),
-          ("Where It Stands", "status"), ("Seller", "seller"), ("Buyer", "buyer"),
-          ("Price ($)", "price"), ("How the Price Works", "price_basis"), ("Deposit ($)", "deposit"),
+          ("Status Update", "status"), ("Seller", "seller"), ("Buyer", "buyer"),
+          ("Price ($)", "price"), ("Price Basis", "price_basis"), ("Earnest Money ($)", "deposit"),
           ("LOI Date", "loi_date"), ("Counter Date", "counter_date"), ("PSA Date", "psa_date"),
-          ("Due Diligence Ends", "dd_expires"), ("Close Date", "close_date"), ("Days to Close", None),
+          ("DD Expiration", "dd_expires"), ("Close Date", "close_date"), ("Days to Close", None),
           ("City", "city"), ("County", "county"), ("State", "state"), ("Acres", "acres"),
           ("Parcel / Lot", "parcel"), ("APN", "apn"), ("Broker", "broker"), ("Escrow / Title", "escrow"),
-          ("Date We Bought It", "orig_acq_date"), ("What We Paid ($)", "orig_cost"),
-          ("Profit ($)", None), ("Multiple", None), ("Yearly Return (IRR)", None),
+          ("Original Acquisition Date", "orig_acq_date"), ("Cost Basis ($)", "orig_cost"),
+          ("Gross Profit ($)", None), ("Multiple", None), ("IRR", None),
           ("CF Out", None), ("CF In", None), ("CF Date 1", None), ("CF Date 2", None)]
 COL = {h: i + 1 for i, (h, _) in enumerate(DETAIL)}           # heading -> column number
 L = {h: get_column_letter(i) for h, i in COL.items()}
 HELPERS = ("CF Out", "CF In", "CF Date 1", "CF Date 2")       # feed the IRR formula; hidden
 
-GROUPS = [("THE DEAL", "Type", "Where It Stands"), ("WHO", "Seller", "Buyer"),
-          ("MONEY", "Price ($)", "Deposit ($)"), ("KEY DATES", "LOI Date", "Days to Close"),
+GROUPS = [("THE DEAL", "Type", "Status Update"), ("WHO", "Seller", "Buyer"),
+          ("MONEY", "Price ($)", "Earnest Money ($)"), ("KEY DATES", "LOI Date", "Days to Close"),
           ("THE LAND", "City", "APN"), ("WHO IS HELPING", "Broker", "Escrow / Title"),
-          ("ONLY WHEN WE SELL LAND WE OWN", "Date We Bought It", "Yearly Return (IRR)")]
+          ("DISPOSITION RETURNS", "Original Acquisition Date", "IRR")]
 
 NOTES = {  # the note on each heading, for someone who has never seen the sheet
     "Type": "Acquisition = we are buying. Disposition = we are selling land we own.",
@@ -62,47 +62,50 @@ NOTES = {  # the note on each heading, for someone who has never seen the sheet
     "Stage": "How far along the deal is. Pick from the list: LOI Sent > Counter Sent > PSA Negotiation > "
              "Under Contract > Closing Scheduled > Closed. Terminated or Declined means it is off.",
     "Next Step": "What has to happen next, in a few words. Shown on the Dashboard.",
-    "Where It Stands": "A sentence on the latest news, from the newest paper on file.",
+    "Status Update": "A sentence on the latest news, from the newest paper on file.",
     "Price ($)": "The price on the latest paper (letter of intent, counter offer or agreement).",
-    "How the Price Works": "How the price is set, e.g. per acre or per lot.",
-    "Deposit ($)": "Earnest money the buyer puts down.",
+    "Price Basis": "How the price is set, e.g. per acre or per lot.",
+    "Earnest Money ($)": "Earnest money the buyer puts down.",
     "LOI Date": "Date of the letter of intent: the first written offer.",
     "Counter Date": "Date of the latest counter offer.",
     "PSA Date": "Date of the purchase and sale agreement: the contract.",
-    "Due Diligence Ends": "Last day the buyer can study the land and still walk away.",
+    "DD Expiration": "Last day the buyer can study the land and still walk away.",
     "Close Date": "The day the sale is due to complete.",
     "Days to Close": "Worked out by Excel: days from today to the close date. Red means the date has passed. "
                      "Typing here is ignored.",
     "APN": "The county's parcel number.",
     "Escrow / Title": "The company holding the money and insuring the title.",
-    "Date We Bought It": "Only for land we are selling: when we bought it.",
-    "What We Paid ($)": "Only for land we are selling: what we paid for it.",
-    "Profit ($)": "Worked out by Excel once a sale closes: sale price less what we paid, before costs.",
+    "Original Acquisition Date": "Only for land we are selling: when we bought it.",
+    "Cost Basis ($)": "Only for land we are selling: what we paid for it.",
+    "Gross Profit ($)": "Worked out by Excel once a sale closes: sale price less what we paid, before costs.",
     "Multiple": "Worked out by Excel: sale price divided by what we paid. 2.0x = double.",
-    "Yearly Return (IRR)": "Worked out by Excel: the yearly rate of return between buying and selling.",
+    "IRR": "Worked out by Excel: the yearly rate of return between buying and selling.",
 }
 
 HIST = [("Deal", "name", "name"), ("Status", "status", None), ("State", "state", "state"),
         ("Type", "type", "type"), ("Size", "size", "size"), ("Acres", "acres", "acres"),
-        ("Bought (first money in)", "acquired", "acquired"), ("Purchase price", "purchase_price", "purchase_price"),
-        ("Loan to buy it", "debt", "acquisition_debt"), ("Equity put in", "contributions", "contributions"),
-        ("Returned", "distributions", "distributions"), ("Profit", "profit", None),
-        ("Multiple", "multiple", None), ("Project IRR", "irr", "project_irr"),
-        ("Last sale", "last_sale", "last_sale"), ("Years held", "hold", None),
+        ("Acquired", "acquired", "acquired"), ("Purchase price", "purchase_price", "purchase_price"),
+        ("Acquisition debt", "debt", "acquisition_debt"), ("Contributions", "contributions", "contributions"),
+        ("Distributions", "distributions", "distributions"), ("Net profit", "profit", None),
+        ("Equity multiple", "multiple", None), ("Project IRR", "irr", "project_irr"),
+        ("Last sale", "last_sale", "last_sale"), ("Hold period (yrs)", "hold", None),
+        ("Owned in 2008 recession", "recession", None),
         ("Smartsheet stage", "stage", None), ("Where", "location", None), ("Zoning", "zoning", None),
         ("Parcel numbers", "apn", None), ("Lots", "lots", None), ("Also called", "also", None),
         ("Old spreadsheet note", "excluded", "excluded")]
 HIST_NOTES = {
     "Deal": "The deal's name. Click the arrow on any heading to sort or filter.",
-    "Status": "Worked out: Owned, Partially sold, Fully exited, Being acquired or Lost. Typing here is ignored.",
-    "Bought (first money in)": "When the first money went in. A year on its own means only the year is known.",
-    "Loan to buy it": "Money borrowed to buy the land.",
-    "Equity put in": "Money the investors put in.",
-    "Returned": "Money paid back to the investors so far.",
-    "Profit": "Worked out: returned less put in. Blank if either is missing.",
-    "Multiple": "Worked out: returned divided by put in. 2.0 = doubled.",
+    "Status": "Worked out: Owned, Partially sold, Fully exited or Being acquired. Typing here is ignored.",
+    "Acquired": "When the first money went in. A year on its own means only the year is known.",
+    "Acquisition debt": "Money borrowed to buy the land.",
+    "Contributions": "Money the investors put in.",
+    "Distributions": "Money paid back to the investors so far.",
+    "Net profit": "Worked out: distributions less contributions. Blank if either is missing.",
+    "Equity multiple": "Worked out: distributions divided by contributions. 2.0 = doubled.",
     "Project IRR": "The yearly return, from the old spreadsheet.",
-    "Years held": "Worked out: from first money in to the last sale, or to today if still held.",
+    "Hold period (yrs)": "Worked out: from first money in to the last sale, or to today if still held.",
+    "Owned in 2008 recession": "Worked out: held at any point from Dec 2007 to June 2009. Where the dates cannot "
+                               "tell, the old spreadsheet's own mark. Blank means not known.",
     "Smartsheet stage": "Where Smartsheet says the project is. Change it in Smartsheet, not here.",
     "Also called": "Other names this deal goes by, such as its company's name. Read only.",
     "Where": "City, county and state, from the project's Smartsheet dashboard. Change it there, not here.",
@@ -115,19 +118,19 @@ DATES = {"loi_date", "counter_date", "psa_date", "dd_expires", "close_date", "or
 MONEY = {"price", "deposit", "orig_cost", "purchase_price", "debt", "contributions", "distributions", "profit"}
 
 SECTIONS = [  # Deal Detail and Dashboard sections: (title, what it holds, test)
-    ("BUYING", "Land we are trying to buy, from first offer to closing.",
+    ("ACQUISITIONS", "Land we are trying to buy, from first offer to closing.",
      lambda d: d.get("type") == "Acquisition" and d.get("stage") not in ("Terminated", "Declined", "Unconfirmed")),
-    ("SELLING", "Land we own that a buyer is negotiating for or under contract on.",
+    ("DISPOSITIONS", "Land we own that a buyer is negotiating for or under contract on.",
      lambda d: d.get("type") == "Disposition" and d.get("stage") in P.ACTIVE),
-    ("LISTED FOR SALE", "Land we own that is on the market with no buyer yet.",
+    ("LISTED", "Land we own that is on the market with no buyer yet.",
      lambda d: d.get("type") == "Disposition" and d.get("stage") == "Listed"),
-    ("SOLD", "Sales that have closed.",
+    ("CLOSED", "Sales that have closed.",
      lambda d: d.get("type") == "Disposition" and d.get("stage") == "Closed"),
-    ("NEEDS AN UPDATE", "Deals whose stage nobody has confirmed lately.",
+    ("STATUS UNCONFIRMED", "Deals whose stage nobody has confirmed lately.",
      lambda d: d.get("stage") == "Unconfirmed"),
-    ("FELL THROUGH", "Deals that ended without closing.",
+    ("TERMINATED", "Deals that ended without closing.",
      lambda d: d.get("stage") in ("Terminated", "Declined")),
-    ("NO STAGE SET", "Deals with no stage set.", lambda d: True),
+    ("UNASSIGNED", "Deals with no stage set.", lambda d: True),
 ]
 NEW_ROWS = 8
 STAGE_COLOURS = {  # fill, font: as on the page, colour only where something went wrong
@@ -264,11 +267,11 @@ def write(payload: dict, path: Path) -> dict:
             if dd.cell(r, COL[h]).fill.fgColor.rgb in (None, "00000000"):
                 dd.cell(r, COL[h]).fill = fill(CALC)
 
-    widths = {"Type": 12, "Property": 24, "Stage": 17, "Next Step": 30, "Where It Stands": 40, "Seller": 26,
-              "Buyer": 26, "Price ($)": 13, "How the Price Works": 30, "City": 13, "County": 11, "State": 6,
+    widths = {"Type": 12, "Property": 24, "Stage": 17, "Next Step": 30, "Status Update": 40, "Seller": 26,
+              "Buyer": 26, "Price ($)": 13, "Price Basis": 30, "City": 13, "County": 11, "State": 6,
               "Acres": 8, "Parcel / Lot": 22, "APN": 13, "Broker": 20, "Escrow / Title": 20,
-              "LOI Date": 13, "Counter Date": 13, "PSA Date": 13, "Due Diligence Ends": 13, "Close Date": 13,
-              "Date We Bought It": 13, "What We Paid ($)": 13, "Deposit ($)": 12}
+              "LOI Date": 13, "Counter Date": 13, "PSA Date": 13, "DD Expiration": 13, "Close Date": 13,
+              "Original Acquisition Date": 13, "Cost Basis ($)": 13, "Earnest Money ($)": 12}
     for h, c in COL.items():
         dd.column_dimensions[L[h]].width = widths.get(h, 11)
     for h in HELPERS:
@@ -369,6 +372,7 @@ def write(payload: dict, path: Path) -> dict:
         vals = {k: (d[k][:4] if k in ("acquired", "last_sale") and d.get(k) and d.get(k + "_approx") else d.get(k))
                 for _, k, _ in HIST if k != "also"}
         vals["also"] = "; ".join(d.get("aliases") or [])
+        vals["recession"] = {True: "Yes", False: "No"}.get(d.get("recession"), "")
         for i, (_, k, _) in enumerate(HIST, 1):
             hist.cell(n, i, _cell(k, vals[k]))
         hist.cell(n, len(HIST) + 1, d["id"])
@@ -492,9 +496,9 @@ def _dashboard(dash, payload, section_rows, first, last, hh, f, fill, thin, wrap
         dash.row_dimensions[top + 2].height = 34
 
     tiles(5, "DEALS IN PROGRESS", [
-        ("B", "BUYING", f'=SUMPRODUCT(({rng("Type")}="Acquisition")*ISNUMBER(MATCH({rng("Stage")},{act},0)))',
+        ("B", "ACQUISITIONS", f'=SUMPRODUCT(({rng("Type")}="Acquisition")*ISNUMBER(MATCH({rng("Stage")},{act},0)))',
          "Land we are trying to buy, from first offer to closing."),
-        ("D", "SELLING", f'=SUMPRODUCT(({rng("Type")}="Disposition")*ISNUMBER(MATCH({rng("Stage")},{act},0)))',
+        ("D", "DISPOSITIONS", f'=SUMPRODUCT(({rng("Type")}="Disposition")*ISNUMBER(MATCH({rng("Stage")},{act},0)))',
          "Land we own that a buyer is negotiating for."),
         ("F", "UNDER CONTRACT", f'=SUMPRODUCT(ISNUMBER(MATCH({rng("Stage")},{con},0))*1)',
          "Buying or selling, with a contract being drafted or signed."),
@@ -512,11 +516,11 @@ def _dashboard(dash, payload, section_rows, first, last, hh, f, fill, thin, wrap
     put_col = get_column_letter([k for _, k, _ in HIST].index("contributions") + 1)
     back_col = get_column_letter([k for _, k, _ in HIST].index("distributions") + 1)
     tiles(11, "PAST DEALS AT A GLANCE", [
-        ("B", "OWNED NOW", f'=COUNTIF({hs(status_col)},"Owned")+COUNTIF({hs(status_col)},"Partially sold")',
+        ("B", "CURRENT HOLDINGS", f'=COUNTIF({hs(status_col)},"Owned")+COUNTIF({hs(status_col)},"Partially sold")',
          "Deals we still hold, including ones partly sold."),
-        ("D", "FULLY SOLD", f'=COUNTIF({hs(status_col)},"Fully exited")', "Deals we have completely sold."),
-        ("F", "EQUITY PUT IN", f'=SUM({hs(put_col)})', "Investor money put into every deal, all time."),
-        ("H", "RETURNED", f'=SUM({hs(back_col)})', "Money paid back to investors, all time."),
+        ("D", "FULL EXITS", f'=COUNTIF({hs(status_col)},"Fully exited")', "Deals we have completely sold."),
+        ("F", "CONTRIBUTIONS", f'=SUM({hs(put_col)})', "Capital contributed to every deal, all time."),
+        ("H", "DISTRIBUTIONS", f'=SUM({hs(back_col)})', "Distributions to investors, all time."),
         ("J", "QUESTIONS", f"=COUNTA('{QUESTIONS_SHEET}'!B5:B500)-COUNTIF('{QUESTIONS_SHEET}'!B5:B500,\"Nothing*\")",
          "Things the tracker needs a person to answer. See the Questions tab."),
     ])
@@ -543,7 +547,7 @@ def _dashboard(dash, payload, section_rows, first, last, hh, f, fill, thin, wrap
                     "by Excel. Red dates have passed.").font = f(size=10, italic=True, color=GREY)
     r += 2
 
-    cols = ["Property", "Parcel / Lot", "Location", "Acres", "Buyer or Seller", "Stage", "Price", "How the Price Works",
+    cols = ["Property", "Parcel / Lot", "Location", "Acres", "Buyer or Seller", "Stage", "Price", "Price Basis",
             "Key Date", "Days to Close", "Next Step"]
     d_ = lambda h, x: f"'Deal Detail'!{L[h]}{x}"
     for title, (what, rows) in section_rows.items():
@@ -568,12 +572,12 @@ def _dashboard(dash, payload, section_rows, first, last, hh, f, fill, thin, wrap
                 f'=IF({d_("Acres", x)}="","",{d_("Acres", x)})',
                 f'=IF({d_("Type", x)}="Disposition",{d_("Buyer", x)},{d_("Seller", x)})&""',
                 f'={d_("Stage", x)}&""',
-                f'=IF({d_("Price ($)", x)}="","",{d_("Price ($)", x)})', f'={d_("How the Price Works", x)}&""',
+                f'=IF({d_("Price ($)", x)}="","",{d_("Price ($)", x)})', f'={d_("Price Basis", x)}&""',
                 "=" + f'IF({d_("Close Date", x)}<>"",IF({d_("Stage", x)}="Closed","Closed ","Closing ")&IFERROR(TEXT({d_("Close Date", x)},"mmm d, yyyy"),{d_("Close Date", x)}),'
-                + date_txt("Due Diligence Ends", "Due diligence ends") + date_txt("PSA Date", "Contract") + date_txt("Counter Date", "Counter")
+                + date_txt("DD Expiration", "Due diligence ends") + date_txt("PSA Date", "Contract") + date_txt("Counter Date", "Counter")
                 + date_txt("LOI Date", "First offer") + '"")))))',   # five IFs, five closing brackets
                 f'=IF({d_("Days to Close", x)}="","",{d_("Days to Close", x)})',
-                f'=IF({d_("Next Step", x)}="",{d_("Where It Stands", x)},{d_("Next Step", x)})&""',
+                f'=IF({d_("Next Step", x)}="",{d_("Status Update", x)},{d_("Next Step", x)})&""',
             ]
             for i, v in enumerate(cells, 2):
                 cell = dash.cell(r, i, v)
@@ -595,6 +599,21 @@ def _dashboard(dash, payload, section_rows, first, last, hh, f, fill, thin, wrap
         a.font, a.alignment = f(), wrap_top
         dash.merge_cells(start_row=r, start_column=2, end_row=r, end_column=12)
         r += 1
+    r += 1
+    dash.cell(r, 2, "RETURNS ON SOLD DEALS").font = f(size=13, bold=True, color=SLATE)
+    dash.cell(r, 4, "Deals fully exited in each period. IRR is each deal's IRR weighted by its share of the "
+                    "profit, as in the old spreadsheet.").font = f(size=10, italic=True, color=GREY)
+    r += 1
+    for i, h in enumerate(["Period", "Deals", "Contributions", "Distributions", "Cash multiple", "IRR"], 2):
+        c = dash.cell(r, i, h)
+        c.fill, c.font = fill(SLATE), f(bold=True, color="FFFFFF")
+    for x in payload.get("returns", []):
+        r += 1
+        vals = [f"Last {x['years']} years" if x["years"] else "All time", x["deals"], x["contributions"],
+                x["distributions"], x["multiple"], x["irr"]]
+        for i, (v, fmt) in enumerate(zip(vals, ["@", "0", '"$"#,##0', '"$"#,##0', '0.00"x"', "0.0%"]), 2):
+            c = dash.cell(r, i, v)
+            c.font, c.number_format, c.border = f(), fmt, thin
     dash.freeze_panes = "A4"
 
 
@@ -615,22 +634,22 @@ def _detail_row(ws, r, d, f):
 def _formulas(ws, r):
     """Days to close, and the closed-sale figures, as in the team workbook."""
     g = lambda h: f"{L[h]}{r}"
-    done = (f'AND({g("Stage")}="Closed",{g("Type")}="Disposition",ISNUMBER({g("What We Paid ($)")}),'
-            f'{g("What We Paid ($)")}>0,ISNUMBER({g("Price ($)")}),ISNUMBER({g("Date We Bought It")}),ISNUMBER({g("Close Date")}))')
+    done = (f'AND({g("Stage")}="Closed",{g("Type")}="Disposition",ISNUMBER({g("Cost Basis ($)")}),'
+            f'{g("Cost Basis ($)")}>0,ISNUMBER({g("Price ($)")}),ISNUMBER({g("Original Acquisition Date")}),ISNUMBER({g("Close Date")}))')
     ws[g("Days to Close")] = f'=IF(OR({g("Close Date")}="",{g("Stage")}="Closed"),"",IFERROR({g("Close Date")}-TODAY(),""))'
-    ws[g("Profit ($)")] = f'=IF({done},{g("Price ($)")}-{g("What We Paid ($)")},"")'
-    ws[g("Multiple")] = f'=IF({done},{g("Price ($)")}/{g("What We Paid ($)")},"")'
-    ws[g("Yearly Return (IRR)")] = f'=IFERROR(IF({done},XIRR({g("CF Out")}:{g("CF In")},{g("CF Date 1")}:{g("CF Date 2")}),""),"")'
-    ws[g("CF Out")] = f'=IF({done},-{g("What We Paid ($)")},"")'
+    ws[g("Gross Profit ($)")] = f'=IF({done},{g("Price ($)")}-{g("Cost Basis ($)")},"")'
+    ws[g("Multiple")] = f'=IF({done},{g("Price ($)")}/{g("Cost Basis ($)")},"")'
+    ws[g("IRR")] = f'=IFERROR(IF({done},XIRR({g("CF Out")}:{g("CF In")},{g("CF Date 1")}:{g("CF Date 2")}),""),"")'
+    ws[g("CF Out")] = f'=IF({done},-{g("Cost Basis ($)")},"")'
     ws[g("CF In")] = f'=IF({done},{g("Price ($)")},"")'
-    ws[g("CF Date 1")] = f'=IF({done},{g("Date We Bought It")},"")'
+    ws[g("CF Date 1")] = f'=IF({done},{g("Original Acquisition Date")},"")'
     ws[g("CF Date 2")] = f'=IF({done},{g("Close Date")},"")'
-    for h, fmt in (("Price ($)", '"$"#,##0'), ("Deposit ($)", '"$"#,##0'), ("What We Paid ($)", '"$"#,##0'),
-                   ("Profit ($)", '"$"#,##0'), ("Multiple", '0.00"x"'), ("Yearly Return (IRR)", "0.0%"),
+    for h, fmt in (("Price ($)", '"$"#,##0'), ("Earnest Money ($)", '"$"#,##0'), ("Cost Basis ($)", '"$"#,##0'),
+                   ("Gross Profit ($)", '"$"#,##0'), ("Multiple", '0.00"x"'), ("IRR", "0.0%"),
                    ("CF Out", '"$"#,##0'), ("CF In", '"$"#,##0'), ("Days to Close", "0"), ("Acres", "0.00"),
                    ("CF Date 1", "mmm d, yyyy"), ("CF Date 2", "mmm d, yyyy")):
         ws[g(h)].number_format = fmt
-    for h in ("LOI Date", "Counter Date", "PSA Date", "Due Diligence Ends", "Close Date", "Date We Bought It"):
+    for h in ("LOI Date", "Counter Date", "PSA Date", "DD Expiration", "Close Date", "Original Acquisition Date"):
         ws[g(h)].number_format = "mmm d, yyyy"
 
 
@@ -687,7 +706,7 @@ def pull_edits(rec: dict, book: Path) -> list[str]:
         by_id = {d["id"]: d for d in rec.get("pipeline") or []}
         for r in body:
             get = lambda h: norm(r[col[h]]) if h in col and col[h] < len(r) else None
-            vals = {k: get(h) for h, k in DETAIL if k}
+            vals = {k: get(h) for h, k in DETAIL if k and h in col}
             rid = get(ID_HEAD)
             if rid in by_id and rid in snap.get("pipeline", {}):
                 d, old = by_id[rid], snap["pipeline"][rid]
@@ -730,7 +749,7 @@ def pull_edits(rec: dict, book: Path) -> list[str]:
         for r in body:
             get = lambda h: norm(r[col[h]]) if h in col and col[h] < len(r) else None
             rid = get(ID_HEAD)
-            vals = {fld: get(h) for h, _, fld in HIST if fld}
+            vals = {fld: get(h) for h, _, fld in HIST if fld and h in col}
             if rid in by_id and rid in snap.get("history", {}):
                 d, old = by_id[rid], snap["history"][rid]
                 for fld, v in vals.items():

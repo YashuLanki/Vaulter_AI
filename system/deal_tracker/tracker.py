@@ -38,9 +38,11 @@ in this repository.
 from __future__ import annotations
 
 import datetime as _dt
+import hashlib
 import json
 import logging
 import re
+import time
 from pathlib import Path
 
 import config
@@ -179,6 +181,7 @@ _TRACKER_COLUMNS = {
     "approach": "status", "debt": "acquisition debt", "first_in": "date of initial contribution",
     "last_sold": "last parcel date sold", "contributions": "contributions",
     "distributions": "distributions/return", "irr": "project irr", "excluded": "excluded from additional analysis",
+    "recession": "owned during recession - dec. 2007 to june 2009",
 }
 _END_LABELS = {"sold deals", "current deals", "total lifetime deals", "stats for website"}
 
@@ -240,6 +243,8 @@ def import_tracker(xlsx: Path) -> dict:
             "last_sale": _iso(last_raw),
             "sold_in_parts": isinstance(last_raw, str) and last_raw.strip().lower() == "var",
             "excluded": str(cell(row, "excluded") or "").strip(),
+            # The old sheet's hand-made "x"; the dates decide first (dashboard._recession).
+            "recession_marked": str(cell(row, "recession") or "").strip().lower() == "x",
             "sales": [], "stage": "", "smartsheet_sold": False, "notes": [],
             "sources": {"history": f"Old tracker ({xlsx.name})"},
         }
@@ -599,23 +604,143 @@ def drive_closings(rec: dict, words: list[str]) -> list[dict]:
     return out
 
 
-def inbox_files(rec: dict, words: list[str]) -> list[dict]:
-    """Saved attachments in this machine's inbox folder, if it has one, not yet read."""
-    from corpus.extract import SUPPORTED_EXTENSIONS
+# Ava's flow saves EVERY attachment (Microsoft's own template, so she sets no filters;
+# owner, 2026-11-05: the setup must be easy for a non-technical person). So the
+# tracker picks: a deal paper by its name, or a calendar note ("Calendar - <title>.txt",
+# saved only for one colleague's meetings) whose title names a date. Anything else is never opened.
+PAPER_WORDS = ["loi", "letter of intent", "psa", "purchase agreement", "purchase and sale", "counter",
+               "amendment", "settlement statement", "closing statement"]
+CALENDAR_PREFIX = "calendar - "
+CALENDAR_WORDS = ["deadline", "expiration", "expires", "expire", "due", "confirm", "confirmed", "closing", "close",
+                  "dd", "feasibility"]
+
+
+def _wanted(name: str) -> bool:
+    if name.lower().startswith(CALENDAR_PREFIX):
+        return blocked(name[len(CALENDAR_PREFIX):], CALENDAR_WORDS)
+    return blocked(name, PAPER_WORDS)
+
+
+# A handed-in file is SCREENED on this machine before Claude ever sees it (owner,
+# 2026-11-05: read files without the keywords too, but stop the moment one holds
+# confidential information and leave it out). The code reads the opening text; a
+# confidential phrase ends it there. Phrases are ones a deal paper does not carry:
+# a PSA mentions a 1099-S or a W-9 as paperwork, so those are deliberately absent.
+CONFIDENTIAL_TEXT = ["schedule k-1", "partner's share of income", "form w-2", "wage and tax statement",
+                     "social security number", "date of birth", "bank statement", "beginning balance",
+                     "ending balance", "general ledger", "trial balance", "balance sheet", "profit and loss",
+                     "income statement", "payroll", "pay stub", "capital account statement",
+                     "investor statement", "attorney-client privileged", "privileged and confidential"]
+# A file with no deal word in its name is offered only if its text reads like a deal
+# paper: at least two of these.
+DEAL_SIGNALS = ["letter of intent", "purchase and sale", "purchase agreement", "purchase contract",
+                "settlement statement", "closing statement", "earnest money", "due diligence",
+                "feasibility period", "counter offer", "counteroffer", "amendment to", "close of escrow",
+                "closing date", "purchase price", "purchaser", "assignment of contract"]
+SCREEN_CHARS = 12_000          # the opening pages; enough to tell, never the whole file
+SCREEN_BUDGET_SECONDS = 20     # per look at the folders; what is left is screened next time
+
+
+def _screen(p: Path, prefix: str) -> str:
+    """'deal', 'other' or 'confidential'. Only 'deal' is ever offered to Claude."""
+    from corpus import extract
+    named = prefix == "drop" or _wanted(p.name)
+    try:
+        text = extract.read_path(p, p.name, max_chars=SCREEN_CHARS)[0].lower()
+    except Exception:
+        return "deal" if named else "other"   # unreadable: a named paper is still worth Claude's try
+    text = " ".join(text.replace("’", "'").split())
+    if any(w in text for w in CONFIDENTIAL_TEXT):
+        return "confidential"
+    if named:
+        return "deal"
+    return "deal" if sum(w in text for w in DEAL_SIGNALS) >= 2 else "other"
+
+
+def _screen_id(key: str) -> str:
+    # The record sits in the TEAM folder, so a screened-out file is kept by a fingerprint,
+    # never its name: the name of somebody's personal attachment is not the team's business.
+    return hashlib.sha1(key.encode("utf-8")).hexdigest()[:16]
+
+
+INBOX_QUIET_DAYS = 30
+
+
+def note_inbox(rec: dict) -> None:
+    """
+    On the machine with the email folder only: when anything last arrived in it.
+    A flow that stopped (a changed password, say) just goes quiet; the page warns.
+    """
     inbox = config.DEAL_INBOX_DIR
+    if not inbox:
+        return
+    newest = None
+    if inbox.is_dir():
+        times = [p.stat().st_mtime for p in inbox.rglob("*") if p.is_file()]
+        newest = _dt.date.fromtimestamp(max(times)).isoformat() if times else None
+    rec["inbox_check"] = {"checked": _dt.date.today().isoformat(), "found": inbox.is_dir(), "newest": newest}
+
+
+def inbox_warning(rec: dict, today: _dt.date) -> str:
+    c = rec.get("inbox_check")
+    if not c:
+        return ""
+    if not c.get("found"):
+        return "The email folder on the daily-run computer is missing, so no email papers are coming in."
+    if not c.get("newest") or (today - _dt.date.fromisoformat(c["newest"])).days > INBOX_QUIET_DAYS:
+        since = f" since {c['newest']}" if c.get("newest") else ""
+        return (f"Nothing has arrived from email{since}. The email flow may have stopped: "
+                "check it is On in Power Automate.")
+    return ""
+
+
+# The two folders a file is handed in through: (key prefix, folder, what to call it).
+def _hand_in_folders() -> list[tuple[str, Path | None, str]]:
+    return [("inbox", config.DEAL_INBOX_DIR, "email attachment"), ("drop", config.DEAL_DROP_DIR, "drop folder")]
+
+
+def inbox_files(rec: dict, words: list[str]) -> list[dict]:
+    """Saved email attachments (one machine only) and papers dropped in by hand, not yet read."""
+    before = len(rec.get("screened", {}))
+    deadline = time.monotonic() + SCREEN_BUDGET_SECONDS
+    out = [x for prefix, root, source in _hand_in_folders()
+           for x in _folder_files(rec, words, prefix, root, source, deadline)]
+    if len(rec.get("screened", {})) != before:
+        save(rec)   # a screen is a few seconds of reading; never do one twice
+    return out
+
+
+def _folder_files(rec: dict, words: list[str], prefix: str, inbox: Path | None, source: str,
+                  deadline: float) -> list[dict]:
+    from corpus.extract import SUPPORTED_EXTENSIONS
     if not inbox or not inbox.is_dir():
         return []
     out = []
+    screened = rec.setdefault("screened", {})
     for p in sorted(inbox.rglob("*")):
         if not p.is_file() or p.name.startswith(("~", ".")) or p.suffix.lower() not in SUPPORTED_EXTENSIONS:
+            continue
+        if prefix == "drop" and config.DEAL_DROP_READ_NAME in p.relative_to(inbox).parts[:-1]:
             continue
         if blocked(p.name, words):
             continue
         st = p.stat()
-        key = f"inbox:{p.relative_to(inbox).as_posix()}|{st.st_size}"
+        key = f"{prefix}:{p.relative_to(inbox).as_posix()}|{st.st_size}"
         if key in rec["processed"]:
             continue
-        out.append({"key": key, "source": "email attachment", "side": "unclear", "property_folder": "",
+        sid = _screen_id(key)
+        if sid not in screened:
+            if time.monotonic() > deadline:
+                continue
+            screened[sid] = _screen(p, prefix)
+            if screened[sid] == "confidential" and (prefix == "drop" or _wanted(p.name)):
+                # Named like a deal paper, so somebody may be waiting on it: say so, by its name only.
+                rec.setdefault("attention", []).append(
+                    f'"{p.name}" looks like a deal paper but holds confidential information, so it was not read. '
+                    "Record what it says by hand if it matters.")
+        if screened[sid] != "deal":
+            continue
+        out.append({"key": key, "source": source, "side": "unclear", "property_folder": "",
                     "document": p.relative_to(inbox).as_posix(), "path": str(p),
                     "filed": _dt.date.fromtimestamp(st.st_mtime).isoformat(), "others": [], "files": [key]})
     return out
@@ -633,10 +758,10 @@ def read_text(item: dict, max_chars: int = 9000) -> str:
     if item["source"] == "drive":
         text, _ = extract.read_document(item["document"], max_chars=max_chars)
     else:
-        inbox = config.DEAL_INBOX_DIR.resolve()
+        roots = [r.resolve() for _, r, s in _hand_in_folders() if r and s == item["source"]]
         p = Path(item["path"]).resolve()
-        if inbox not in p.parents:
-            raise ValueError("That file is not in the inbox folder.")
+        if not any(r in p.parents for r in roots):
+            raise ValueError("That file is not in a folder the tracker reads.")
         text, _ = extract.read_path(p, p.name, max_chars=max_chars)
     return text
 
@@ -646,6 +771,10 @@ def mark_read(rec: dict, item_key: str, result: str, deal_id: str = "") -> bool:
     stamp = {"at": _dt.datetime.now().isoformat(timespec="seconds"), "result": result, "deal": deal_id}
     if item_key.startswith("inbox:"):
         rec["processed"][item_key] = stamp
+        return True
+    if item_key.startswith("drop:"):
+        rec["processed"][item_key] = stamp
+        _file_away(item_key[len("drop:"):].rsplit("|", 1)[0])
         return True
     if item_key.startswith("paper:"):
         from deal_tracker import pipeline
@@ -659,6 +788,22 @@ def mark_read(rec: dict, item_key: str, result: str, deal_id: str = "") -> bool:
     for f in found[0]["files"]:
         rec["processed"]["drive:" + f] = stamp
     return True
+
+
+def _file_away(rel: str) -> None:
+    """Move a dropped paper into Read/ once recorded. A file open elsewhere stays put (it is marked read)."""
+    src = config.DEAL_DROP_DIR / rel
+    dest_dir = config.DEAL_DROP_DIR / config.DEAL_DROP_READ_NAME
+    dest = dest_dir / src.name
+    n = 2
+    while dest.exists():
+        dest = dest_dir / f"{src.stem} ({n}){src.suffix}"
+        n += 1
+    try:
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        src.replace(dest)
+    except OSError:
+        pass
 
 
 # ─── Recording what a document says ───────────────────────────────────────────

@@ -28,14 +28,14 @@ STAGES = ["LOI Sent", "LOI Received", "Counter Sent", "PSA Negotiation", "Under 
 ACTIVE = {"LOI Sent", "LOI Received", "Counter Sent", "PSA Negotiation", "Under Contract", "Closing Scheduled"}
 DONE = {"Closed", "Terminated", "Declined"}
 # What each stage is called on the page and in "What changed"; the record keeps the team's own names.
-PLAIN_STAGE = {"LOI Sent": "Offer sent", "LOI Received": "Offer received", "Counter Sent": "Counter offer sent",
-               "PSA Negotiation": "Contract being written", "Under Contract": "Contract signed",
-               "Closing Scheduled": "Closing date set", "Closed": "Closed", "Terminated": "Fell through",
-               "Declined": "We said no", "Listed": "For sale", "Unconfirmed": "Needs an update"}
+PLAIN_STAGE = {"LOI Sent": "LOI sent", "LOI Received": "LOI received", "Counter Sent": "Counter sent",
+               "PSA Negotiation": "PSA in negotiation", "Under Contract": "Under contract",
+               "Closing Scheduled": "Closing scheduled", "Closed": "Closed", "Terminated": "Terminated",
+               "Declined": "Declined", "Listed": "Listed", "Unconfirmed": "Status unconfirmed"}
 # The changes worth a line in "What changed", and what to call them.
-WATCHED = {"stage": "Stage", "price": "Price", "deposit": "Deposit", "acres": "Acres", "buyer": "Buyer",
-           "seller": "Seller", "loi_date": "First offer", "counter_date": "Counter offer", "psa_date": "Contract",
-           "dd_expires": "Study period ends", "close_date": "Closing"}
+WATCHED = {"stage": "Stage", "price": "Price", "deposit": "Earnest money", "acres": "Acres", "buyer": "Buyer",
+           "seller": "Seller", "loi_date": "LOI date", "counter_date": "Counter date", "psa_date": "PSA date",
+           "dd_expires": "DD expiration", "close_date": "Closing date"}
 
 FIELDS = {  # workbook heading -> record key
     "Type": "type", "Property": "property", "Parcel / Lot": "parcel", "APN": "apn", "City": "city",

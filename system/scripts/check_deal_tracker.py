@@ -139,7 +139,14 @@ def run(tmp: Path) -> None:
     (inbox / "Closing Statement Maple.pdf").write_bytes(b"%PDF-1.4")
     (inbox / "K-1 2025.pdf").write_bytes(b"%PDF-1.4")
     (inbox / "notes.xyz").write_text("x")
+    (inbox / "Scan_0012.pdf").write_bytes(b"%PDF-1.4")
+    (inbox / "Calendar - Lunch with Sam.txt").write_text("x")
+    (inbox / "Calendar - Oak Ridge 40 DD expiration.txt").write_text("x")
     config.DEAL_INBOX_DIR = inbox
+    config.DEAL_DROP_DIR = tmp / "drop"
+    (tmp / "drop" / "Read").mkdir(parents=True)
+    (tmp / "drop" / "LOI Cedar Bend.pdf").write_bytes(b"%PDF-1.4")
+    (tmp / "drop" / "Read" / "PSA already read.pdf").write_bytes(b"%PDF-1.4")
 
     section("Starting from the old spreadsheet")
     old, book = tmp / "Old tracker.xlsx", tmp / "Pipeline Tracker_20261001.xlsx"
@@ -223,18 +230,51 @@ def run(tmp: Path) -> None:
 
     section("Saved email attachments")
     inbox_items = [i for i in items if i["key"].startswith("inbox:")]
-    check("only the readable, non-accounting attachment is offered",
-          [i["document"] for i in inbox_items] == ["Closing Statement Maple.pdf"], [i["document"] for i in inbox_items])
+    check("only deal papers and date notes are offered: no accounting, no other attachment, no other meeting",
+          [i["document"] for i in inbox_items] == ["Calendar - Oak Ridge 40 DD expiration.txt", "Closing Statement Maple.pdf"],
+          [i["document"] for i in inbox_items])
 
     section("Marking read")
     check("a closing can be marked read", T.mark_read(rec, sale["key"], "sale recorded"))
     granite = next(i for i in papers if i["offer_folder"] == "2026 Granite Homes")
     check("an offer paper can be marked read", T.mark_read(rec, granite["key"], "pipeline updated"))
-    check("an inbox file can be marked read", T.mark_read(rec, inbox_items[0]["key"], "purchase recorded"))
+    check("an inbox file can be marked read", all(T.mark_read(rec, i["key"], "recorded") for i in inbox_items))
+    drop_items = [i for i in items if i["key"].startswith("drop:")]
+    check("a paper dropped in by hand is offered; its Read folder is not",
+          [i["document"] for i in drop_items] == ["LOI Cedar Bend.pdf"], [i["document"] for i in drop_items])
+    check("a dropped paper is filed into Read once recorded",
+          T.mark_read(rec, drop_items[0]["key"], "pipeline updated")
+          and (config.DEAL_DROP_DIR / "Read" / "LOI Cedar Bend.pdf").is_file()
+          and not (config.DEAL_DROP_DIR / "LOI Cedar Bend.pdf").exists())
     left = {i["key"] for i in T.pending(rec)}
     check("what was read is not offered again",
-          not ({sale["key"], granite["key"], inbox_items[0]["key"]} & left) and len(left) == 2, left)
+          not ({sale["key"], granite["key"], drop_items[0]["key"], *(i["key"] for i in inbox_items)} & left)
+          and len(left) == 2, left)
     check("an unknown key is refused", not T.mark_read(rec, "drive:no such folder", "x"))
+
+    section("Email files screened before Claude sees them")
+    box = tmp / "inbox2"
+    box.mkdir()
+    (box / "Scan_0034.txt").write_text("Letter of Intent. The purchase price is $1. Due diligence 60 days.")
+    (box / "Q3 report.txt").write_text("Balance Sheet. Letter of intent, purchase price, due diligence.")
+    (box / "PSA Oak draft.txt").write_text("Purchase and sale agreement. Schedule K-1 attached.")
+    (box / "Holiday party.txt").write_text("Bring a dish.")
+    config.DEAL_INBOX_DIR, saved_inbox = box, config.DEAL_INBOX_DIR
+    got = [i["document"] for i in T.pending(rec) if i["key"].startswith("inbox:")]
+    check("a deal paper with no deal word in its name is found by what it says", "Scan_0034.txt" in got, got)
+    check("confidential text stops the read, even with deal words beside it", "Q3 report.txt" not in got, got)
+    check("an ordinary attachment is left alone", "Holiday party.txt" not in got, got)
+    check("a deal-named paper holding confidential text is not read, and a person is told by name",
+          "PSA Oak draft.txt" not in got and any("PSA Oak draft.txt" in a for a in rec["attention"]), got)
+    kept = json.dumps(rec)
+    check("names of screened-out files are never written into the team's record",
+          "Q3 report" not in kept and "Holiday party" not in kept)
+    T.note_inbox(rec)
+    check("a working email folder gives no warning", T.inbox_warning(rec, today) == "")
+    check("a folder quiet for over 30 days warns that the flow may have stopped",
+          "may have stopped" in T.inbox_warning(rec, today + _dt.timedelta(days=45)))
+    config.DEAL_INBOX_DIR = saved_inbox
+    rec.pop("inbox_check")
 
     section("Recording what a document says")
     pine, o80, o40 = by["Pine Flat 12 Investors, LLC"], by["Oak Ridge 80"], by["Oak Ridge 40"]
@@ -265,6 +305,26 @@ def run(tmp: Path) -> None:
     check("held with nothing sold reads owned", T.status(pine) == "Owned")
     T.record_event(rec, o80, "sale", "2026-10-20", 900_000, 80, "Aspen Co", True, None, None, "SS 3")
     check("a final sale reads fully exited", T.status(o80) == "Fully exited")
+
+    section("Returns by period, and the 2008 recession")
+    from deal_tracker import dashboard as D
+    wf = D.deal_row(by["Willow Flat"], today)
+    check("a lost deal shows as fully exited, never as lost money", wf["status"] == "Fully exited")
+    ex = lambda last, put, back, irr: {"status": "Fully exited", "last_sale": last, "contributions": put,
+                                       "distributions": back, "profit": back - put, "irr": irr}
+    recent, old = (today - _dt.timedelta(days=400)).isoformat(), (today - _dt.timedelta(days=4000)).isoformat()
+    ret = {x["years"]: x for x in D.returns([ex(recent, 100, 300, 0.4), ex(old, 100, 150, 0.1)], today)}
+    check("cash multiple counts only deals sold in the period", ret[5]["deals"] == 1 and ret[5]["multiple"] == 3.0
+          and ret[15]["deals"] == 2 and ret[15]["multiple"] == 2.25, ret)
+    check("IRR is weighted by each deal's share of the profit", ret[None]["irr"] == round((200 * 0.4 + 50 * 0.1) / 250, 4),
+          ret[None])
+    rc = lambda a, last, status, marked=False: D._recession(_dt.date.fromisoformat(a) if a else None,
+                                                            _dt.date.fromisoformat(last) if last else None, status, marked)
+    check("held through 2008 counts as owned in the recession, by the dates",
+          rc("2005-01-01", "2012-01-01", "Fully exited") is True and rc("2001-01-01", "2006-01-01", "Fully exited") is False
+          and rc("2011-01-01", None, "Owned") is False and rc("2006-01-01", None, "Owned") is True)
+    check("where the dates cannot tell, the old spreadsheet's mark is used, else not known",
+          rc("2005-01-01", None, "Fully exited", True) is True and rc("2005-01-01", None, "Fully exited") is None)
 
     section("What changed, and why")
     portfolio.load_all_properties = lambda: (
@@ -372,7 +432,7 @@ def run(tmp: Path) -> None:
     hr = next(r for r in range(1, 40) if hs.cell(r, 1).value == "Deal")
     hh = [c.value for c in hs[hr]]
     hrow = next(r for r in range(hr + 1, hs.max_row + 1) if hs.cell(r, hh.index(X.ID_HEAD) + 1).value == o80["id"])
-    hs.cell(hrow, hh.index("Equity put in") + 1, 3_100_000)
+    hs.cell(hrow, hh.index("Contributions") + 1, 3_100_000)
     oi = wb["Open Items"]
     oi.delete_rows(next(r for r in range(1, 40) if oi.cell(r, 1).value == X.ITEMS_HEAD) + 1)
     wb.save(xl)
@@ -488,7 +548,9 @@ def edge_check(page_path: Path) -> None:
              "e=>window.__errs.push(e.message+' line '+e.lineno));</script>")
     test_page = page_path.with_name("test.html")
     test_page.write_text(guard + page.replace("</body>", TEST + "</body>"), encoding="utf-8")
+    # Its own profile: with the person's Edge already open, a shared one hangs the run.
     r = subprocess.run([str(edge), "--headless=new", "--disable-gpu", "--no-first-run",
+                        f"--user-data-dir={page_path.parent / 'edge-profile'}",
                         "--virtual-time-budget=8000", "--dump-dom", test_page.as_uri()],
                        capture_output=True, text=True, encoding="utf-8", timeout=180, stdin=subprocess.DEVNULL)
     test_page.unlink(missing_ok=True)

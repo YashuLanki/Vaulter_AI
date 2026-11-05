@@ -41,12 +41,51 @@ def _date(v: str | None) -> tuple[_dt.date | None, bool]:
         return None, False
 
 
+# The Great Recession, as the old spreadsheet's "Owned During Recession" column dates it.
+RECESSION = (_dt.date(2007, 12, 1), _dt.date(2009, 6, 30))
+RETURN_YEARS = (5, 10, 15, None)   # None = all time
+
+
+def _recession(bought: _dt.date | None, last: _dt.date | None, status: str, marked: bool) -> bool | None:
+    """
+    Held at any point in the recession, from the dates. Where they cannot tell (a
+    loss with no sale date, say), the old spreadsheet's own mark; else None.
+    """
+    if bought and not (status == "Fully exited" and not last):
+        return bought <= RECESSION[1] and (status != "Fully exited" or last >= RECESSION[0])
+    if bought and bought > RECESSION[1]:
+        return False
+    return True if marked else None
+
+
+def returns(deals: list[dict], today: _dt.date) -> list[dict]:
+    """
+    Deals fully exited in the last 5, 10 and 15 years, and all time, worked out the
+    old spreadsheet's way: cash multiple = distributions / contributions, and IRR =
+    each deal's IRR weighted by its share of the profit.
+    """
+    out = []
+    for n in RETURN_YEARS:
+        since = today.replace(year=today.year - n, day=min(today.day, 28)) if n else None
+        sold = [d for d in deals if d["status"] == "Fully exited" and d["last_sale"]
+                and d["contributions"] is not None and d["distributions"] is not None
+                and (since is None or _dt.date.fromisoformat(d["last_sale"]) >= since)]
+        put, back = sum(d["contributions"] for d in sold), sum(d["distributions"] for d in sold)
+        withirr = [d for d in sold if d["irr"] is not None and d["profit"] is not None]
+        prof = sum(d["profit"] for d in withirr)
+        out.append({"years": n, "deals": len(sold), "contributions": round(put), "distributions": round(back),
+                    "multiple": round(back / put, 2) if put else None,
+                    "irr": round(sum(d["profit"] * d["irr"] for d in withirr) / prof, 4) if prof > 0 else None,
+                    "irr_deals": len(withirr)})
+    return out
+
+
 def deal_row(d: dict, today: _dt.date) -> dict:
-    status = T.status(d)
+    status = "Fully exited" if T.status(d) == "Lost" else T.status(d)
     bought, approx = _date(d.get("acquired"))
     ends = [s["date"] for s in d["sales"] if s.get("date")] + ([d["last_sale"]] if d.get("last_sale") else [])
     last, last_approx = _date(max(ends)) if ends else (None, False)
-    end = last if status == "Fully exited" else (None if status == "Lost" else today)
+    end = last if status == "Fully exited" else today
     hold = round((end - bought).days / 365.25, 1) if bought and end and end >= bought else None
     put, back = d.get("contributions"), d.get("distributions")
     profit = round(back - put) if put is not None and back is not None and not d.get("lost") else None
@@ -59,7 +98,8 @@ def deal_row(d: dict, today: _dt.date) -> dict:
         "contributions": put, "distributions": back, "profit": profit,
         "multiple": round(back / put, 2) if put and back is not None and not d.get("lost") else None,
         "irr": d.get("project_irr"), "last_sale": last.isoformat() if last else "", "last_sale_approx": last_approx,
-        "sold_in_parts": d.get("sold_in_parts", False), "hold": hold, "hold_to_today": status not in ("Fully exited", "Lost"),
+        "sold_in_parts": d.get("sold_in_parts", False), "hold": hold, "hold_to_today": status != "Fully exited",
+        "recession": _recession(bought, last, status, d.get("recession_marked", False)),
         "sales": d["sales"], "excluded": d.get("excluded", ""), "notes": d.get("notes", []),
         "sources": d.get("sources", {}), "lost": d.get("lost", False),
         # The land, from the Smartsheet project dashboards (smartsheet_dashboards.py).
@@ -170,7 +210,7 @@ def build_payload(rec: dict, today: _dt.date | None = None, book: Path | None = 
     return {"built": today.isoformat(), "book_url": web_address(book) if book else "",
             "built_at": _dt.datetime.now().strftime("%B %d, %Y at %I:%M %p").replace(" 0", " "),
             "imported_from": rec.get("imported_from", ""), "watch_from": rec.get("watch_from", ""),
-            "deals": deals, "attention": rec.get("attention", []), "pipeline": pipeline,
+            "deals": deals, "returns": returns(deals, today), "inbox_warning": T.inbox_warning(rec, today), "attention": rec.get("attention", []), "pipeline": pipeline,
             "updates": rec.get("updates", []), "stage_words": P.PLAIN_STAGE,
             "pipeline_from": rec.get("pipeline_from", ""), "pipeline_watch_from": rec.get("pipeline_watch_from", ""),
             "open_items": rec.get("open_items", []), "file_list": _file_list_date(),
@@ -186,6 +226,8 @@ def write(rec: dict, folder: Path | None = None, today: _dt.date | None = None) 
     """
     folder = folder or config.DEAL_TRACKER_DIR
     folder.mkdir(parents=True, exist_ok=True)
+    if folder == config.DEAL_TRACKER_DIR:
+        config.DEAL_DROP_DIR.mkdir(exist_ok=True)   # where a person hands in a paper
     book = folder / BOOK_NAME
     if X.pull_edits(rec, book):
         T.save(rec)
