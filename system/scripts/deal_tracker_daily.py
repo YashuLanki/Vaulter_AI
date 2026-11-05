@@ -18,6 +18,7 @@ email attachments live on it. Everything else is the same on any machine.
 """
 from __future__ import annotations
 
+import datetime as dt
 import json
 import logging
 import os
@@ -25,6 +26,7 @@ import platform
 import shutil
 import subprocess
 import sys
+from collections import Counter
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -64,8 +66,16 @@ def layer_one() -> int:
     tracker.note_inbox(rec)
     tracker.save(rec)
     page = dashboard.write(rec)
+    before = set(rec.get("screened", {}))
     waiting = len(tracker.pending(rec))
-    log.info(f"Refreshed ({counts}); page rebuilt at {page}; {waiting} document(s) waiting to be read.")
+    # Counts only: what a screened file was called never goes in a log the team can read.
+    new = Counter(v for k, v in rec.get("screened", {}).items() if k not in before)
+    log.info(f"Refreshed ({counts}); page rebuilt at {page}; {waiting} document(s) waiting to be read. "
+             f"New email or dropped files checked: {new.get('deal', 0)} deal paper(s), "
+             f"{new.get('other', 0)} not deal papers, {new.get('confidential', 0)} stopped as confidential.")
+    warning = tracker.inbox_warning(rec, dt.date.today())
+    if warning:
+        log.warning(warning)
     return waiting
 
 
@@ -93,10 +103,34 @@ def layer_two() -> None:
     log.info(f"Claude Code finished ({'ok' if r.returncode == 0 else f'exit {r.returncode}'}): {tail[0][:300]}")
 
 
+# The same lines, in the team folder beside the record, so the maintainer can read how
+# Ava's laptop did each morning from his own computer (owner, 2026-11-05).
+TEAM_LOG = config.DEAL_TRACKER_RECORD_FILE.parent / "daily run log.txt"
+TEAM_LOG_KEEP = 2000   # lines; about a year of mornings
+
+
+def _team_log_handler() -> logging.Handler | None:
+    try:
+        TEAM_LOG.parent.mkdir(parents=True, exist_ok=True)
+        if TEAM_LOG.is_file():
+            lines = TEAM_LOG.read_text(encoding="utf-8", errors="replace").splitlines()
+            if len(lines) > TEAM_LOG_KEEP:
+                TEAM_LOG.write_text("\n".join(lines[-TEAM_LOG_KEEP:]) + "\n", encoding="utf-8")
+        h = logging.FileHandler(TEAM_LOG, encoding="utf-8")
+        h.setFormatter(logging.Formatter(f"%(asctime)s  {platform.node()}  [%(levelname)s]  %(message)s"))
+        return h
+    except OSError:
+        return None   # the team folder out of reach must never stop the run itself
+
+
 def main() -> int:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s  [%(levelname)s]  %(message)s",
                         handlers=[logging.FileHandler(Path(config.LOG_DIR) / "deal_tracker_daily.log",
                                                       encoding="utf-8")])
+    team = _team_log_handler()
+    if team:
+        log.addHandler(team)   # this run's own lines only, not every module's
+    log.info("Daily run started.")   # a start with nothing after it is a run that hung or died
     try:
         waiting = layer_one()
     except Exception as e:

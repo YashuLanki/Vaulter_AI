@@ -705,7 +705,9 @@ it is left out, and only a file named as a deal paper (`PAPER_WORDS`), a `Calend
 of one colleague's meetings whose title names a date, or a file whose text carries two `DEAL_SIGNALS` is offered.
 Screened-out files are kept in the TEAM record by a fingerprint, never by name. The confidential list
 deliberately leaves out 1099 and W-9, which ordinary PSAs mention. A folder quiet for 30 days puts a
-warning on the page (`note_inbox`, daily run only). **Papers in the library are read where
+warning on the page (`note_inbox`, daily run only). Each daily run also writes its own lines (never
+other modules', never a screened file's name, only counts) to `system/deal_tracker/daily run log.txt`
+in the team folder, so the maintainer can see how Ava's laptop did without touching it. **Papers in the library are read where
 they are filed, never copied in**: the team folder is open to everyone while the library has
 folder permissions, so a copy would show a restricted paper to the whole team. "What changed"
 names each paper, which is the history. It updates itself from Smartsheet, the summary cards, closing statements
