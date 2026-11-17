@@ -921,6 +921,21 @@ def _claude_desktop_config_paths() -> list:
                 / "claude_desktop_config.json"]
 
     paths = []
+
+    # CLAUDE-DATA FIRST (2026-11-16). Desktop 5.x from the Store moved everything
+    # it keeps to %LOCALAPPDATA%\Claude-Data\claude_<publisher>\ -- its own README
+    # there calls it "the data Claude keeps for this Windows account", and it
+    # survives an uninstall. The package's LocalCache then holds only a
+    # ".user-data-left" marker. Found on the maintainer's new PC: setup's two old
+    # places were written, Desktop read neither, nothing appeared. A folder in
+    # there is proof Desktop made it, so it is used even before Desktop has
+    # written a settings file into it -- and it goes FIRST, because setup's
+    # "never opened" message looks at the first answer, and on such a machine
+    # %APPDATA%\Claude may not exist at all. Never created when absent: Desktop
+    # moves its data there itself, and a folder of ours could get in its way.
+    for data_dir in _claude_data_dirs():
+        paths.append(data_dir / "claude_desktop_config.json")
+
     appdata = os.environ.get("APPDATA")
     if appdata:
         paths.append(Path(appdata) / "Claude" / "claude_desktop_config.json")
@@ -993,10 +1008,22 @@ def _claude_desktop_config_paths() -> list:
     return unique
 
 
+def _claude_data_dirs() -> list:
+    r"""Desktop 5.x's own data folders: %LOCALAPPDATA%\Claude-Data\<one per install>."""
+    local = os.environ.get("LOCALAPPDATA")
+    if sys.platform != "win32" or not local:
+        return []
+    try:
+        return sorted(p for p in (Path(local) / "Claude-Data").iterdir() if p.is_dir())
+    except OSError:
+        return []
+
+
 def _existing_claude_config_files() -> list:
     """Settings files Claude Desktop has already written. Proof, not inference."""
     found = []
     for base, pattern in (
+        (os.environ.get("LOCALAPPDATA"), "Claude-Data/*/claude_desktop_config.json"),
         (os.environ.get("APPDATA"), "Claude/claude_desktop_config.json"),
         (os.environ.get("LOCALAPPDATA"),
          "Packages/*/LocalCache/Roaming/Claude/claude_desktop_config.json"),
@@ -1024,6 +1051,12 @@ def _claude_package_from_running_process():
 
     Returns None for an ordinary install, or when nothing is running -- both
     normal, both handled by the plain locations above.
+
+    Reads every claude.exe's COMMAND LINE (2026-11-16). It used to take the path
+    of the first process named Claude -- and Claude Code's CLI is also
+    claude.exe, so on a machine running both it often answered for the CLI and
+    found nothing. Desktop 5.x also passes --user-data-dir, which names its
+    settings folder outright: the strongest evidence there is, so it wins.
     """
     if sys.platform != "win32":
         return None
@@ -1031,26 +1064,53 @@ def _claude_package_from_running_process():
     if not local:
         return None
     try:
+        import json as _json
         import subprocess
         out = subprocess.run(
             ["powershell", "-NoProfile", "-Command",
-             "(Get-Process Claude -ErrorAction SilentlyContinue | "
-             "Select-Object -First 1).Path"],
-            capture_output=True, text=True, timeout=20)
-        exe = (out.stdout or "").strip()
+             "Get-CimInstance Win32_Process -Filter \"Name='claude.exe'\" | "
+             "Select-Object ExecutablePath, CommandLine | ConvertTo-Json -Compress"],
+            capture_output=True, text=True, timeout=20, stdin=subprocess.DEVNULL)
+        rows = _json.loads((out.stdout or "").strip() or "[]")
     except Exception:
         return None
-    if not exe or "windowsapps" not in exe.lower():
+    if isinstance(rows, dict):
+        rows = [rows]
+    procs = [(r.get("ExecutablePath") or "", r.get("CommandLine") or "")
+             for r in rows if isinstance(r, dict)]
+    found = _desktop_settings_from_processes(procs, local)
+    if found is None:
         return None
+    # A --user-data-dir names a folder the running app is using, so it exists.
+    # The older package mapping is only trusted if Windows made that folder.
+    if "claude-data" in str(found).lower() or found.parent.parent.parent.parent.is_dir():
+        return found
+    return None
 
-    # The package folder is the WindowsApps child: Claude_<version>_<arch>__<pub>
-    for part in Path(exe).parts:
-        if part.lower().startswith("claude_") and "__" in part:
-            family = part.split("_")[0] + "_" + part.rsplit("__", 1)[1]
-            candidate = (Path(local) / "Packages" / family / "LocalCache"
-                         / "Roaming" / "Claude" / "claude_desktop_config.json")
-            if candidate.parent.parent.parent.parent.is_dir():
-                return candidate
+
+def _desktop_settings_from_processes(procs, local):
+    r"""
+    Desktop's settings file from (executable, command line) pairs, or None.
+
+    Pure, so the checks can feed it real command lines. --user-data-dir first;
+    otherwise an older Store install's WindowsApps folder,
+    Claude_<version>_<arch>__<publisher>, maps to
+    <local>\Packages\Claude_<publisher>\LocalCache\Roaming\Claude.
+    Claude Code's claude.exe carries neither, so it is never chosen.
+    """
+    import re as _re
+    for _exe, cmd in procs:
+        m = _re.search(r'--user-data-dir=(?:"([^"]+)"|(\S+))', cmd or "")
+        if m:
+            return Path(m.group(1) or m.group(2)) / "claude_desktop_config.json"
+    for exe, _cmd in procs:
+        if "windowsapps" not in (exe or "").lower():
+            continue
+        for part in Path(exe).parts:
+            if part.lower().startswith("claude_") and "__" in part:
+                family = part.split("_")[0] + "_" + part.rsplit("__", 1)[1]
+                return (Path(local) / "Packages" / family / "LocalCache"
+                        / "Roaming" / "Claude" / "claude_desktop_config.json")
     return None
 
 

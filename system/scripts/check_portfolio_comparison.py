@@ -1873,6 +1873,94 @@ def main() -> int:
         _where = [l.strip() for l in _tb.format_exc().splitlines() if l.strip().startswith("File ")][-1:]
         check("mini term sheet checks ran", False, f"{type(e).__name__}: {e} ({'; '.join(_where)})")
 
+    # §12. Claude Desktop moved its settings (found 2026-11-16, on the maintainer's
+    # new PC). Desktop 5.x from the Microsoft Store keeps everything in
+    # %LOCALAPPDATA%\Claude-Data\claude_<publisher>\ and says so in a README there;
+    # the package's LocalCache keeps only a ".user-data-left" marker. Setup wrote
+    # %APPDATA%\Claude and LocalCache, reported success, and Desktop showed nothing.
+    # Every check here runs against a throwaway folder, never the real settings.
+    print("\n§12 Claude Desktop's settings folder")
+    try:
+        import inspect as _insp12
+        import os as _os12
+        import tempfile as _tf12
+        sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+        sys.path.insert(0, str(Path(__file__).resolve().parent))
+        import setup_wizard as _sw12
+
+        if sys.platform != "win32":
+            check("Claude Desktop settings checks (Windows only) skipped", True)
+        else:
+            _env_saved = {k: _os12.environ.get(k) for k in ("APPDATA", "LOCALAPPDATA")}
+            _fn_saved = (_sw12._claude_store_families, _sw12._claude_package_from_running_process)
+            with _tf12.TemporaryDirectory() as _t:
+                _t = Path(_t)
+                try:
+                    _os12.environ["APPDATA"] = str(_t / "Roaming")
+                    _os12.environ["LOCALAPPDATA"] = str(_t / "Local")
+                    (_t / "Roaming").mkdir()
+                    (_t / "Local").mkdir()
+                    _sw12._claude_store_families = lambda: []
+                    _sw12._claude_package_from_running_process = lambda: None
+
+                    def _paths():
+                        return [str(p).lower() for p in _sw12._claude_desktop_config_paths()]
+
+                    _data = _t / "Local" / "Claude-Data"
+                    check("no Claude-Data folder: no path under it is invented",
+                          not any("claude-data" in p for p in _paths()))
+                    check("...and listing the places does not create one", not _data.exists())
+
+                    _dir = _data / "claude_pzs8sxrjxfjjc"
+                    _dir.mkdir(parents=True)
+                    _want = str(_dir / "claude_desktop_config.json").lower()
+                    check("a Claude-Data folder Desktop made is written to, even before it holds a settings file",
+                          _want in _paths(), f"got {_paths()}")
+                    check("...and it is the FIRST answer, so setup does not call Desktop 'never opened'",
+                          _paths()[:1] == [_want], f"first was {_paths()[:1]}")
+
+                    (_dir / "claude_desktop_config.json").write_text('{"preferences": {}}', encoding="utf-8")
+                    check("an existing Claude-Data settings file counts as proof Desktop reads it",
+                          _want in [str(p).lower() for p in _sw12._existing_claude_config_files()])
+                    check("...and is listed once, not twice", _paths().count(_want) == 1)
+                finally:
+                    _sw12._claude_store_families, _sw12._claude_package_from_running_process = _fn_saved
+                    for _k, _v in _env_saved.items():
+                        if _v is None:
+                            _os12.environ.pop(_k, None)
+                        else:
+                            _os12.environ[_k] = _v
+
+            # The running app states its own folder. Real command lines, shortened.
+            _udd = r"C:\Users\x\AppData\Local\Claude-Data\claude_pzs8sxrjxfjjc"
+            _store = r"C:\Program Files\WindowsApps\Claude_5.11492.5.0_x64__pzs8sxrjxfjjc\app\Claude.exe"
+            _procs = [
+                (r"C:\Users\x\.local\bin\claude.exe", r"C:\Users\x\.local\bin\claude.exe"),
+                (_store, f'"{_store}" --type=renderer --user-data-dir="{_udd}" --lang=en-US'),
+            ]
+            _got = _sw12._desktop_settings_from_processes(_procs, r"C:\Users\x\AppData\Local")
+            check("the running Desktop's own --user-data-dir names its settings file",
+                  _got is not None and str(_got).lower() == (_udd + r"\claude_desktop_config.json").lower(),
+                  f"got {_got}")
+            check("...unquoted as well as quoted",
+                  str(_sw12._desktop_settings_from_processes(
+                      [(_store, f"{_store} --user-data-dir={_udd} --x")], r"C:\L")).lower()
+                  == (_udd + r"\claude_desktop_config.json").lower())
+            check("Claude Code's claude.exe is never mistaken for Desktop",
+                  _sw12._desktop_settings_from_processes(_procs[:1], r"C:\L") is None)
+            _old = _sw12._desktop_settings_from_processes(
+                [(_store, f'"{_store}"')], r"C:\L")
+            check("an older Store Desktop with no --user-data-dir still maps to its package folder",
+                  _old is not None and str(_old).lower()
+                  == r"c:\l\packages\claude_pzs8sxrjxfjjc\localcache\roaming\claude\claude_desktop_config.json",
+                  f"got {_old}")
+            check("the process lookup reads command lines, not just the first process named Claude",
+                  "CommandLine" in _insp12.getsource(_sw12._claude_package_from_running_process))
+    except Exception as e:
+        import traceback as _tb
+        _where = [l.strip() for l in _tb.format_exc().splitlines() if l.strip().startswith("File ")][-1:]
+        check("Claude Desktop settings checks ran", False, f"{type(e).__name__}: {e} ({'; '.join(_where)})")
+
     passed = sum(1 for _, ok, _ in RESULTS if ok)
     print(f"\n{passed}/{len(RESULTS)} checks passed")
     return 0 if passed == len(RESULTS) else 1
