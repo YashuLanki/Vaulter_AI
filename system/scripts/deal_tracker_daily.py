@@ -65,6 +65,9 @@ def layer_one() -> int:
     counts["dashboards"] = smartsheet_dashboards.refresh(rec)
     tracker.note_inbox(rec)
     tracker.save(rec)
+    # The word list Ava's flows read: today's deal names and counterparties.
+    if tracker.write_calendar_words(rec):
+        log.info("Word list for email and calendar updated with today's deal names.")
     page = dashboard.write(rec)
     before = set(rec.get("screened", {}))
     waiting = len(tracker.pending(rec))
@@ -141,6 +144,13 @@ def main() -> int:
             layer_two()
         except Exception as e:
             log.error(f"Reading the waiting papers failed; they stay waiting: {type(e).__name__}: {e}")
+    if waiting >= 0:
+        # Deal and Status for Ava's workbooks; her status flow copies them in after this run.
+        from deal_tracker import tracker
+        rec = tracker.load()
+        if rec is not None and config.DEAL_INBOX_DIR and not tracker.write_inbox_status(rec):
+            log.warning("The inbox status file could not be written; Deal and Status in the email "
+                        "workbooks were not updated today.")
     return 0
 
 

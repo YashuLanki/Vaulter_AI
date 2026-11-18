@@ -210,7 +210,7 @@ def build_payload(rec: dict, today: _dt.date | None = None, book: Path | None = 
     return {"built": today.isoformat(), "book_url": web_address(book) if book else "",
             "built_at": _dt.datetime.now().strftime("%B %d, %Y at %I:%M %p").replace(" 0", " "),
             "imported_from": rec.get("imported_from", ""), "watch_from": rec.get("watch_from", ""),
-            "deals": deals, "returns": returns(deals, today), "inbox_warning": T.inbox_warning(rec, today), "attention": rec.get("attention", []), "pipeline": pipeline,
+            "deals": deals, "returns": returns(deals, today), "inbox_warning": T.inbox_warning(rec, today), "attention": rec.get("attention", []), "lessons": rec.get("lessons", []), "pipeline": pipeline,
             "updates": rec.get("updates", []), "stage_words": P.PLAIN_STAGE,
             "pipeline_from": rec.get("pipeline_from", ""), "pipeline_watch_from": rec.get("pipeline_watch_from", ""),
             "open_items": rec.get("open_items", []), "file_list": _file_list_date(),

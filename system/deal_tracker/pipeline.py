@@ -255,6 +255,10 @@ def find_entry(rec: dict, ident: str, deal_type: str = "") -> list[dict]:
     hit = [d for d in pool if d["id"] == ident]
     if hit:
         return hit
+    # A name a person said means this deal (settle_question) wins outright.
+    hit = [d for d in pool if ident.strip().lower() in (a.lower() for a in d.get("aliases", []))]
+    if hit:
+        return hit
     want = _words(ident)
     if not want:
         return []

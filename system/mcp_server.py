@@ -4528,6 +4528,8 @@ for every listing.""".replace(
 
     def _deal_tracker_page(rec) -> str:
         from deal_tracker import dashboard as _dtd
+        from deal_tracker import tracker as _dtt
+        _dtt.write_inbox_status(rec)   # Deal and Status for Ava's workbooks; never stops the page
         try:
             return str(_dtd.write(rec))
         except Exception as e:
@@ -4626,8 +4628,16 @@ for every listing.""".replace(
             if document_key and file_name:
                 w = next((x for x in waiting if x["key"] == document_key), None)
                 f = next((p for p in (w or {}).get("files", []) if p.rsplit("/", 1)[-1] == file_name.strip()), None)
+                c = next((p for p in (w or {}).get("checks", []) if p.rsplit("/", 1)[-1] == file_name.strip()), None)
+                if c:
+                    return (f"=== document_key: {w['key']} (second paper, to check the sale price)\nReading: {c}\n"
+                            + T.read_text({**w, "document": c, "others": []})
+                            + "\n\nIf it states the price, pass it as check_price with check_source='"
+                            + c.rsplit("/", 1)[-1] + "' to save_deal_tracker_update. If it states none, read "
+                            "another listed paper, or record the sale without check_price: it will be held "
+                            "for a person.")
                 if not f:
-                    return "That file is not one of the versions listed for that document_key."
+                    return "That file is not one of the versions or papers listed for that document_key."
                 w = {**w, "document": f, "others": []}
                 return (f"=== document_key: {w['key']} (other version)\nReading: {f}\n" + T.read_text(w)
                         + "\n\nRecord it with save_deal_tracker_update(document_key=..., ...) as usual.")
@@ -4635,6 +4645,9 @@ for every listing.""".replace(
                 return "Nothing new to read. Call open_deal_tracker to show the updated page."
             batch = waiting[:max(1, min(limit, 4))]
             out = [f"{len(waiting)} waiting; here are {len(batch)}.", ""]
+            if rec.get("lessons"):
+                out += ["Lessons from questions the team settled before (follow them; they outrank a guess):"]
+                out += [f"- {x['lesson']}" for x in rec["lessons"]] + [""]
             for w in batch:
                 paper = w["key"].startswith("paper:")
                 out.append(f"=== document_key: {w['key']}")
@@ -4653,6 +4666,9 @@ for every listing.""".replace(
                 if w["others"]:
                     out.append(("Earlier or other papers in this offer (not read): " if paper else
                                 "Other versions in the same closing (not read): ") + "; ".join(w["others"][:8]))
+                if w.get("checks"):
+                    out.append("Papers to check a sale price against (not read; newest first): "
+                               + "; ".join(p.rsplit("/", 1)[-1] for p in w["checks"]))
                 try:
                     if paper:
                         text, used = P.read_best(rec, w)
@@ -4677,6 +4693,15 @@ for every listing.""".replace(
                     "PSA means 'PSA Negotiation', never 'Under Contract'; only a fully executed PSA is "
                     "'Under Contract'. A new buyer's offer on a property is a NEW pipeline deal "
                     "(create_new=true). If it is not about a deal at all, not_a_deal=true.\n")
+            if any(w["key"].startswith("row:") for w in batch):
+                out.append(
+                    "For a CALENDAR EVENT or EMAIL row call save_deal_pipeline_update(document_key=..., deal=<pipeline "
+                    "id>, fields={...}, why=...) with only the date it states, in the matching field (dd_expires, "
+                    "close_date, psa_date, loi_date, counter_date, YYYY-MM-DD). Its date REPLACES the tracker's "
+                    "date, even one from a signed paper (owner's rule); 'why' says what the row says. Times in the "
+                    "row are Arizona time. If it names no single pipeline deal, or its date has no field (a "
+                    "hearing, a plat recording, an owned property), call it with needs_a_look='<what it says and "
+                    "why it was not settled>' instead. If it is not about a deal, not_a_deal=true.\n")
             out.append(
                 "For a CLOSING STATEMENT call save_deal_tracker_update(document_key=..., kind=..., deal=..., "
                 "date=..., price=..., acres=..., other_party=..., final_sale=...):\n"
@@ -4689,7 +4714,14 @@ for every listing.""".replace(
                 "- contributions / distributions: only if the document itself states the investors' "
                 "totals; never work them out.\n"
                 "- An estimated statement with no settlement date: record kind='neither'; the final one "
-                "will be offered when it is filed.\n"
+                "will be offered when it is filed. A sale is never recorded from an estimate.\n"
+                "- A SALE needs a second paper that agrees (owner's rule): read one of the 'Papers to check "
+                "a sale price against' with get_deal_tracker_documents(document_key=..., file_name=...), "
+                "best first: a RECORDED affidavit of property value or deed that states the price, else the "
+                "fully executed PSA and its LATEST amendment. Pass check_source=<that file name> and "
+                "check_price=<the price it states>. With no second paper, or one that disagrees, the sale "
+                "is held for a person, never recorded. Never use Juniper Square's sale price as the second "
+                "paper: it is the gross finished-lot price before credits.\n"
                 "- If the other versions listed look like a SEPARATE closing (another buyer or parcel), "
                 "record this one with keep_open=true, read that one with get_deal_tracker_documents("
                 "document_key=..., file_name=...), and record it as usual.\n"
@@ -4704,7 +4736,8 @@ for every listing.""".replace(
                                  other_party: str = "", final_sale: bool = False,
                                  contributions: float | None = None, distributions: float | None = None,
                                  create_new_deal: bool = False, state: str = "",
-                                 keep_open: bool = False) -> str:
+                                 keep_open: bool = False, check_source: str = "",
+                                 check_price: float | None = None) -> str:
         """
         Record what one CLOSING STATEMENT (or a saved attachment that is one)
         from get_deal_tracker_documents says. Marks it read, with every other
@@ -4727,6 +4760,12 @@ for every listing.""".replace(
             state: two-letter state, for a new deal
             keep_open: true when another statement in the same closing folder is
                        a separate sale still to be recorded
+            check_source: for a sale, the file name of the SECOND paper read to
+                          check the price (recorded affidavit of value or deed,
+                          or the signed PSA / latest amendment)
+            check_price: the price that second paper states. A sale is recorded
+                         only when it agrees with `price`; otherwise it is held
+                         for a person.
         """
         try:
             from deal_tracker import tracker as T
@@ -4744,6 +4783,9 @@ for every listing.""".replace(
                 T.mark_read(rec, document_key, "not a purchase or sale")
                 T.save(rec)
                 return f"Marked as read, nothing recorded. {len(T.pending(rec))} left."
+            if kind == "sale" and T.is_estimate(item["document"].rsplit("/", 1)[-1]):
+                return ("That is an ESTIMATED statement; a sale is recorded only from the final one. Read a "
+                        "final version listed for this closing, or record kind='neither' and wait for it.")
             hits = T.find_deal(rec, deal) if deal.strip() else []
             if not hits and item["property_folder"]:
                 hits = T.find_deal(rec, item["property_folder"])
@@ -4761,10 +4803,17 @@ for every listing.""".replace(
                                state=state.strip().upper())
             else:
                 d = hits[0]
-            name = item["document"].rsplit("/", 1)[-1]
-            source = {"drive": "Closing statement ", "drop folder": "Dropped in "}.get(item["source"], "Email attachment ") + name
+            source = T.source_label(item)
             said = T.record_event(rec, d, kind, date, price, acres, other_party, final_sale,
-                                  contributions, distributions, source)
+                                  contributions, distributions, source,
+                                  check_source=check_source, check_price=check_price)
+            if any(s.startswith("sale held") for s in said):
+                T.hold_for_question(rec, document_key, d, date)
+                T.save(rec)
+                _deal_tracker_page(rec)
+                return (f"{d['name']}: " + ", ".join(said) + ". It is on Needs a look; once someone has "
+                        f"checked it, edit_deal_tracker(deal='{d['id']}', field='confirm sale', "
+                        f"value='{date}') records it. {len(T.pending(rec))} document(s) left.")
             if rec.get("pipeline"):
                 from deal_tracker import pipeline as P
                 closed = P.close_from_statement(rec, d, kind, date, price, other_party)
@@ -4782,9 +4831,53 @@ for every listing.""".replace(
             return f"Could not record that document: {e}"
 
     @mcp.tool()
+    def settle_deal_tracker_question(question_words: str, deal: str = "", fields: dict | None = None,
+                                     lesson: str = "", name_means_deal: str = "",
+                                     remove_lesson: str = "") -> str:
+        """
+        Settle one of the deal tracker's "Needs a look" questions with what a
+        teammate decided, and remember it so the tracker does not ask the same
+        thing again. Use when someone answers a question shown on the tracker
+        page or in Questions for the Team ("that one is Oak Ridge 40", "council
+        hearings go in next step"), or asks to forget a lesson.
+
+        Args:
+            question_words: a few words from the question, enough to pick one
+            deal: the pipeline id or property the answer is about
+            fields: what to set on that deal, as save_deal_pipeline_update takes
+                    them (dd_expires, close_date, next_step, status ...), only
+                    what the teammate said
+            lesson: ONE plain sentence telling the tracker what to do next time
+                    a case like this comes in, in the teammate's own terms
+            name_means_deal: a name that should now always mean this deal
+                    (e.g. "Oak Ridge" -> Oak Ridge 40)
+            remove_lesson: words from a lesson to forget (on its own, no question)
+        """
+        try:
+            from deal_tracker import tracker as T
+            rec = T.load()
+            if rec is None:
+                return "There is no deal tracker yet."
+            if remove_lesson.strip() and not question_words.strip():
+                n = T.remove_lesson(rec, remove_lesson)
+                T.save(rec)
+                _deal_tracker_page(rec)
+                return f"{n} lesson(s) forgotten."
+            try:
+                said = T.settle_question(rec, question_words, deal, fields or {}, lesson, name_means_deal)
+            except ValueError as e:
+                return str(e)
+            T.save(rec)
+            _deal_tracker_page(rec)
+            return f"Settled: {said}. {len(rec.get('attention', []))} question(s) left."
+        except Exception as e:
+            return f"Could not settle that question: {e}"
+
+    @mcp.tool()
     def save_deal_pipeline_update(deal: str, fields: dict, document_key: str = "", deal_type: str = "",
                                   create_new: bool = False, not_a_deal: bool = False,
-                                  open_item_done: str = "", new_open_item: str = "", why: str = "") -> str:
+                                  open_item_done: str = "", new_open_item: str = "", why: str = "",
+                                  needs_a_look: str = "") -> str:
         """
         Update one LIVE pipeline deal: from an offer paper given by
         get_deal_tracker_documents (pass its document_key), or because the user
@@ -4807,6 +4900,10 @@ for every listing.""".replace(
                  user says it ("the seller countered at a higher price", "closing
                  moved by the second amendment"). It is shown to the whole team in
                  "What changed". Leave it blank when nothing says why; never guess.
+            needs_a_look: with a document_key, when it cannot be settled (names no
+                 single deal, or a date the tracker has no field for): one plain
+                 sentence saying what it says and why it was not settled. It is
+                 marked "Needs a look" and asked of the team; nothing is changed.
         """
         try:
             from deal_tracker import tracker as T
@@ -4819,18 +4916,25 @@ for every listing.""".replace(
                 item = next((w for w in T.pending(rec) if w["key"] == document_key), None)
                 if item is None:
                     return "That document_key is not waiting (already recorded, or mistyped)."
+            if needs_a_look.strip():
+                if not item:
+                    return "needs_a_look goes with the document_key of the row or paper that could not be settled."
+                q = T.needs_a_look(rec, item, needs_a_look)
+                T.save(rec)
+                _deal_tracker_page(rec)
+                return f"Marked Needs a look and asked of the team: {q}. {len(T.pending(rec))} left."
             if not_a_deal:
                 if item:
                     T.mark_read(rec, document_key, "not a deal paper")
                     T.save(rec)
+                    T.write_inbox_status(rec)
                 return f"Marked as read, nothing recorded. {len(T.pending(rec))} left."
             hits = P.find_entry(rec, deal, deal_type) if deal.strip() else []
             if len(hits) > 1:
                 return ("That fits more than one pipeline deal; call again with deal set to one id: "
                         + "; ".join(f"{h['id']} = {h.get('type')} {h.get('property')} "
                                     f"({h.get('buyer') or h.get('seller')}, {h.get('stage')})" for h in hits[:10]))
-            source = (f"{'Offer paper' if document_key.startswith('paper:') else 'Dropped in' if document_key.startswith('drop:') else 'Email attachment'} "
-                      f"{item['document'].rsplit('/', 1)[-1]}") if item else "Told by a teammate"
+            source = T.source_label(item) if item else "Told by a teammate"
             if not hits:
                 if not create_new or deal_type.title() not in ("Acquisition", "Disposition"):
                     return ("No pipeline deal matches. Call again with deal set to its id, or with "
@@ -4877,7 +4981,9 @@ for every listing.""".replace(
             field: 'same as' (value = the OTHER deal's name or id; the two are
                    joined, keeping the old tracker's deal), or one of: name, state,
                    acquired (YYYY-MM-DD), purchase_price, acres, contributions,
-                   distributions, last_sale (YYYY-MM-DD), lost (yes/no), note
+                   distributions, last_sale (YYYY-MM-DD), lost (yes/no), note,
+                   or 'confirm sale' (value = the held sale's date, YYYY-MM-DD,
+                   once a person has checked a sale the tracker held)
             value: the new value
         """
         try:
@@ -4906,6 +5012,8 @@ for every listing.""".replace(
             elif field == "note":
                 d["notes"].append(value.strip())
                 said = "note added"
+            elif field == "confirm_sale":
+                said = T.confirm_sale(rec, d, value)
             elif field in ("name", "state", "acquired", "last_sale"):
                 if field == "name":
                     T.link_name(rec, d["name"], d)

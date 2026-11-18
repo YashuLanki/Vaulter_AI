@@ -13,8 +13,10 @@ adds what has changed since, from four places:
   * the property summaries' data cards (purchase price and year, a sale);
   * closing statements filed on the firm's drive, found by NAME in the file
     list -- nothing is opened until Claude reads the one chosen per closing;
-  * a folder of saved email attachments, only on the machine whose own
-    `.env` names it (`config.DEAL_INBOX_DIR`). Nothing here reads email.
+  * the email inbox folder, only on the machine whose own `.env` names it
+    (`config.DEAL_INBOX_DIR`): saved attachments in its `Attachments/` folder,
+    and the calendar and email rows Ava's flows add to `Date Updates.xlsx`
+    (see `inbox.py`). Nothing here reads email itself.
 
 The live pipeline (offers in motion) is pipeline.py; the Excel copy excel.py.
 
@@ -586,6 +588,18 @@ def drive_closings(rec: dict, words: list[str]) -> list[dict]:
     read_names = {k.rsplit("/", 1)[-1] for k in rec["processed"] if k.startswith("drive:")}
     side_of = lambda folder: ("sale" if _SALE_PATH.search(folder + "/")
                               else "purchase" if _BUY_PATH.search(folder + "/") else "unclear")
+    # Second papers for a sale's price (recorded affidavit of value or deed, signed PSA or
+    # amendment), found by name anywhere in the same property's folder.
+    def prop_root(p: str) -> str:
+        parts = p.split("/")
+        i = 3 if len(parts) > 3 and parts[2].startswith("!") else 2
+        return "/".join(parts[:i + 1]) + "/"
+    papers: dict[str, list[str]] = {}
+    for path, name in rows:
+        low = name.lower().replace("_", " ")
+        if (_CHECK_NAME.search(low) and not _NOT_A_CHECK.search(low) and not low.endswith((".msg", ".eml"))
+                and not blocked(name, words)):
+            papers.setdefault(prop_root(path), []).append(path)
     out, offered = [], set()
     # A folder that says sale or purchase first, so a copy filed in both is offered from that one.
     for folder, files in sorted(groups.items(), key=lambda g: (side_of(g[0]) == "unclear", g[0])):
@@ -600,25 +614,112 @@ def drive_closings(rec: dict, words: list[str]) -> list[dict]:
         out.append({"key": "drive:" + folder, "source": "drive", "side": side,
                     "property_folder": _property_folder(best), "document": best,
                     "filed": max(D.name_date(f.rsplit("/", 1)[-1]) for f in files),
-                    "others": sorted(f.rsplit("/", 1)[-1] for f in files if f != best), "files": files})
+                    "others": sorted(f.rsplit("/", 1)[-1] for f in files if f != best), "files": files,
+                    "checks": sorted(papers.get(prop_root(best), []),
+                                     key=lambda p: D.name_date(p.rsplit("/", 1)[-1]) or "", reverse=True)[:12]
+                    if side != "purchase" else []})
     return out
 
 
-# Ava's flow saves EVERY attachment (Microsoft's own template, so she sets no filters;
-# owner, 2026-11-05: the setup must be easy for a non-technical person). So the
-# tracker picks: a deal paper by its name, or a calendar note ("Calendar - <title>.txt",
-# saved only for one colleague's meetings) whose title names a date. Anything else is never opened.
+# Ava's flow saves EVERY attachment (owner, 2026-11-05: the setup must be easy for a
+# non-technical person), code-named, with its real name in the Attachments Log. So the
+# tracker picks: a deal paper by its real name, or one whose text reads like a deal paper.
 PAPER_WORDS = ["loi", "letter of intent", "psa", "purchase agreement", "purchase and sale", "counter",
                "amendment", "settlement statement", "closing statement"]
-CALENDAR_PREFIX = "calendar - "
-CALENDAR_WORDS = ["deadline", "expiration", "expires", "expire", "due", "confirm", "confirmed", "closing", "close",
-                  "dd", "feasibility"]
 
 
 def _wanted(name: str) -> bool:
-    if name.lower().startswith(CALENDAR_PREFIX):
-        return blocked(name[len(CALENDAR_PREFIX):], CALENDAR_WORDS)
     return blocked(name, PAPER_WORDS)
+
+
+# The words that make an email or calendar event a deal date (owner, 2026-11-17). One file in
+# the team folder, read by Ava's flows AND here, in three parts: words anyone may edit, then
+# deal names and other names, both rewritten by the daily run (`write_calendar_words`).
+CALENDAR_WORDS_FILE = RECORD_FILE.with_name("calendar words.txt")
+_PART_WORDS, _PART_DEALS, _PART_OTHERS = "# --- words", "# --- deal names", "# --- other names"
+DEFAULT_CALENDAR_WORDS = ["deadline", "expiration", "expires", "expire", "due", "confirm", "confirmed",
+                          "closing", "close", "dd", "feasibility"]
+
+
+def calendar_words() -> tuple[list[str], list[str], list[str]]:
+    """(words, deal names, other names) from the word list; the built-in words if it is missing."""
+    parts: dict[str, list[str]] = {_PART_WORDS: [], _PART_DEALS: [], _PART_OTHERS: []}
+    try:
+        lines = CALENDAR_WORDS_FILE.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return list(DEFAULT_CALENDAR_WORDS), [], []
+    part = None
+    for line in lines:
+        s = line.strip()
+        if s.startswith("#"):
+            # The seeded list's one names part ("deal, company and people names") counts as other names.
+            part = next((p for p in parts if s.lower().startswith(p)), _PART_OTHERS if "names" in s.lower() else part)
+            continue
+        if s and part:
+            parts[part].append(s.lower())
+    return parts[_PART_WORDS] or list(DEFAULT_CALENDAR_WORDS), parts[_PART_DEALS], parts[_PART_OTHERS]
+
+
+def row_matches(row: dict) -> bool:
+    """Whole words, in code: a calendar row needs any word or name; an email a word AND a deal name."""
+    words, deals, others = calendar_words()
+    text = " ".join(row.get(k, "") for k in ("Event", "Subject", "Details"))
+    if row.get("tab") == "Calendar":
+        return blocked(text, words + deals + others)
+    return blocked(text, words) and blocked(text, deals)
+
+
+def _name_forms(name: str) -> list[str]:
+    """How a name is written in an email: lower case, company words off the end, and the part
+    before a dash ("Wilson 155 – Long Branch" is also "wilson 155")."""
+    out = []
+    for part in (name, re.split(r"\s[–—-]\s|\(", name or "")[0]):
+        words = re.sub(r"[,.]", " ", str(part or "").lower()).split()
+        while words and words[-1] in _STOP:
+            words.pop()
+        s = " ".join(words)
+        if len(s) >= 4 and s not in out:
+            out.append(s)
+    return out
+
+
+def write_calendar_words(rec: dict) -> bool:
+    """Rewrite the word list's two names parts from the record; the words part is kept exactly.
+    Returns whether the file changed. Ava's flows read this file, so a new deal counts the next morning."""
+    from deal_tracker import pipeline as P
+    deals, others = set(), set()
+    for d in rec.get("pipeline") or []:
+        if d.get("stage") not in P.ACTIVE:
+            continue
+        deals.update(_name_forms(d.get("property", "")))
+        for k in ("buyer", "seller", "broker", "escrow"):
+            others.update(_name_forms(d.get(k) or ""))
+    for d in rec.get("deals", []):
+        if status(d) in ("Owned", "Being acquired", "Partially sold"):
+            for n in [d["name"], *d.get("aliases", [])]:
+                deals.update(_name_forms(n))
+    others -= deals
+    try:
+        old = CALENDAR_WORDS_FILE.read_text(encoding="utf-8")
+    except OSError:
+        old = (f"# Words that make an email or calendar event worth saving for the deal tracker.\n"
+               f"{_PART_WORDS} (edit freely) ---\n" + "\n".join(DEFAULT_CALENDAR_WORDS) + "\n")
+    # Keep everything up to the first names part, whichever shape the file has.
+    head = re.split(r"(?m)^# --- [^\n]*names[^\n]*$", old, maxsplit=1)[0].rstrip("\n") + "\n"
+    tail = "(kept current by the tracker's daily run; edits here are replaced) ---\n"
+    new = (head + f"\n{_PART_DEALS} {tail}" + "\n".join(sorted(deals)) + "\n"
+           + f"\n{_PART_OTHERS} {tail}" + "\n".join(sorted(others)) + "\n")
+    if new == old:
+        return False
+    try:
+        CALENDAR_WORDS_FILE.parent.mkdir(parents=True, exist_ok=True)
+        tmp = CALENDAR_WORDS_FILE.with_name("~tmp_" + CALENDAR_WORDS_FILE.name)
+        tmp.write_text(new, encoding="utf-8")
+        tmp.replace(CALENDAR_WORDS_FILE)
+    except OSError as e:
+        log.warning(f"The email and calendar word list could not be updated: {e}")
+        return False   # yesterday's list still works; never stop the day's run over it
+    return True
 
 
 # A handed-in file is SCREENED on this machine before Claude ever sees it (owner,
@@ -641,10 +742,10 @@ SCREEN_CHARS = 12_000          # the opening pages; enough to tell, never the wh
 SCREEN_BUDGET_SECONDS = 20     # per look at the folders; what is left is screened next time
 
 
-def _screen(p: Path, prefix: str) -> str:
+def _screen(p: Path, prefix: str, name: str = "") -> str:
     """'deal', 'other' or 'confidential'. Only 'deal' is ever offered to Claude."""
     from corpus import extract
-    named = prefix == "drop" or _wanted(p.name)
+    named = prefix == "drop" or _wanted(name or p.name)
     try:
         text = extract.read_path(p, p.name, max_chars=SCREEN_CHARS)[0].lower()
     except Exception:
@@ -671,14 +772,25 @@ def note_inbox(rec: dict) -> None:
     On the machine with the email folder only: when anything last arrived in it.
     A flow that stopped (a changed password, say) just goes quiet; the page warns.
     """
+    from deal_tracker import inbox as IB
     inbox = config.DEAL_INBOX_DIR
     if not inbox:
         return
-    newest = None
+    newest, unreadable, gone = None, False, []
     if inbox.is_dir():
-        times = [p.stat().st_mtime for p in inbox.rglob("*") if p.is_file()]
-        newest = _dt.date.fromtimestamp(max(times)).isoformat() if times else None
-    rec["inbox_check"] = {"checked": _dt.date.today().isoformat(), "found": inbox.is_dir(), "newest": newest}
+        # What ARRIVED, never the workbooks' own saved time: the status flow saves those every
+        # day, so a stopped email flow would otherwise never look quiet.
+        att = inbox / IB.ATTACH_DIR
+        dates = [_dt.date.fromtimestamp(p.stat().st_mtime).isoformat() for p in att.glob("*") if p.is_file()] \
+            if att.is_dir() else []
+        try:
+            gone = IB.missing(inbox)
+            dates += [d for d in (_received(r.get("Received", "")) for r in IB.date_rows(inbox)) if d]
+        except IB.InboxUnreadable:
+            unreadable = True
+        newest = max(dates) if dates else None
+    rec["inbox_check"] = {"checked": _dt.date.today().isoformat(), "found": inbox.is_dir(), "newest": newest,
+                          "unreadable": unreadable, "missing": gone}
 
 
 def inbox_warning(rec: dict, today: _dt.date) -> str:
@@ -687,6 +799,12 @@ def inbox_warning(rec: dict, today: _dt.date) -> str:
         return ""
     if not c.get("found"):
         return "The email folder on the daily-run computer is missing, so no email papers are coming in."
+    if c.get("unreadable"):
+        return ("The email folder's Date Updates or Attachments Log could not be opened today, so date updates "
+                "and email attachments were not checked.")
+    if c.get("missing"):
+        return ("The email folder is missing " + "; ".join(c["missing"]) + ", so what goes there was not "
+                "checked today. Put it back, or ask Claude to make the inbox workbooks again.")
     if not c.get("newest") or (today - _dt.date.fromisoformat(c["newest"])).days > INBOX_QUIET_DAYS:
         since = f" since {c['newest']}" if c.get("newest") else ""
         return (f"Nothing has arrived from email{since}. The email flow may have stopped: "
@@ -695,23 +813,39 @@ def inbox_warning(rec: dict, today: _dt.date) -> str:
 
 
 # The two folders a file is handed in through: (key prefix, folder, what to call it).
+def _attachments_dir() -> Path | None:
+    from deal_tracker import inbox as IB
+    return config.DEAL_INBOX_DIR / IB.ATTACH_DIR if config.DEAL_INBOX_DIR else None
+
+
 def _hand_in_folders() -> list[tuple[str, Path | None, str]]:
-    return [("inbox", config.DEAL_INBOX_DIR, "email attachment"), ("drop", config.DEAL_DROP_DIR, "drop folder")]
+    return [("inbox", _attachments_dir(), "email attachment"), ("drop", config.DEAL_DROP_DIR, "drop folder")]
 
 
 def inbox_files(rec: dict, words: list[str]) -> list[dict]:
-    """Saved email attachments (one machine only) and papers dropped in by hand, not yet read."""
+    """Saved email attachments and date rows (one machine only) and papers dropped in by hand, not yet read."""
+    from deal_tracker import inbox as IB
     before = len(rec.get("screened", {}))
     deadline = time.monotonic() + SCREEN_BUDGET_SECONDS
-    out = [x for prefix, root, source in _hand_in_folders()
-           for x in _folder_files(rec, words, prefix, root, source, deadline)]
+    out = []
+    for prefix, root, source in _hand_in_folders():
+        names = {}
+        if prefix == "inbox" and config.DEAL_INBOX_DIR:
+            if not (config.DEAL_INBOX_DIR / IB.ATTACH_LOG).is_file():
+                continue   # no log: wait rather than read attachments without their names; note_inbox says so
+            try:
+                names = IB.attachment_names(config.DEAL_INBOX_DIR)
+            except IB.InboxUnreadable:
+                continue   # the same when it will not open
+        out += _folder_files(rec, words, prefix, root, source, deadline, names)
+    out += _row_items(rec, words)
     if len(rec.get("screened", {})) != before:
         save(rec)   # a screen is a few seconds of reading; never do one twice
     return out
 
 
 def _folder_files(rec: dict, words: list[str], prefix: str, inbox: Path | None, source: str,
-                  deadline: float) -> list[dict]:
+                  deadline: float, names: dict[str, str] | None = None) -> list[dict]:
     from corpus.extract import SUPPORTED_EXTENSIONS
     if not inbox or not inbox.is_dir():
         return []
@@ -722,7 +856,10 @@ def _folder_files(rec: dict, words: list[str], prefix: str, inbox: Path | None, 
             continue
         if prefix == "drop" and config.DEAL_DROP_READ_NAME in p.relative_to(inbox).parts[:-1]:
             continue
-        if blocked(p.name, words):
+        # A saved attachment is code-named; its real name comes from the Attachments Log.
+        # With no log row it goes by the file's own name, screened on its contents.
+        name = (names or {}).get(p.stem) or p.relative_to(inbox).as_posix()
+        if blocked(name, words):
             continue
         st = p.stat()
         key = f"{prefix}:{p.relative_to(inbox).as_posix()}|{st.st_size}"
@@ -732,17 +869,58 @@ def _folder_files(rec: dict, words: list[str], prefix: str, inbox: Path | None, 
         if sid not in screened:
             if time.monotonic() > deadline:
                 continue
-            screened[sid] = _screen(p, prefix)
-            if screened[sid] == "confidential" and (prefix == "drop" or _wanted(p.name)):
+            screened[sid] = _screen(p, prefix, name)
+            if screened[sid] == "confidential" and (prefix == "drop" or _wanted(name)):
                 # Named like a deal paper, so somebody may be waiting on it: say so, by its name only.
                 rec.setdefault("attention", []).append(
-                    f'"{p.name}" looks like a deal paper but holds confidential information, so it was not read. '
+                    f'"{name}" looks like a deal paper but holds confidential information, so it was not read. '
                     "Record what it says by hand if it matters.")
         if screened[sid] != "deal":
             continue
         out.append({"key": key, "source": source, "side": "unclear", "property_folder": "",
-                    "document": p.relative_to(inbox).as_posix(), "path": str(p),
+                    "document": name, "path": str(p), "code": p.stem,
                     "filed": _dt.date.fromtimestamp(st.st_mtime).isoformat(), "others": [], "files": [key]})
+    return out
+
+
+def _received(text: str) -> str:
+    """The Received cell ("Nov 17, 2026 2:00 PM") as a date; blank if it does not read."""
+    for fmt in ("%b %d, %Y %I:%M %p", "%b %d, %Y", "%Y-%m-%d %H:%M:%S", "%Y-%m-%d"):
+        try:
+            return _dt.datetime.strptime(text.strip(), fmt).date().isoformat()
+        except ValueError:
+            continue
+    return ""
+
+
+def _row_items(rec: dict, words: list[str] | None = None) -> list[dict]:
+    """Calendar and email rows naming a deal date, screened in code before Claude sees them.
+    A subject on the do-not-open list ("wire instructions") is private, like a file named so."""
+    from deal_tracker import inbox as IB
+    if not config.DEAL_INBOX_DIR:
+        return []
+    try:
+        rows = IB.date_rows(config.DEAL_INBOX_DIR)
+    except IB.InboxUnreadable:
+        return []   # note_inbox puts "not checked" on the page
+    screened = rec.setdefault("screened", {})
+    out = []
+    for r in rows:
+        key = f"row:{r['tab']}:{r['ID']}"
+        if key in rec["processed"]:
+            continue
+        sid = _screen_id(key)
+        if sid not in screened:
+            text = " ".join(IB.row_text(r).lower().replace("’", "'").split())
+            title = r.get("Event") or r.get("Subject", "")
+            screened[sid] = ("confidential" if any(w in text for w in CONFIDENTIAL_TEXT)
+                             or blocked(title, words if words is not None else do_not_open_words())
+                             else "deal" if row_matches(r) else "other")
+        if screened[sid] != "deal":
+            continue
+        out.append({"key": key, "source": "calendar event" if r["tab"] == "Calendar" else "email",
+                    "side": "unclear", "property_folder": "", "document": r.get("Event") or r.get("Subject", ""),
+                    "row": r, "filed": _received(r.get("Received", "")), "others": [], "files": [key]})
     return out
 
 
@@ -755,6 +933,9 @@ def pending(rec: dict) -> list[dict]:
 
 def read_text(item: dict, max_chars: int = 9000) -> str:
     from corpus import extract
+    if item["key"].startswith("row:"):
+        from deal_tracker import inbox as IB
+        return IB.row_text(item["row"])[:max_chars]
     if item["source"] == "drive":
         text, _ = extract.read_document(item["document"], max_chars=max_chars)
     else:
@@ -769,7 +950,7 @@ def read_text(item: dict, max_chars: int = 9000) -> str:
 def mark_read(rec: dict, item_key: str, result: str, deal_id: str = "") -> bool:
     """Mark every file of a closing (or the one attachment) as read. False if the key is unknown."""
     stamp = {"at": _dt.datetime.now().isoformat(timespec="seconds"), "result": result, "deal": deal_id}
-    if item_key.startswith("inbox:"):
+    if item_key.startswith(("inbox:", "row:")):
         rec["processed"][item_key] = stamp
         return True
     if item_key.startswith("drop:"):
@@ -790,6 +971,173 @@ def mark_read(rec: dict, item_key: str, result: str, deal_id: str = "") -> bool:
     return True
 
 
+def source_label(item: dict) -> str:
+    """What "What changed" names as the source of an update."""
+    word = next((w for p, w in (("row:Calendar:", "Calendar event"), ("row:Email:", "Email"),
+                                ("paper:", "Offer paper"), ("drop:", "Dropped in"), ("inbox:", "Email attachment"),
+                                ("drive:", "Closing statement")) if item["key"].startswith(p)), "Document")
+    return f"{word} {item['document'].rsplit('/', 1)[-1]}"
+
+
+def needs_a_look(rec: dict, item: dict, reason: str) -> str:
+    """A row or paper the tracker cannot settle on its own: marked so, and asked of the team once."""
+    when = f", received {item['filed']}" if item.get("filed") else ""
+    question = f"{source_label(item)}{when}: {reason.strip()}"
+    mark_read(rec, item["key"], "needs a look")
+    # Which item each question is about, so settling it can mark the row Done. Kept apart from
+    # `processed`: an offer paper or a closing is stamped under its files' keys, not its own.
+    rec.setdefault("questions", {})[item["key"]] = question
+    rec.setdefault("attention", [])
+    _note(rec, question)
+    return question
+
+
+# What a person decided about a Needs a look item, kept so the same case is settled without
+# asking next time (owner, 2026-11-17: "learn from its mistake"). Shown on the page and given
+# to the agent at the top of every run's reading instructions.
+MAX_LESSONS = 50
+
+
+def add_lesson(rec: dict, lesson: str, source: str) -> bool:
+    lesson = " ".join((lesson or "").split())
+    have = rec.setdefault("lessons", [])
+    if not lesson or any(x["lesson"].lower() == lesson.lower() for x in have):
+        return False
+    have.insert(0, {"date": _dt.date.today().isoformat(), "lesson": lesson, "from": source})
+    del have[MAX_LESSONS:]
+    return True
+
+
+def remove_lesson(rec: dict, words: str) -> int:
+    have = rec.get("lessons", [])
+    keep = [x for x in have if not words.strip() or words.strip().lower() not in x["lesson"].lower()]
+    rec["lessons"] = keep
+    return len(have) - len(keep)
+
+
+def settle_question(rec: dict, question_words: str, deal: str = "", fields: dict | None = None,
+                    lesson: str = "", name_means_deal: str = "") -> str:
+    """A person's answer to one question: applied, the question cleared, and the lesson kept.
+    Raises ValueError (with what to do) when the question or the deal is not exactly one."""
+    from deal_tracker import pipeline as P
+    want = " ".join(question_words.lower().split())
+    qs = [a for a in rec.get("attention", []) if want and want in " ".join(a.lower().split())]
+    if len(qs) != 1:
+        raise ValueError("No question has those words." if not qs else
+                         "More than one question has those words: " + " | ".join(qs[:5]))
+    q, said = qs[0], []
+    if "field='confirm sale'" in q:
+        # Clearing a held sale's question here would drop the sale unrecorded, with nothing left asking.
+        raise ValueError("That question is a held sale. Once someone has checked it, record it with "
+                         "edit_deal_tracker(field='confirm sale', value='<the sale date>'); settling it "
+                         "here would clear the question without recording the sale.")
+    entry = None
+    if deal.strip():
+        hits = P.find_entry(rec, deal)
+        if len(hits) != 1:
+            raise ValueError("That fits " + ("no pipeline deal." if not hits else
+                             "more than one pipeline deal: " + "; ".join(f"{h['id']} = {h.get('property')}" for h in hits[:8])))
+        entry = hits[0]
+        if fields:
+            said += P.apply(rec, entry, fields, "Settled by a teammate")
+        if name_means_deal.strip():
+            n = name_means_deal.strip()
+            if n not in entry.setdefault("aliases", []):
+                entry["aliases"].append(n)
+            history = matches(rec, entry.get("property", ""))
+            if len(history) == 1:
+                link_name(rec, n, history[0])
+            said.append(f'"{n}" now means {entry.get("property")}')
+    questions = rec.setdefault("questions", {})
+    for key in [k for k, v in questions.items() if v == q]:
+        stamp = rec["processed"].get(key)
+        if stamp:
+            stamp.update({"result": "settled by a teammate", "deal": entry["id"] if entry else stamp.get("deal", "")})
+        del questions[key]
+    rec["attention"] = [a for a in rec["attention"] if a != q]
+    if add_lesson(rec, lesson, q):
+        said.append("lesson kept")
+    return ", ".join(said) or "question cleared"
+
+
+# Deal and Status go back into Ava's workbooks (owner, 2026-11-17). This file, beside the record,
+# says for each row ID what became of it; her status flow copies it in one row at a time. It
+# holds IDs, deal names and statuses only: never a subject or a file name.
+INBOX_STATUS_FILE = RECORD_FILE.with_name("inbox status.json")
+# Only rows still waiting, or received or settled within this many days, go in the file: the
+# status flow updates each listed row every day, and Power Automate limits how many it may.
+STATUS_RECENT_DAYS = 30
+
+
+def _recent(iso: str, today: _dt.date) -> bool:
+    try:
+        return (today - _dt.date.fromisoformat(iso[:10])).days <= STATUS_RECENT_DAYS
+    except (TypeError, ValueError):
+        return False
+
+
+def _status_of(rec: dict, key: str) -> tuple[str, str]:
+    stamp = rec["processed"].get(key)
+    if stamp:
+        r = stamp.get("result", "")
+        status = "Needs a look" if r == "needs a look" else "Not a deal" if r.startswith("not a") else "Done"
+        did = stamp.get("deal", "")
+        deal = next((d.get("property") or d.get("name", "") for d in [*(rec.get("pipeline") or []),
+                                                                      *rec.get("deals", [])] if d["id"] == did), "")
+        return status, deal
+    verdict = rec.get("screened", {}).get(_screen_id(key))
+    return {"confidential": "Skipped", "other": "Not a deal"}.get(verdict, "New"), ""
+
+
+def inbox_status(rec: dict) -> dict:
+    """Every row in the inbox workbooks with its Status and Deal. Raises InboxUnreadable."""
+    from corpus.extract import SUPPORTED_EXTENSIONS
+    from deal_tracker import inbox as IB
+    out = {"made": _dt.datetime.now().isoformat(timespec="seconds"), "attachments": [], "calendar": [], "email": []}
+    today = _dt.date.today()
+    box = config.DEAL_INBOX_DIR
+    if not box:
+        return out
+    files = {p.stem: p for p in (box / IB.ATTACH_DIR).glob("*") if p.is_file()} if (box / IB.ATTACH_DIR).is_dir() else {}
+    words = do_not_open_words()
+    for code, name in IB.attachment_names(box).items():
+        p = files.get(code)
+        if p is None:
+            continue
+        if blocked(name, words):
+            status, deal = "Skipped", ""
+        elif p.suffix.lower() not in SUPPORTED_EXTENSIONS:
+            status, deal = "Not a deal", ""
+        else:
+            status, deal = _status_of(rec, f"inbox:{p.name}|{p.stat().st_size}")
+        out["attachments"].append({"id": code, "deal": deal, "status": status})
+    for r in IB.date_rows(box):
+        key = f"row:{r['tab']}:{r['ID']}"
+        status, deal = _status_of(rec, key)
+        if status != "New" and not (_recent(_received(r.get("Received", "")), today)
+                                    or _recent(rec["processed"].get(key, {}).get("at", ""), today)):
+            continue   # settled long ago: already written back, nothing to change
+        out[r["tab"].lower()].append({"id": r["ID"], "deal": deal, "status": status})
+    return out
+
+
+def write_inbox_status(rec: dict) -> bool:
+    """Write the status file; False (and the old file kept) when the inbox cannot be read or written."""
+    from deal_tracker import inbox as IB
+    if not config.DEAL_INBOX_DIR:
+        return False   # only the machine with the email folder knows the rows; never blank the team's file
+    try:
+        st = inbox_status(rec)
+        INBOX_STATUS_FILE.parent.mkdir(parents=True, exist_ok=True)
+        tmp = INBOX_STATUS_FILE.with_name("~tmp_" + INBOX_STATUS_FILE.name)
+        tmp.write_text(json.dumps(st, indent=1), encoding="utf-8")
+        tmp.replace(INBOX_STATUS_FILE)
+        return True
+    except (IB.InboxUnreadable, OSError) as e:
+        log.warning(f"Could not write the inbox status file: {e}")
+        return False
+
+
 def _file_away(rel: str) -> None:
     """Move a dropped paper into Read/ once recorded. A file open elsewhere stays put (it is marked read)."""
     src = config.DEAL_DROP_DIR / rel
@@ -808,9 +1156,86 @@ def _file_away(rel: str) -> None:
 
 # ─── Recording what a document says ───────────────────────────────────────────
 
+# A sale price is taken only when TWO papers agree (owner, 2026-11-17: "what if the closing papers
+# are wrong too"). The final signed statement is one; the second is the recorded affidavit of
+# property value or deed, or the signed purchase agreement and its latest amendment. Juniper
+# Square's sale "price" is NOT a second paper: it is the gross finished-lot price before the
+# cost-to-complete credit ($14.67M on a sale whose final statement says $6,000,000).
+_ESTIMATE = re.compile(r"\best(imated)?\b", re.I)
+_FINAL = re.compile(r"\bfinal\b", re.I)
+_CHECK_NAME = re.compile(r"affidavit of (property )?value|\bapv\b|\bdeed\b|\bpsa\b|purchase (and sale )?agreement|"
+                         r"\bamendment\b", re.I)
+_NOT_A_CHECK = re.compile(r"deed of trust|\bdraft\b|\bredline\b|\bloi\b", re.I)
+
+
+def is_estimate(name: str) -> bool:
+    """An estimated settlement statement, which may still change before closing."""
+    n = name.replace("_", " ").replace("-", " ")
+    return bool(_ESTIMATE.search(n)) and not _FINAL.search(n)
+
+
+def _sale_hold(ev: dict, check_source: str, check_price) -> str:
+    """Why a sale cannot be recorded yet, or '' when a second paper agrees with the statement."""
+    if ev["price"] is None:
+        return "the statement gives no sales price"
+    other = _num(check_price)
+    if not (check_source or "").strip() or other is None:
+        return ("only one paper gives the price; a second one (the recorded affidavit of value or deed, "
+                "or the signed purchase agreement) is needed")
+    if abs(other - ev["price"]) > 1:
+        return f"{check_source.strip()} gives {plain_money(other)}, the statement gives {plain_money(ev['price'])}"
+    return ""
+
+
+def _add_sale(rec: dict, d: dict, ev: dict, why: str) -> None:
+    d["sales"].append(ev)
+    d["sales"].sort(key=lambda s: s["date"])
+    if ev["date"] and (not d.get("last_sale") or ev["date"] > d["last_sale"]):
+        d["last_sale"] = ev["date"]
+    log_update(rec, d["name"], " ".join(x for x in (
+        "Sold" + (" the last of it" if ev["final"] else " part"),
+        f"{ev['acres']:g} acres" if ev["acres"] else "", f"for {plain_money(ev['price'])}" if ev["price"] else "",
+        f"to {ev['other_party']}" if ev["other_party"] else "", f"on {plain_date(ev['date'])}" if ev["date"] else "") if x),
+        why, ev["source"])
+
+
+def confirm_sale(rec: dict, d: dict, date: str) -> str:
+    """A person checked a held sale: record it as the statement gave it."""
+    held = d.get("held_sales") or []
+    ev = next((h for h in held if h["date"] == date.strip()), None)
+    if ev is None:
+        return "No held sale on that date. Held: " + (", ".join(h["date"] for h in held) or "none")
+    held.remove(ev)
+    ev.pop("held", None)
+    ev["checked_against"] = "confirmed by a person"
+    _add_sale(rec, d, ev, "Closing statement, confirmed by a person")
+    start = f'{d["name"]}: sale on {plain_date(ev["date"])} '
+    rec["attention"] = [a for a in rec.get("attention", []) if not a.startswith(start)]
+    # An emailed statement's row in Ava's workbook goes from Needs a look to Done.
+    questions = rec.setdefault("questions", {})
+    for key in [k for k, q in questions.items() if q.startswith(start)]:
+        if key in rec["processed"]:
+            rec["processed"][key].update({"result": "sale confirmed by a person", "deal": d["id"]})
+        del questions[key]
+    return f"sale on {plain_date(ev['date'])} recorded"
+
+
+def hold_for_question(rec: dict, key: str, d: dict, date: str) -> None:
+    """A held sale's paper is Needs a look, linked to its question, so confirming the sale settles it."""
+    mark_read(rec, key, "needs a look", d["id"])
+    start = f'{d["name"]}: sale on {plain_date(date)} '
+    q = next((a for a in rec.get("attention", []) if a.startswith(start)), None)
+    if q:
+        rec.setdefault("questions", {})[key] = q
+
+
 def record_event(rec: dict, d: dict, kind: str, date: str, price, acres, other_party: str,
-                 final: bool, contributions, distributions, source: str) -> list[str]:
-    """Apply one purchase or sale to a deal. Returns what changed, and any disagreement."""
+                 final: bool, contributions, distributions, source: str,
+                 check_source: str = "", check_price=None) -> list[str]:
+    """Apply one purchase or sale to a deal. Returns what changed, and any disagreement.
+
+    A sale is recorded only when `check_price`, from the second paper `check_source`, agrees
+    with the statement's price; otherwise it is held on the deal for a person (`confirm_sale`)."""
     said = []
     date = (date or "").strip()
     if kind == "purchase":
@@ -838,20 +1263,24 @@ def record_event(rec: dict, d: dict, kind: str, date: str, price, acres, other_p
               "final": bool(final), "source": source}
         # The buyer is part of "the same sale": one property can close twice on one day at one
         # price to two builders (seen on a real two-closing sale, 2026-10-29).
-        if any(s["date"] == ev["date"] and s["price"] == ev["price"]
-               and _tokens(s.get("other_party", "")) == _tokens(ev["other_party"]) for s in d["sales"]):
+        same = lambda s: (s["date"] == ev["date"] and s["price"] == ev["price"]
+                          and _tokens(s.get("other_party", "")) == _tokens(ev["other_party"]))
+        hold = _sale_hold(ev, check_source, check_price)
+        if any(same(s) for s in d["sales"]):
             said.append("sale already recorded")
+        elif hold:
+            ev["held"] = hold
+            held = d.setdefault("held_sales", [])
+            if not any(same(h) for h in held):
+                held.append(ev)
+            _note(rec, f'{d["name"]}: sale on {plain_date(date)} for {plain_money(ev["price"])} ({source}) was not '
+                       f"recorded: {hold}. Once checked, record it with edit_deal_tracker(field='confirm sale', "
+                       f"value='{date}').")
+            said.append(f"sale held for a person ({hold})")
         else:
-            d["sales"].append(ev)
-            d["sales"].sort(key=lambda s: s["date"])
-            if date and (not d.get("last_sale") or date > d["last_sale"]):
-                d["last_sale"] = date
+            ev["checked_against"] = check_source.strip()
+            _add_sale(rec, d, ev, f"Closing statement, checked against {check_source.strip()}")
             said.append("sale added" + (", marked as the final sale" if final else ""))
-            log_update(rec, d["name"], " ".join(x for x in (
-                "Sold" + (" the last of it" if final else " part"),
-                f"{ev['acres']:g} acres" if ev["acres"] else "", f"for {plain_money(ev['price'])}" if ev["price"] else "",
-                f"to {ev['other_party']}" if ev["other_party"] else "", f"on {plain_date(date)}" if date else "") if x),
-                "Closing statement filed", source)
     if kind == "purchase" and any(s.endswith(" set") for s in said):
         log_update(rec, d["name"], " ".join(x for x in (
             "Bought", f"for {plain_money(d['purchase_price'])}" if d.get("purchase_price") else "",

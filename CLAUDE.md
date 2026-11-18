@@ -659,7 +659,7 @@ boundary is "is this your own computer, logged in as you." claude.ai (the web ap
 be used with this server: it runs in the cloud and can only reach a network address, never
 a process on someone's own machine. Claude Desktop or Claude Code are required.
 
-**43 tools.** Don't maintain this list by hand — it drifted to 19 entries with one duplicated
+**44 tools.** Don't maintain this list by hand — it drifted to 19 entries with one duplicated
 and two missing. Get the truth from the code:
 
 ```bash
@@ -692,7 +692,16 @@ live in the team folder, not in code) are recorded there. `check_portfolio_compa
 holds its regression checks; `check_term_sheet_page.py` opens the dashboard in headless Edge.
 **Deal tracker** (`system/deal_tracker/`, built 2026-10-29, not yet shipped) — `open_deal_tracker`,
 `get_deal_tracker_documents`, `save_deal_tracker_update`, `save_deal_pipeline_update`,
-`edit_deal_tracker`, `import_deal_tracker`, `schedule_deal_tracker`. The firm's acquisitions and
+`edit_deal_tracker`, `import_deal_tracker`, `schedule_deal_tracker`, `settle_deal_tracker_question`.
+**The email inbox changed on 2026-11-17** (`deal_tracker/inbox.py`; design in vaulter-copilot's
+`docs/superpowers/specs/2026-11-16-deal-tracker-cowork-design.md`, "The inbox"): Ava's flows save
+attachments, code-named, in `Attachments/` with a row each in `Attachments Log.xlsx`, and add a row
+to `Date Updates.xlsx` (Calendar / Email tabs) for any event or email naming a deal date; a third flow
+copies Deal and Status back from `system/deal_tracker/inbox status.json`. Rows are screened in code
+like files; an email or calendar date REPLACES the tracker's date (owner's rule); what cannot be
+settled is "Needs a look", and settling one keeps a lesson the reading run is given every time.
+Notes below about `.name.txt` and `Calendar - <title>.txt` describe the old layout.
+The firm's acquisitions and
 dispositions: the live pipeline (laid out like the team's own pipeline workbook) and every past
 deal, as `Deal Tracker.html` and `Deal Tracker.xlsx` in the team folder's `Deal Tracker/`, plus a
 `Drop papers here/` folder (2026-11-05) where anyone can hand in a paper by hand, which is moved
@@ -732,6 +741,19 @@ Smartsheet key on a SECOND machine, the daily run's (owner's choice, 2026-11-03)
 must be shared as Viewer with the key's account (only one was, that day). Every change the tracker
 makes now goes into "What changed" (`tracker.log_update`): old to new, and a reason only when a
 paper or a person gave one, never a guess.
+**A sale price needs TWO papers that agree (owner, 2026-11-17).** The final signed statement, plus a
+recorded affidavit of property value or deed, or the signed PSA and its latest amendment
+(`drive_closings` lists these as `checks`, found by name in the property's folder). With no second
+paper, or one that disagrees, `record_event` HOLDS the sale on the deal (`held_sales`) and asks a
+person; `edit_deal_tracker(field='confirm sale')` records it once checked. A sale is never recorded
+from an estimated statement (`is_estimate`). **Juniper Square's sale price is not a second paper**:
+it is the gross finished-lot price before the cost-to-complete credit. Measured on one real sale:
+Juniper Square's figure was about a hundred times the price the final statement and the latest
+amendment both state (real figures stay out of this public file). The recorded affidavits are
+scans, unreadable without OCR, so on a machine without Tesseract the PSA is the working second paper.
+**A DocuSigned scan looked like text and was never scanned (fixed 2026-11-17, `extract._needs_ocr`):**
+the envelope-id stamp is a real text line, so a scanned amendment came back as two ids and a name.
+A page whose text is only e-signature stamps plus under 40 characters is now OCR'd.
 
 **A pending restart is detected and said out loud (`_restart_pending`, 2026-09-01).** Applying an
 update rewrites the `VERSION` file, and `_get_code_version()` reads that file — so between an
