@@ -1238,10 +1238,16 @@ parts; the design, with the reasoning, is `docs/superpowers/specs/2026-11-19-aut
 3. **Chat stays silent, but only where that is verified.** `_auto_update_active()` = Windows, not a
    development copy, and `_RESTART_TASK_OK`: `_ensure_restart_task` reads the existing task and
    re-registers it (`-Force`) when it is missing or differs in runner, script, interval, time limit
-   or logon type (`_task_matches`), and only a verified match makes the install "active". A match
-   is remembered for the day (`data/restart_task.json`), and the check runs in a worker a tool answer
-   waits on for at most 4 s (one query measured 6.2-6.7 s). No `pythonw.exe` means no task (a
-   console would open every 15 minutes). A failed registration is one `log.error` a day, so it
+   or logon type (`_task_matches`; a runner that is any existing pythonw.exe inside this install's
+   folder is accepted, so Claude Desktop and Claude Code on different Pythons do not fight over
+   it), and only a verified match makes the install "active". A match is recorded
+   (`data/restart_task.json`) and trusted at once on later starts on ANY day, re-checked in a
+   background worker once a day (a failed re-check withdraws it). An install never verified waits
+   for the worker at most 4 s (one query measured 6.2-6.7 s), and **until it answers, chat says
+   nothing about updates** (`_update_wording_active`): with a today-only record, the first
+   conversation of every day used to ask the person to install (review I-1). After a match, the
+   branch's old machine-wide task "Vaulter AI - Update restart" is deleted if it runs this
+   install's script. No `pythonw.exe` means no task (a console would open every 15 minutes). A failed registration is one `log.error` a day, so it
    reaches the team without repeating at every start, and that machine keeps the ask-first wording. On active
    installs `check_for_update` says a waiting update "will install automatically; say nothing",
    `check_system_health` raises no update issue, and the one line asking the person to quit and
@@ -1311,7 +1317,7 @@ Known limits: "idle" means no keyboard or mouse, so a long task Claude is runnin
 the restart; the release that carries all this still reaches each teammate the old way, once (they
 say yes and restart), and every update after it is automatic; signing the marker's own fields
 (version, force) in `release.py` is deferred, so someone with write access to the team folder could
-still re-offer an older signed release. `check_auto_update.py` holds the 363 checks.
+still re-offer an older signed release. `check_auto_update.py` holds the 389 checks.
 
 **Every published package is signed, and every instance verifies before trusting a download
 (2026-08-07).** Before this, anyone with write access to the shared OneDrive update folder —
