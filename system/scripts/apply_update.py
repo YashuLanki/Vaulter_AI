@@ -534,16 +534,28 @@ def _norm_cmd(text: str) -> str:
 
 
 def _count_servers(procs: list, main_py: Path, self_pid: int) -> int:
-    """Processes other than self_pid running `main.py mcp` for this install."""
+    """
+    Servers other than this one running `main.py mcp` for this install.
+    procs is (pid, parent_pid, command_line). On Windows a venv's python.exe is
+    a launcher that starts the real interpreter as a child with the same command
+    line, so every server is two matching processes. Only ROOT matches (parent
+    not itself a match) count, and the root of this process's own chain is left
+    out -- otherwise the check would always see itself and never allow an install.
+    """
     target = _norm_cmd(str(main_py))
-    count = 0
-    for pid, cmd in procs:
-        if pid == self_pid or not cmd:
-            continue
-        norm = _norm_cmd(cmd)
+    matching = {}
+    for pid, ppid, cmd in procs:
+        norm = _norm_cmd(cmd or "")
         if target in norm and norm.rstrip().endswith(" mcp"):
-            count += 1
-    return count
+            matching[pid] = ppid
+    roots = {pid for pid, ppid in matching.items() if ppid not in matching}
+    own = self_pid
+    seen = set()
+    while own in matching and matching[own] in matching and own not in seen:
+        seen.add(own)
+        own = matching[own]
+    roots.discard(own)
+    return len(roots)
 
 
 def other_servers_running(project_root: Path) -> bool:
@@ -557,7 +569,7 @@ def other_servers_running(project_root: Path) -> bool:
     out_path = Path(tempfile.gettempdir()) / f"vaulter_procs_{os.getpid()}.json"
     try:
         script = ("Get-CimInstance Win32_Process -Filter \"Name like 'python%'\" | "
-                  "Select-Object ProcessId, CommandLine | ConvertTo-Json -Compress")
+                  "Select-Object ProcessId, ParentProcessId, CommandLine | ConvertTo-Json -Compress")
         with open(out_path, "w", encoding="utf-8") as fh:
             result = subprocess.run(
                 ["powershell", "-NoProfile", "-NonInteractive", "-Command", script],
@@ -569,7 +581,8 @@ def other_servers_running(project_root: Path) -> bool:
         data = json.loads(raw) if raw else []
         if isinstance(data, dict):
             data = [data]
-        procs = [(int(d["ProcessId"]), d.get("CommandLine") or "") for d in data]
+        procs = [(int(d["ProcessId"]), int(d.get("ParentProcessId") or 0),
+                  d.get("CommandLine") or "") for d in data]
         return _count_servers(procs, project_root / "main.py", os.getpid()) > 0
     except Exception:
         return False

@@ -288,13 +288,18 @@ with tempfile.TemporaryDirectory() as t:
           au.recover_unfinished_apply(root) is False)
 
 # --- counting servers ----------------------------------------------------------
-n = au._count_servers(
-    [(1, "python C:\\x\\system\\main.py mcp"), (2, "python C:\\x\\system\\main.py mcp"),
-     (3, "python C:\\y\\system\\main.py mcp")],
-    Path("C:/x/system/main.py"), self_pid=1)
-check("_count_servers counts only others on the same main.py", n == 1, str(n))
-n = au._count_servers([(2, "python C:\\x\\system\\main.py search foo")],
-                      Path("C:/x/system/main.py"), self_pid=1)
+X = Path("C:/x/system/main.py")
+CX = r"python C:\x\system\main.py mcp"
+CY = r"python C:\y\system\main.py mcp"
+n = au._count_servers([(10, 1, CX), (11, 10, CX)], X, self_pid=11)
+check("_count_servers: our own launcher + child count as zero others", n == 0, str(n))
+n = au._count_servers([(10, 1, CX), (11, 10, CX), (20, 1, CX), (21, 20, CX)], X, self_pid=11)
+check("_count_servers: another launcher + child counts once", n == 1, str(n))
+n = au._count_servers([(10, 1, CX), (11, 10, CX), (20, 1, CY), (21, 20, CY)], X, self_pid=11)
+check("_count_servers: a different install's pair is not counted", n == 0, str(n))
+n = au._count_servers([(1, 5, CX), (2, 6, CX)], X, self_pid=1)
+check("_count_servers: single processes without launchers, one other", n == 1, str(n))
+n = au._count_servers([(2, 1, r"python C:\x\system\main.py search foo")], X, self_pid=1)
 check("_count_servers ignores non-mcp commands", n == 0, str(n))
 check("other_servers_running returns a bool on a real tree",
       isinstance(au.other_servers_running(PROJECT_ROOT), bool))
