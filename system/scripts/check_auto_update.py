@@ -403,6 +403,111 @@ check("project_root-derived paths equal config's",
       and PROJECT_ROOT / "data" / "apply_in_progress.json" == config.APPLY_IN_PROGRESS_FILE
       and PROJECT_ROOT / "data" == config.DATA_DIR)
 
+# =============================================================================
+print("\n2. Install at startup")
+import ast  # noqa: E402
+import contextlib  # noqa: E402
+import io  # noqa: E402
+import re  # noqa: E402
+import subprocess  # noqa: E402
+import types  # noqa: E402
+
+_main_src = (PROJECT_ROOT / "main.py").read_text(encoding="utf-8")
+_fn_node = next((n for n in ast.parse(_main_src).body
+                 if isinstance(n, ast.FunctionDef) and n.name == "_auto_install_at_startup"), None)
+check("main.py defines _auto_install_at_startup", _fn_node is not None)
+
+_calls = []
+
+
+def _fake_run(cmd, **kw):
+    _calls.append((cmd, kw))
+    return types.SimpleNamespace(returncode=0)
+
+
+def _sub(run):
+    return types.SimpleNamespace(run=run, DEVNULL=subprocess.DEVNULL, STDOUT=subprocess.STDOUT,
+                                 TimeoutExpired=subprocess.TimeoutExpired)
+
+
+_ns = {"subprocess": _sub(_fake_run), "sys": sys, "Path": Path}
+if _fn_node is not None:
+    exec(compile(ast.Module(body=[_fn_node], type_ignores=[]), "main.py", "exec"), _ns)
+_fn = _ns.get("_auto_install_at_startup")
+
+if _fn:
+    with tempfile.TemporaryDirectory() as t:
+        sd = Path(t) / "system"
+        (sd / "data").mkdir(parents=True)
+        _calls.clear()
+        _fn(sd)
+        check("startup: nothing staged -> subprocess never called", _calls == [])
+
+        (sd / "data" / "pending_update").mkdir()
+        (sd / "data" / "pending_update" / "ready.json").write_text("{}")
+        _calls.clear()
+        _fn(sd)
+        c = _calls[0] if len(_calls) == 1 else None
+        check("startup: ready.json -> called once", c is not None, str(len(_calls)))
+        if c:
+            cmd, kw = c
+            check("startup: runs apply_update.py --auto --startup with this interpreter",
+                  str(cmd[0]) == sys.executable and Path(str(cmd[1])) == sd / "scripts" / "apply_update.py"
+                  and "--auto" in cmd and "--startup" in cmd, str(cmd))
+            check("startup: stdin DEVNULL, no pipes, timeout 120, cwd is the system dir",
+                  kw.get("stdin") == subprocess.DEVNULL and kw.get("timeout") == 120
+                  and str(kw.get("cwd")) == str(sd) and "capture_output" not in kw
+                  and kw.get("stdout") is not subprocess.PIPE, str(kw))
+            check("startup: output goes to a file, data/logs/auto_install.txt",
+                  (sd / "data" / "logs" / "auto_install.txt").exists())
+
+        (sd / "data" / "pending_update" / "ready.json").unlink()
+        (sd / "data" / "apply_in_progress.json").write_text("{}")
+        _calls.clear()
+        _fn(sd)
+        check("startup: apply_in_progress.json alone also triggers it", len(_calls) == 1)
+
+        def _boom(cmd, **kw):
+            raise OSError("no such thing")
+        _ns["subprocess"] = _sub(_boom)
+        buf = io.StringIO()
+        try:
+            with contextlib.redirect_stdout(buf):
+                _fn(sd)
+            raised = False
+        except BaseException:
+            raised = True
+        check("startup: a failing subprocess.run does not propagate", not raised)
+        check("startup: never writes to stdout", buf.getvalue() == "", repr(buf.getvalue()))
+
+_call_at = _main_src.find("_auto_install_at_startup(Path(__file__).parent)")
+check("main.py calls it before importing config",
+      _call_at != -1 and _call_at < _main_src.find("from config import LOG_DIR"))
+check("main.py calls it only for the mcp command",
+      re.search(r'sys\.argv\[1\] == "mcp"[^\n]*:\s*\n\s*_auto_install_at_startup', _main_src) is not None)
+
+# --- the CLI logs errors where the team's error reports look ---------------------
+with tempfile.TemporaryDirectory() as t:
+    root = make_tree(Path(t))
+
+    def breaks2(project_root):
+        raise RuntimeError("boom")
+
+    out = io.StringIO()
+    with Stub(breaks2), contextlib.redirect_stdout(out):
+        au._auto_cli(False, root)
+    logf = root / "data" / "logs" / "vaulter.log"
+    text = logf.read_text(encoding="utf-8") if logf.exists() else ""
+    check("CLI: failed install writes data/logs/vaulter.log", logf.exists())
+    check("CLI: an [ERROR] line in the report format",
+          re.search(r"^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d,\d{3}  \[ERROR\]  .*automatic update", text, re.M)
+          is not None, text[:200])
+    check("CLI: no separate auto_update.log", not (root / "data" / "logs" / "auto_update.log").exists())
+    check("CLI: still prints one line", len(out.getvalue().strip().splitlines()) == 1, out.getvalue())
+    check("CLI: its file handler is removed afterwards",
+          not any(isinstance(h, logging.FileHandler) for h in logging.getLogger().handlers))
+
+
 failed = [r for r in RESULTS if not r[1]]
 print(f"\n{len(RESULTS) - len(failed)} passed, {len(failed)} failed")
 sys.exit(1 if failed else 0)

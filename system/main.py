@@ -21,6 +21,7 @@ along with the pipelines behind them. See docs/REBUILD_PLAN.md.
 import os
 import sys
 import logging
+import subprocess
 import logging.handlers  # submodule: `import logging` alone does NOT expose this
 from pathlib import Path
 
@@ -39,6 +40,32 @@ for _stream in (sys.stdout, sys.stderr):
         _stream.reconfigure(encoding="utf-8", errors="replace")
     except Exception:
         pass
+
+def _auto_install_at_startup(system_dir: Path) -> None:
+    """Install a staged update BEFORE anything of ours is imported, so the server
+    then loads only the new code. Runs the installer in a separate process (a
+    file for output, never pipes; stdin closed). Never raises, never prints:
+    stdout is the MCP pipe."""
+    try:
+        data = system_dir / "data"
+        if not ((data / "pending_update" / "ready.json").exists()
+                or (data / "apply_in_progress.json").exists()):
+            return
+        logs = data / "logs"
+        logs.mkdir(parents=True, exist_ok=True)
+        with open(logs / "auto_install.txt", "ab") as out:
+            subprocess.run(
+                [sys.executable, str(system_dir / "scripts" / "apply_update.py"),
+                 "--auto", "--startup"],
+                stdin=subprocess.DEVNULL, stdout=out, stderr=subprocess.STDOUT,
+                timeout=120, cwd=str(system_dir))
+    except BaseException:
+        pass
+
+
+if len(sys.argv) > 1 and sys.argv[1] == "mcp":
+    _auto_install_at_startup(Path(__file__).parent)
+
 
 # ─── Lock working directory to project root ───────────────────────
 os.chdir(str(Path(__file__).parent))

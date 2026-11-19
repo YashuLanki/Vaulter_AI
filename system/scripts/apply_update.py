@@ -838,20 +838,37 @@ def main() -> None:
     print("Done. Fully quit and reopen Claude Desktop for the new code to take effect.")
 
 
-def _auto_cli(startup: bool) -> None:
-    """`--auto [--startup]`: recover, then install if safe. One line, exit 0."""
+def _auto_cli(startup: bool, project_root: Path | None = None) -> None:
+    """`--auto [--startup]`: recover, then install if safe. One line, exit 0.
+
+    Logs to data/logs/vaulter.log in the server's own format, because the team's
+    error reports scan that file for [ERROR] lines. A plain append handler: the
+    server's rotating handler owns rotation and has not opened the log yet.
+    """
+    if project_root is None:
+        project_root = PROJECT_ROOT
+    handler = None
+    root_logger = logging.getLogger()
+    old_level = root_logger.level
     try:
-        logs = PROJECT_ROOT / "data" / "logs"
+        logs = project_root / "data" / "logs"
         logs.mkdir(parents=True, exist_ok=True)
-        logging.basicConfig(filename=str(logs / "auto_update.log"), level=logging.INFO,
-                            format="%(asctime)s %(message)s")
-        recovered = recover_unfinished_apply()
-        r = auto_apply(at_startup=startup)
+        handler = logging.FileHandler(logs / "vaulter.log", encoding="utf-8")
+        handler.setFormatter(logging.Formatter("%(asctime)s  [%(levelname)s]  %(message)s"))
+        root_logger.addHandler(handler)
+        root_logger.setLevel(logging.INFO)
+        recovered = recover_unfinished_apply(project_root)
+        r = auto_apply(project_root, at_startup=startup)
         extra = " (previous version put back after an unfinished apply)" if recovered else ""
         print(f"auto-update: applied={r['applied']} version={r['version'] or '-'} "
               f"restored={r['restored']} {r['reason']}{extra}".strip())
     except Exception as e:
         print(f"auto-update: error {e}")
+    finally:
+        if handler is not None:
+            root_logger.removeHandler(handler)
+            handler.close()
+        root_logger.setLevel(old_level)
 
 
 if __name__ == "__main__":
