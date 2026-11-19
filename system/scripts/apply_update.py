@@ -101,7 +101,9 @@ def _sync_tree(project_root: Path, src_dir: Path) -> tuple[int, int]:
 
     # Step 2: copy every file from the new version into place.
     updated = 0
-    for rel in new_files:
+    # VERSION goes LAST, so a VERSION that already changed means every other
+    # file was copied before it.
+    for rel in sorted(new_files, key=lambda r: r == Path("VERSION")):
         src = src_dir / rel
         dest = project_root / rel
         dest.parent.mkdir(parents=True, exist_ok=True)
@@ -639,12 +641,14 @@ def _discard_backup(dest: Path, marker: Path) -> None:
         pass
 
 
-def _backup_is_usable(dest: Path, marker: Path, current_version: str) -> bool:
-    """Complete (marker present, file count matches) and made from the version
-    now installed -- a backup of some older tree must not be put over a newer one."""
+def _backup_is_usable(dest: Path, marker: Path, current_version: str, target_version: str) -> bool:
+    """Complete (marker present, file count matches) and the tree is either still
+    on the version the backup was made from, or already on the update's target
+    (a half-applied tree has copied the new VERSION). Any OTHER running version
+    means the machine moved on, and a backup of an older tree must not go over it."""
     try:
         info = json.loads(marker.read_text(encoding="utf-8"))
-        if not dest.is_dir() or info.get("source_version") != current_version:
+        if not dest.is_dir() or current_version not in (info.get("source_version"), target_version):
             return False
         return sum(1 for p in dest.rglob("*") if p.is_file()) == info.get("files")
     except Exception:
@@ -781,7 +785,7 @@ def recover_unfinished_apply(project_root: Path | None = None) -> bool:
             return False
         backup = _backup_dir(project_root, str(version))
         marker = _marker_path(project_root, str(version))
-        if not _backup_is_usable(backup, marker, running_version(project_root)):
+        if not _backup_is_usable(backup, marker, running_version(project_root), str(version)):
             return False
         _sync_tree(project_root, backup)
         _discard_backup(backup, marker)

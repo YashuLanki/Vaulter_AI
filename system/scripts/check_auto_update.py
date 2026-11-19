@@ -285,6 +285,38 @@ with tempfile.TemporaryDirectory() as t:
     check("recover: marker but no backup restores nothing",
           au.recover_unfinished_apply(root) is False)
 
+# --- recovery of a half-applied tree whose VERSION was already copied -------------
+with tempfile.TemporaryDirectory() as t:
+    root = make_tree(Path(t))
+    before = snapshot(root)
+    au._backup_tree(root, root / "data" / "backups" / "pre_update_2.0",
+                    au._marker_path(root, "2.0"), "1.0")
+    (root / "data" / "apply_in_progress.json").write_text(json.dumps({"version": "2.0"}))
+    (root / "VERSION").write_text("2.0")
+    (root / "a.py").write_text("half written")
+    (root / "sub" / "b.py").unlink()
+    check("recover: a tree already on the target VERSION is still rescued",
+          au.recover_unfinished_apply(root) is True)
+    check("recover: ...and every original file is sha256-identical", snapshot(root) == before)
+with tempfile.TemporaryDirectory() as t:
+    root = make_tree(Path(t))
+    au._backup_tree(root, root / "data" / "backups" / "pre_update_2.0",
+                    au._marker_path(root, "2.0"), "1.0")
+    (root / "data" / "apply_in_progress.json").write_text(json.dumps({"version": "2.0"}))
+    (root / "VERSION").write_text("3.0")
+    check("recover: a tree on some OTHER version is left alone",
+          au.recover_unfinished_apply(root) is False and (root / "VERSION").read_text() == "3.0")
+with tempfile.TemporaryDirectory() as t:
+    root = make_tree(Path(t))
+    order = []
+    real_copy2 = __import__("shutil").copy2
+    __import__("shutil").copy2 = lambda src, dst, *a, **k: (order.append(Path(dst).name), real_copy2(src, dst, *a, **k))[1]
+    try:
+        au.apply_update(root, root / "data" / "pending_update" / "u.zip")
+    finally:
+        __import__("shutil").copy2 = real_copy2
+    check("_sync_tree copies VERSION last", order and order[-1] == "VERSION", str(order))
+
 # --- a bad backup is never restored --------------------------------------------
 import shutil  # noqa: E402
 with tempfile.TemporaryDirectory() as t:
