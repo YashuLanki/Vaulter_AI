@@ -2049,6 +2049,100 @@ with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as t:
     check("6.15 a rollback (older version, staged while 1.0 ran) installs automatically", r["applied"] is True,
           r["reason"])
 
+# --- 6.16 the restart task --------------------------------------------------------------------
+if ar is not None:
+    ORPHAN = row(900, 777, STORE_EXE, "2026-11-18T07:00:00.0000000-07:00", "renderer")
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as t:
+        root = restart_tree(Path(t))
+        env = Env(procs=DESKTOP_ROWS + [ORPHAN] + CLI_ROWS, after_kill=[ORPHAN] + CLI_ROWS)
+        ar.main([], project_root=root, ops=env.ops())
+        check("6.16 an orphaned Desktop helper outside the main's tree does not block the install",
+              "auto_apply" in env.names(), str(env.names()))
+    NEW_MAIN = row(990, 1, STORE_EXE, "2026-11-19T09:30:00.0000000-07:00")
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as t:
+        root = restart_tree(Path(t))
+        env = Env(after_kill=[NEW_MAIN] + CLI_ROWS)
+        ar.main([], project_root=root, ops=env.ops())
+        check("6.16 the person reopened Claude during the wait: nothing installed under it, no relaunch",
+              "auto_apply" not in env.names() and "relaunch" not in env.names()
+              and ERROR_LINE.search(read(root / VLOG)) is None, str(env.names()))
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as t:
+        root = restart_tree(Path(t))
+        env = Env(appears=False)
+        ar.main([], project_root=root, ops=env.ops())
+        relaunches = [c for c in env.calls if c[0] == "relaunch"]
+        vt = read(root / VLOG)
+        check("6.16 relaunch 'succeeds' but Claude never appears: tried again, then one [ERROR]",
+              len(relaunches) == 2 and len(ERROR_LINE.findall(vt)) == 1 and "reopen" in vt, f"{relaunches} {vt}")
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as t:
+        root = restart_tree(Path(t))
+        env = Env()
+        ar.main([], project_root=root, ops=env.ops())
+        check("6.16 a normal restart confirms Claude came back and logs no [ERROR]",
+              read(root / VLOG) == "" and "reopened: yes" in read(root / RLOG), read(root / RLOG))
+    _stub = r"C:\Users\x\AppData\Local\AnthropicClaude\claude.exe"
+    _rcp = inspect.signature(ar.relaunch_command).parameters
+    _got = (ar.relaunch_command(CLASSIC_EXE, [], exists=lambda p_: str(p_).lower() == _stub.lower())
+            if "exists" in _rcp else None)
+    check("6.16 a classic install is reopened through its stable launcher (survives a Squirrel update)",
+          _got == [_stub], str(_got))
+
+    # broken or set-aside stages never restart Claude
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as t:
+        root = restart_tree(Path(t))
+        (root / "data" / "pending_update" / "u.zip").unlink()
+        env = Env()
+        ar.main([], project_root=root, ops=env.ops())
+        check("6.16 staged zip missing: Claude is not restarted for it, and the record is cleared",
+              "taskkill" not in env.names()
+              and not (root / "data" / "pending_update" / "ready.json").exists(), str(env.names()))
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as t:
+        root = restart_tree(Path(t))
+        (root / "data" / "pending_update" / "u.zip").write_bytes(b"PK\x03\x04 not a zip")
+        env = Env()
+        ar.main(["--dry-run", "--ignore-idle"], project_root=root, ops=env.ops())
+        check("6.16 corrupt staged zip, dry run: would not restart, and changes nothing",
+              "would restart" not in read(root / RLOG)
+              and (root / "data" / "pending_update" / "ready.json").exists(), read(root / RLOG))
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as t:
+        root = restart_tree(Path(t))
+        (root / "data" / "update_failures.json").write_text(json.dumps(
+            {"2.0": {"failures": 2, "set_aside": True, "signature": ""}}))
+        env = Env()
+        ar.main([], project_root=root, ops=env.ops())
+        check("6.16 a set-aside version: Claude is not restarted for it", "taskkill" not in env.names())
+
+    # one unexpected-error [ERROR] a day, not one every 15 minutes
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as t:
+        root = restart_tree(Path(t))
+        for _ in range(3):
+            env = Env()
+            ops = env.ops()
+            ops["list_processes"] = lambda: (_ for _ in ()).throw(RuntimeError("WMI broken"))
+            ar.main([], project_root=root, ops=ops)
+        check("6.16 the same unexpected failure three runs running: one [ERROR], not three",
+              len(ERROR_LINE.findall(read(root / VLOG))) == 1, read(root / VLOG))
+
+    # just woke from sleep: idle time from before the sleep does not count
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as t:
+        root = restart_tree(Path(t))
+        ar.main([], project_root=root, ops=Env(idle=0.0, slept=100.0).ops())   # before the sleep, in use
+        env = Env(idle=8 * 3600.0, slept=100.0 + 8 * 3600)   # woke after a night asleep
+        ar.main([], project_root=root, ops=env.ops())
+        check("6.16 the first run after waking from sleep does not restart Claude",
+              "taskkill" not in env.names() and "sleep" in read(root / RLOG), read(root / RLOG))
+        env = Env(idle=1200.0, slept=100.0 + 8 * 3600)      # 15 minutes later, still away
+        ar.main([], project_root=root, ops=env.ops())
+        check("6.16 ...the next run, still away, does", ("taskkill", 34004) in env.calls, str(env.names()))
+
+    # corrupt counts never allow a loop
+    check("6.16 a negative restart count (hand-edited) does not allow restarts",
+          ar.may_restart({"2.0": {"restarts": -5}}, "2.0") is False)
+    _ift = getattr(ar, "idle_from_ticks", None)
+    check("6.16 idle time across the 49.7-day tick wrap",
+          _ift is not None and _ift(2 ** 32 + 5000, 2 ** 32 - 10000) == 15.0
+          and _ift(10 ** 6, 4000) == 996.0, "")
+
 # --- 6.18 main.py's startup log does not grow without limit --------------------------------------
 if _fn:
     _ns["subprocess"] = _sub(_fake_run)

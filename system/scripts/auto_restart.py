@@ -4,9 +4,9 @@ auto_restart.py
 Restart Claude Desktop when an update is owed and the person has been away for
 15 minutes, so a new version takes effect with nothing for them to do.
 
-Run every 15 minutes by the Windows scheduled task "Vaulter AI - Update restart"
-(pythonw.exe, as the logged-on user, so there is no console: nothing here depends
-on print). Design: docs/superpowers/specs/2026-11-19-auto-update-restart-design.md,
+Run every 15 minutes by the Windows scheduled task "Vaulter AI - Update restart
+(<user>)" (pythonw.exe, as the logged-on user, so there is no console: nothing
+here depends on print). Design: docs/superpowers/specs/2026-11-19-auto-update-restart-design.md,
 "Part 2" and "Decisions after the builder check".
 
     python scripts/auto_restart.py [--dry-run] [--ignore-idle]
@@ -33,8 +33,18 @@ Claude Desktop is stopped:
   8. is there a way to reopen it? if not, it is not closed;
   9. list the processes again and stop only if the same process (pid AND start
      time) is still Desktop's; count the restart, stop Desktop's process tree,
-     wait (30 s of wall time) for it to go, install (after recovering any
-     unfinished install), reopen it the way it was installed.
+     wait (30 s of wall time) for THAT tree to go (an orphaned helper from an
+     older Desktop is not waited for), install (after recovering any
+     unfinished install), reopen it the way it was installed, and confirm it
+     came back (60 s, one more try, then an [ERROR]).
+
+Hardening pass (2026-11-19, check_auto_update.py section 6): a staged package
+that is missing or unusable never restarts Claude (it is thrown away, so the
+channel check fetches it again), nor does a version set aside after failing to
+install twice; the first run after the computer wakes from sleep does not count
+the idle time from before the sleep; if the person opens Claude while it is
+closed for an install, nothing is installed under it; the same unexpected error
+reaches the team once a day, not every 15 minutes.
 
 Every path derives from the `system` folder (overridable for checks):
 data/auto_restart.json (state), data/logs/auto_restart.txt (one line per run
@@ -67,6 +77,8 @@ import apply_update as au  # noqa: E402
 IDLE_SECONDS_NEEDED = 900
 RESTART_LIMIT = 2
 EXIT_WAIT_SECONDS = 30
+REOPEN_WAIT_SECONDS = 60             # how long a reopened Desktop has to show up, per try
+WOKE_SLEEP_SECONDS = 60              # asleep longer than this since the last run = "just woke"
 LOG_FORMAT = "%(asctime)s  [%(levelname)s]  %(message)s"   # what the error reports scan for
 _LOG_MAX_BYTES = 256 * 1024
 _NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)      # pythonw must not flash consoles
@@ -135,11 +147,14 @@ def desktop_root(procs: list) -> dict | None:
     return mains[0] if len(mains) == 1 else None
 
 
-def relaunch_command(exe_path: str, start_apps: list) -> list:
+def relaunch_command(exe_path: str, start_apps: list, exists=os.path.exists) -> list:
     """How to reopen Desktop the way it was installed. A Store install through its
     Start menu entry (the one named exactly "Claude" whose AppID belongs to the
-    package family in the path, Claude_<publisher>); a classic install by its own
-    executable; [] when neither is known, in which case Desktop is not closed."""
+    package family in the path, Claude_<publisher>); a classic install through
+    its stable launcher (AnthropicClaude\\claude.exe, which starts the newest
+    app-<version> folder, so a Desktop that updated itself while closed still
+    opens), else its own executable; [] when neither is known, in which case
+    Desktop is not closed."""
     if not is_desktop_exe(exe_path):
         return []
     p = _norm(exe_path)
@@ -156,6 +171,10 @@ def relaunch_command(exe_path: str, start_apps: list) -> list:
                 return ["explorer.exe", "shell:AppsFolder\\" + app_id]
         return []
     if "\\anthropicclaude\\" in p:
+        cut = p.index("\\anthropicclaude\\") + len("\\anthropicclaude\\")
+        stub = str(exe_path).replace("/", "\\")[:cut] + "claude.exe"
+        if _norm(stub) != p and exists(stub):
+            return [stub]
         return [exe_path]
     return []
 
@@ -184,9 +203,10 @@ def may_restart(state: dict, version: str, limit: int = RESTART_LIMIT) -> bool:
     if entry.get("gave_up"):
         return False
     try:
-        return int(entry.get("restarts", 0) or 0) < limit
+        n = int(entry.get("restarts", 0) or 0)
     except (TypeError, ValueError):
         return False      # an unreadable count must not allow a loop
+    return 0 <= n < limit  # nor a negative one (only a hand edit makes one)
 
 
 def record_restart(state: dict, version: str) -> dict:
@@ -196,6 +216,8 @@ def record_restart(state: dict, version: str) -> dict:
     try:
         n = int(entry.get("restarts", 0) or 0)
     except (TypeError, ValueError):
+        n = RESTART_LIMIT
+    if n < 0:
         n = RESTART_LIMIT
     new[version] = {"restarts": n + 1, "gave_up": bool(entry.get("gave_up", False))}
     if "gave_up_at" in entry:
@@ -250,11 +272,33 @@ def idle_seconds() -> float:
         if not u32.GetLastInputInfo(ctypes.byref(info)):
             return 0.0
         k32.GetTickCount64.restype = ctypes.c_ulonglong
-        now = k32.GetTickCount64()
-        # dwTime is the 32-bit tick count, which wraps every 49.7 days.
-        return float(((now & 0xFFFFFFFF) - info.dwTime) & 0xFFFFFFFF) / 1000.0
+        return idle_from_ticks(k32.GetTickCount64(), info.dwTime)
     except Exception:
         return 0.0
+
+
+def idle_from_ticks(now_ms: int, last_input_ms: int) -> float:
+    """Seconds from the last input to now. last_input_ms is GetLastInputInfo's
+    32-bit tick count, which wraps every 49.7 days; now_ms the 64-bit count."""
+    return float(((int(now_ms) & 0xFFFFFFFF) - int(last_input_ms)) & 0xFFFFFFFF) / 1000.0
+
+
+def slept_seconds():
+    """Seconds this computer has spent asleep or hibernating since it started:
+    the tick count (which idle time is measured in) includes sleep, the unbiased
+    interrupt time does not. None off Windows or on any failure."""
+    if sys.platform != "win32":
+        return None
+    try:
+        k32 = ctypes.WinDLL("kernel32")
+        k32.GetTickCount64.restype = ctypes.c_ulonglong
+        ticks = k32.GetTickCount64()
+        unbiased = ctypes.c_ulonglong(0)
+        if not k32.QueryUnbiasedInterruptTime(ctypes.byref(unbiased)):
+            return None
+        return max(0.0, ticks / 1000.0 - unbiased.value / 1e7)
+    except Exception:
+        return None
 
 
 # ---------------------------------------------------------------------------
@@ -272,7 +316,7 @@ def _powershell_json(script: str, timeout: int = 30):
     try:
         with open(out, "w", encoding="utf-8") as fh:
             result = subprocess.run(
-                ["powershell", "-NoProfile", "-NonInteractive", "-Command",
+                [au.powershell_exe(), "-NoProfile", "-NonInteractive", "-Command",
                  "[Console]::OutputEncoding = [Text.Encoding]::UTF8; " + script],
                 stdin=subprocess.DEVNULL, stdout=fh, stderr=subprocess.DEVNULL,
                 timeout=timeout, creationflags=_NO_WINDOW,
@@ -373,6 +417,7 @@ DEFAULT_OPS = {
     "taskkill": _taskkill,
     "relaunch": _relaunch,
     "idle_seconds": idle_seconds,
+    "slept_seconds": slept_seconds,
     "channel_check": _channel_check,
     "recover": au.recover_unfinished_apply,
     "auto_apply": au.auto_apply,
@@ -446,6 +491,109 @@ def _error(root: Path, message: str) -> None:
         pass
 
 
+def _error_daily(root: Path, key: str, message: str) -> None:
+    """_error, at most once a day per key: a fault that repeats every 15 minutes
+    (WMI broken, a disk full) would otherwise fill the team's error reports."""
+    path = root / "data" / "logs" / "auto_restart_errors.json"
+    today = datetime.now().strftime("%Y-%m-%d")
+    try:
+        seen = json.loads(path.read_text(encoding="utf-8"))
+        seen = seen if isinstance(seen, dict) else {}
+    except Exception:
+        seen = {}
+    if seen.get(key) == today:
+        return
+    _error(root, message)
+    seen[key] = today
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(seen), encoding="utf-8")
+    except OSError:
+        pass
+
+
+def _just_woke(root: Path, ops: dict, dry: bool) -> bool:
+    """True when the computer slept since the previous run that got this far.
+    Idle time is counted in ticks, which run on through sleep, so a laptop opened
+    after a night shut reads as idle for hours at the very moment its owner sits
+    down. Such a run waits for the next one. Records the current figure (never in
+    a dry run). False whenever it cannot tell."""
+    try:
+        slept = ops["slept_seconds"]()
+    except Exception:
+        return False
+    if slept is None:
+        return False
+    path = root / "data" / "auto_restart_clock.json"
+    try:
+        prev = float(json.loads(path.read_text(encoding="utf-8")).get("slept"))
+    except Exception:
+        prev = None
+    if not dry:
+        try:
+            path.write_text(json.dumps({"slept": slept}), encoding="utf-8")
+        except OSError:
+            pass
+    return prev is not None and float(slept) - prev > WOKE_SLEEP_SECONDS
+
+
+def _key(proc: dict) -> tuple:
+    return _int(proc.get("ProcessId")), str(proc.get("CreationDate") or "")
+
+
+def tree_keys(procs: list, root: dict) -> set:
+    """(pid, start time) of root and every process descended from it in procs. A
+    'child' that started before its parent is an orphan whose dead parent's pid
+    was reused, and is not part of the tree."""
+    by_parent = {}
+    for p in procs or []:
+        if isinstance(p, dict):
+            by_parent.setdefault(_int(p.get("ParentProcessId")), []).append(p)
+    keys, todo = set(), [root]
+    while todo:
+        cur = todo.pop()
+        k = _key(cur)
+        if k in keys:
+            continue
+        keys.add(k)
+        started = _iso_to_epoch(cur.get("CreationDate"))
+        for child in by_parent.get(k[0], []):
+            c_started = _iso_to_epoch(child.get("CreationDate"))
+            if started is None or c_started is None or c_started >= started:
+                todo.append(child)
+    return keys
+
+
+def _reopen(ops: dict, cmd: list):
+    """Start Desktop and confirm it shows up: True / False, or None when the
+    process list could not be read at all (cannot tell). One more start if it
+    does not appear within REOPEN_WAIT_SECONDS: explorer.exe returns at once
+    whether or not the app it was asked for ever opens."""
+    could_tell = False
+    started_once = False
+    for _ in range(2):
+        try:
+            started = bool(ops["relaunch"](cmd))
+        except Exception:
+            started = False
+        if not started:
+            continue
+        started_once = True
+        deadline = ops["monotonic"]() + REOPEN_WAIT_SECONDS
+        while True:
+            rows = ops["list_processes"]()
+            if rows is not None:
+                could_tell = True
+                if desktop_mains(rows):
+                    return True
+            if ops["monotonic"]() >= deadline:
+                break
+            ops["sleep"](2)
+    if started_once and not could_tell:
+        return None
+    return False
+
+
 @contextlib.contextmanager
 def _vaulter_log(root: Path):
     """Route log records (the install's and the channel check's) into vaulter.log
@@ -490,7 +638,8 @@ def main(argv: list, *, project_root: Path | None = None, ops: dict | None = Non
     except Exception as e:
         say(f"stopped by an unexpected error ({type(e).__name__})")
         if not dry:
-            _error(root, f"the automatic restart check stopped with an unexpected error "
+            _error_daily(root, f"unexpected {type(e).__name__}",
+                         f"the automatic restart check stopped with an unexpected error "
                          f"({type(e).__name__})")
         return 1
 
@@ -515,6 +664,26 @@ def _run(root: Path, ops: dict, dry: bool, ignore_idle: bool, say) -> int:
     except Exception:
         pending = None
     running = au.running_version(root)
+    # A stage that cannot be installed must never close Claude: decided here,
+    # before anything is stopped, by the installer's own rules.
+    staged_v = au.staged_update_applicable(pending, running, root / "data") if pending else ""
+    if not staged_v:
+        pending = None                  # nothing, superseded, or set aside after failing
+    else:
+        problem = au.stage_problem(root / "data", pending, staged_v)
+        if problem:
+            say(f"update {staged_v} is staged but its package is "
+                f"{'missing' if problem == 'missing' else 'unusable'}, so Claude is not restarted "
+                f"for it" + ("" if dry else "; it will be downloaded again"))
+            if not dry:
+                with _vaulter_log(root):
+                    au.discard_stage(root / "data", pending)
+                    if problem != "missing":
+                        _error(root, f"the staged package for update {staged_v} was unusable; it "
+                                     f"was thrown away and will be downloaded again")
+                        au.set_aside_after_failure(root / "data", pending, staged_v,
+                                                   "its package was unusable")
+            pending = None
     try:
         version_mtime = (root / "VERSION").stat().st_mtime
     except OSError:
@@ -554,6 +723,10 @@ def _run(root: Path, ops: dict, dry: bool, ignore_idle: bool, say) -> int:
             f"so they start again")
 
     if not ignore_idle:
+        if _just_woke(root, ops, dry):
+            say(f"update {version} is waiting; the computer has just woken from sleep, so its "
+                f"idle time does not count yet, trying again next run")
+            return 0
         idle = float(ops["idle_seconds"]())
         if idle < IDLE_SECONDS_NEEDED:
             say(f"update {version} is waiting; the computer is in use (idle {int(idle)} of "
@@ -604,27 +777,50 @@ def _run(root: Path, ops: dict, dry: bool, ignore_idle: bool, say) -> int:
     # so the loop guard holds whatever happens next.
     _write_state(root, record_restart(state, version))
 
-    reopened = False
+    # Only THIS Desktop's tree is waited for. Waiting for every Desktop
+    # executable meant an orphaned helper left by an older Desktop (its main long
+    # gone) kept the install from ever happening.
+    main_row = next(p for p in again if isinstance(p, dict) and _int(p.get("ProcessId")) == pid
+                    and p.get("CreationDate") == desk.get("CreationDate"))
+    main_key = _key(main_row)
+    tree = tree_keys(again, main_row)
+    tree_desktop = {_key(p) for p in again if isinstance(p, dict) and _key(p) in tree
+                    and is_desktop_exe(p.get("ExecutablePath"))}
+
     outcome = "not installed"
+    reopen_needed = True
     try:
         ops["taskkill"](pid)
         # Wall time, not a count of sleeps: each listing is a PowerShell run that
         # can take seconds, and the task's own time limit must never be reached
         # with Desktop closed.
         gone = False
+        rows = None
         deadline = ops["monotonic"]() + EXIT_WAIT_SECONDS
         while True:
             rows = ops["list_processes"]()
-            if rows is not None and not desktop_processes(rows):
+            if rows is not None and not any(isinstance(p, dict) and _key(p) in tree_desktop
+                                            for p in rows):
                 gone = True
                 break
             if ops["monotonic"]() >= deadline:
                 break
             ops["sleep"](1)
+        reopened_meanwhile = gone and any(_key(p) not in tree for p in desktop_mains(rows))
         if not gone:
             outcome = "not installed, Claude Desktop did not close"
+            # Reopen unless its main process is still there: helpers hanging on
+            # alone leave no app to come back to, and when the list could not be
+            # read at all, a reopen of a running Desktop only brings it forward.
+            reopen_needed = rows is None or not any(
+                isinstance(p, dict) and _key(p) == main_key for p in rows)
             _error(root, f"Claude Desktop did not close within {EXIT_WAIT_SECONDS} seconds for "
                          f"update {version}; nothing was installed")
+        elif reopened_meanwhile:
+            # The person came back and opened it while it was closed: installing
+            # now would change files under its new server. The next idle run will.
+            outcome = "not installed, Claude Desktop was opened again meanwhile"
+            reopen_needed = False
         else:
             with _vaulter_log(root):
                 recovered = ops["recover"](root)
@@ -640,15 +836,16 @@ def _run(root: Path, ops: dict, dry: bool, ignore_idle: bool, say) -> int:
             if recovered:
                 outcome += ", an earlier unfinished install was undone first"
     finally:
-        try:
-            reopened = bool(ops["relaunch"](cmd))
-        except Exception:
-            reopened = False
-        if not reopened:
-            _error(root, f"Claude Desktop was closed to load update {version} but could not be "
-                         f"reopened; open it by hand")
+        if not reopen_needed:
+            reopened_text = "not needed, it is running"
+        else:
+            reopened = _reopen(ops, cmd)
+            if reopened is False:
+                _error(root, f"Claude Desktop was closed to load update {version} but could not be "
+                             f"reopened; open it by hand")
+            reopened_text = {True: "yes", False: "no", None: "started, not confirmed"}[reopened]
         say(f"restarted Claude Desktop for update {version} (restart {attempt} of "
-            f"{RESTART_LIMIT}): {outcome}; reopened: {'yes' if reopened else 'no'}")
+            f"{RESTART_LIMIT}): {outcome}; reopened: {reopened_text}")
     return 0
 
 
