@@ -599,7 +599,7 @@ table.pt{table-layout:fixed;min-width:760px}
     // Past deals has no Home (owner, 2026-11-17): each entry is a page listing those deals, and
     // "Returns" holds the summary cards and the returns table.
     const pages = [...STATUSES.filter(([v]) => H.some(d => d.status === v)).map(([v, l]) => [v, l]),
-                   ["long", `Held over ${LONG} years`], ["recession", "Owned in 2008 recession"], ["returns", "Returns"]];
+                   ["recession", "Owned in 2008 recession"], ["returns", "Returns"]];   // "Held over 5 years" removed (owner, 2026-11-17)
     if (!pages.some(p => p[0] === hstatus)) hstatus = pages[0][0];
     $("#snav-h").innerHTML = pages.map(([v, l]) => navBtn("history", v, l)).join("");
     const isReturns = hstatus === "returns";
