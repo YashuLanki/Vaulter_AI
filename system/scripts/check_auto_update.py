@@ -886,6 +886,7 @@ with tempfile.TemporaryDirectory() as t:
 
 # =============================================================================
 print("\n3. Idle restart")
+import inspect  # noqa: E402,F811
 # Every external effect is a stub passed in `ops`: no check here lists, stops or
 # starts a real process, reads real idle time or asks the real release channel.
 try:
@@ -906,16 +907,21 @@ DESKTOP_START = "2026-11-19T08:00:00.1234567-07:00"   # PowerShell's 'o' format,
 DESKTOP_START_EPOCH = 1795100400.123456               # the same instant, seconds since 1970 UTC
 
 
-def row(pid, ppid, exe, created=DESKTOP_START):
+def row(pid, ppid, exe, created=DESKTOP_START, typ=None):
+    """typ: the Electron helper type (--type=...); None for a main process."""
     return {"ProcessId": pid, "ParentProcessId": ppid, "ExecutablePath": exe,
-            "CommandLine": f'"{exe}"', "CreationDate": created}
+            "CommandLine": f'"{exe}"' + (f" --type={typ}" if typ else ""), "CreationDate": created}
 
 
 # Recorded on this machine 2026-11-19: Desktop parent 34004 (its parent 12308 is
-# not Desktop) with eight children; four Claude Code CLI processes.
+# not Desktop) with eight children; four Claude Code CLI processes. Every child
+# carries an Electron --type= (the live listing that day: crashpad-handler,
+# gpu-process, three utility, three renderer); the main process carries none.
+_HELPER_TYPES = ("crashpad-handler", "gpu-process", "utility", "renderer",
+                 "renderer", "renderer", "utility", "utility")
 DESKTOP_ROWS = [row(34004, 12308, STORE_EXE)] + [
-    row(p, 34004, STORE_EXE, "2026-11-19T08:00:05.0000000-07:00")
-    for p in (24540, 9492, 9420, 4912, 21040, 35000, 22996, 22764)]
+    row(p, 34004, STORE_EXE, "2026-11-19T08:00:05.0000000-07:00", typ)
+    for p, typ in zip((24540, 9492, 9420, 4912, 21040, 35000, 22996, 22764), _HELPER_TYPES)]
 CLI_ROWS = [row(15912, 8356, CLI_EXE), row(18916, 7284, CLI_EXE),
             row(33016, 18292, CLI_EXE), row(18024, 33524, CLI_EXE)]
 CLI_PIDS = {r["ProcessId"] for r in CLI_ROWS}
@@ -927,9 +933,17 @@ class Env:
     """A stubbed world for auto_restart.main. `calls` records every effect in order."""
 
     def __init__(self, procs=None, after_kill=None, idle=1000.0, start_apps=None,
-                 apply_result=None):
+                 apply_result=None, relist=None, list_cost=0.0, recover_raises=False,
+                 apply_raises=False, relaunch_ok=True, now=DESKTOP_START_EPOCH + 3600):
         self.procs = list(DESKTOP_ROWS + CLI_ROWS) if procs is None else procs
         self.after_kill = list(CLI_ROWS) if after_kill is None else after_kill
+        self.relist = relist              # what the re-check right before taskkill sees
+        self.list_cost = list_cost        # seconds of (fake) wall time each listing takes
+        self.recover_raises, self.apply_raises = recover_raises, apply_raises
+        self.relaunch_ok = relaunch_ok
+        self.clock = 0.0                  # fake monotonic clock
+        self.now = now                    # fake epoch time
+        self.n_list = 0
         self.killed = False
         self.idle = idle
         self.apps = START_APPS if start_apps is None else start_apps
@@ -943,6 +957,7 @@ class Env:
             "taskkill": self.taskkill, "relaunch": self.relaunch,
             "idle_seconds": self.idle_seconds, "channel_check": self.channel_check,
             "recover": self.recover, "auto_apply": self.auto_apply, "sleep": self.sleep,
+            "monotonic": self.monotonic, "time": self.time,
         }
 
     def names(self):
@@ -950,7 +965,17 @@ class Env:
 
     def list_processes(self):
         self.calls.append(("list_processes",))
+        self.n_list += 1
+        self.clock += self.list_cost
+        if self.n_list == 2 and self.relist is not None and not self.killed:
+            return list(self.relist)
         return list(self.after_kill if self.killed else self.procs)
+
+    def monotonic(self):
+        return self.clock
+
+    def time(self):
+        return self.now
 
     def start_apps(self):
         self.calls.append(("start_apps",))
@@ -963,7 +988,7 @@ class Env:
 
     def relaunch(self, cmd):
         self.calls.append(("relaunch", list(cmd)))
-        return True
+        return self.relaunch_ok
 
     def idle_seconds(self):
         self.calls.append(("idle_seconds",))
@@ -974,14 +999,19 @@ class Env:
 
     def recover(self, project_root):
         self.calls.append(("recover", project_root))
+        if self.recover_raises:
+            raise RuntimeError("recover broke")
         return False
 
     def auto_apply(self, project_root, at_startup=False):
         self.calls.append(("auto_apply", project_root, at_startup))
+        if self.apply_raises:
+            raise RuntimeError("install broke")
         return dict(self.apply_result)
 
     def sleep(self, seconds):
         self.calls.append(("sleep", seconds))
+        self.clock += seconds
 
 
 def restart_tree(tmp: Path, dev: bool = False, staged: bool = True) -> Path:
@@ -1030,7 +1060,7 @@ if ar is not None and all(hasattr(ar, f) for f in AR_NEEDED):
     r = ar.desktop_root(under)
     check("desktop_root: a Claude Code child of Desktop does not change the root",
           r is not None and r["ProcessId"] == 34004)
-    classic = [row(70, 9, CLASSIC_EXE), row(71, 70, CLASSIC_EXE)] + CLI_ROWS
+    classic = [row(70, 9, CLASSIC_EXE), row(71, 70, CLASSIC_EXE, typ="renderer")] + CLI_ROWS
     r = ar.desktop_root(classic)
     check("desktop_root: a classic AnthropicClaude install's parent",
           r is not None and r["ProcessId"] == 70)
@@ -1212,8 +1242,10 @@ if ar is not None and all(hasattr(ar, f) for f in AR_NEEDED):
         check("give up, run twice: exactly one [ERROR] line",
               len(ERROR_LINE.findall(vtext)) == 1 and vtext.count("[ERROR]") == 1, vtext)
         check("give up: the [ERROR] line names the version", "2.0" in vtext)
-        check("give up: recorded as given up",
-              state_of(root) == {"2.0": {"restarts": 2, "gave_up": True}}, str(state_of(root)))
+        _st = state_of(root) or {}
+        check("give up: recorded as given up, with when (gave_up_at, epoch seconds)",
+              _st.get("2.0", {}).get("restarts") == 2 and _st["2.0"].get("gave_up") is True
+              and _st["2.0"].get("gave_up_at") == DESKTOP_START_EPOCH + 3600, str(_st))
 
     # --- main: --dry-run on a real install changes nothing --------------------------------------------
     with tempfile.TemporaryDirectory() as t:
@@ -1245,6 +1277,142 @@ if ar is not None and all(hasattr(ar, f) for f in AR_NEEDED):
         rc_ = ar.main([], project_root=root, ops=ops)
         check("a failing channel check does not stop the run", rc_ == 0 and boom["n"] == 1
               and "idle_seconds" in env.names(), str(env.names()))
+
+    # --- T3-b: the main process is the one with no --type= -------------------------------------
+    orphan = row(900, 777, STORE_EXE, "2026-11-18T07:00:00.0000000-07:00", "renderer")  # parent gone
+    r = ar.desktop_root([orphan] + DESKTOP_ROWS + CLI_ROWS)
+    check("T3-b: an orphaned --type=renderer helper older than the live main -> the live main",
+          r is not None and r["ProcessId"] == 34004, str(r and r["ProcessId"]))
+    two_mains = DESKTOP_ROWS + [row(950, 1, STORE_EXE, "2026-11-19T09:00:00.0000000-07:00")]
+    check("T3-b: two Desktop processes without --type= -> no root", ar.desktop_root(two_mains) is None)
+    check("T3-b: only helpers -> no root", ar.desktop_root(DESKTOP_ROWS[1:]) is None)
+    with tempfile.TemporaryDirectory() as t:
+        root = restart_tree(Path(t))
+        env = Env(procs=two_mains + CLI_ROWS)
+        ar.main([], project_root=root, ops=env.ops())
+        check("T3-b: two mains -> refused: nothing stopped, nothing recorded",
+              "taskkill" not in env.names() and state_of(root) is None, str(env.names()))
+        check("T3-b: ...and the refusal is logged", "2.0" in read(root / RLOG) and read(root / RLOG) != "",
+              read(root / RLOG))
+
+    # --- T3-a: re-check the process right before stopping it ------------------------------------
+    with tempfile.TemporaryDirectory() as t:
+        root = restart_tree(Path(t))
+        env = Env()
+        ar.main([], project_root=root, ops=env.ops())
+        names = env.names()
+        check("T3-a: processes are listed again immediately before taskkill",
+              "taskkill" in names and names[names.index("taskkill") - 1] == "list_processes", str(names))
+    reused = [dict(r_, CreationDate="2026-11-19T10:00:00.0000000-07:00") if r_["ProcessId"] == 34004 else r_
+              for r_ in DESKTOP_ROWS] + CLI_ROWS
+    with tempfile.TemporaryDirectory() as t:
+        root = restart_tree(Path(t))
+        env = Env(relist=reused)
+        ar.main([], project_root=root, ops=env.ops())
+        check("T3-a: same pid, different start time (pid reused) -> not stopped, not recorded",
+              "taskkill" not in env.names() and "relaunch" not in env.names() and state_of(root) is None,
+              str(env.names()))
+    taken = [dict(r_, ExecutablePath=r"C:\Windows\notepad.exe") if r_["ProcessId"] == 34004 else r_
+             for r_ in DESKTOP_ROWS] + CLI_ROWS
+    with tempfile.TemporaryDirectory() as t:
+        root = restart_tree(Path(t))
+        env = Env(relist=taken)
+        ar.main([], project_root=root, ops=env.ops())
+        check("T3-a: the pid is no longer a Desktop executable -> not stopped",
+              "taskkill" not in env.names(), str(env.names()))
+    with tempfile.TemporaryDirectory() as t:
+        root = restart_tree(Path(t))
+        env = Env(relist=list(CLI_ROWS))
+        ar.main([], project_root=root, ops=env.ops())
+        check("T3-a: Desktop gone by the re-check -> not stopped", "taskkill" not in env.names())
+
+    # --- C1(c): the exit wait is 30 s of wall time, however slow each listing is -----------------
+    with tempfile.TemporaryDirectory() as t:
+        root = restart_tree(Path(t))
+        env = Env(after_kill=list(DESKTOP_ROWS + CLI_ROWS), list_cost=10.0)
+        ar.main([], project_root=root, ops=env.ops())
+        after_kill = env.names()[env.names().index("taskkill") + 1:] if "taskkill" in env.names() else []
+        n_lists = after_kill.count("list_processes")
+        check("C1: a 10 s listing ends the exit wait by wall time (at most 4 listings, not 31)",
+              "taskkill" in env.names() and 1 <= n_lists <= 4, f"{n_lists} listings")
+        check("C1: ...and nothing is installed", "auto_apply" not in env.names())
+
+    # --- T3-d: Desktop is reopened whatever happens after it was closed ---------------------------
+    for label, kw in (("recover raises", {"recover_raises": True}),
+                      ("auto_apply raises", {"apply_raises": True})):
+        with tempfile.TemporaryDirectory() as t:
+            root = restart_tree(Path(t))
+            env = Env(**kw)
+            rc_ = ar.main([], project_root=root, ops=env.ops())
+            check(f"T3-d: {label} -> Desktop still reopened", ("relaunch", STORE_CMD) in env.calls,
+                  str(env.names()))
+            check(f"T3-d: {label} -> an [ERROR] line, exit 1",
+                  rc_ == 1 and ERROR_LINE.search(read(root / VLOG)) is not None, read(root / VLOG))
+    with tempfile.TemporaryDirectory() as t:
+        root = restart_tree(Path(t))
+        env = Env(relaunch_ok=False)
+        ar.main([], project_root=root, ops=env.ops())
+        vt = read(root / VLOG)
+        check("T3-d: a failed reopen writes one [ERROR] saying so",
+              len(ERROR_LINE.findall(vt)) == 1 and "reopen" in vt, vt)
+
+    # --- I1: no restart owed for a version installed at startup ------------------------------------
+    ro = ar.restart_owed
+    _ro_params = inspect.signature(ro).parameters
+    check("I1: restart_owed takes the startup-installed version", "startup_installed" in _ro_params)
+    if "startup_installed" in _ro_params:
+        check("I1: VERSION newer than Desktop, but that version was installed at startup -> nothing owed",
+              ro(None, "2.0", 300.0, 200.0, startup_installed="2.0") == "")
+        check("I1: ...a different version recorded -> still owed",
+              ro(None, "2.0", 300.0, 200.0, startup_installed="1.9") == "2.0")
+        check("I1: ...a staged update is owed whatever the record says",
+              ro({"version": "3.0", "current_version_at_download": "2.0"}, "2.0", 300.0, 200.0,
+                 startup_installed="2.0") == "3.0")
+    # the reviewer's scenario: Desktop started 20 s ago, VERSION written now, nothing staged
+    for with_record in (True, False):
+        with tempfile.TemporaryDirectory() as t:
+            root = restart_tree(Path(t), staged=False)
+            later = DESKTOP_START_EPOCH + 20
+            os.utime(root / "VERSION", (later, later))
+            if with_record:
+                (root / "data" / "startup_installed.json").write_text(json.dumps({"version": "1.0"}))
+            env = Env(apply_result={"applied": False, "version": "", "reason": "", "restored": False})
+            ar.main([], project_root=root, ops=env.ops())
+            if with_record:
+                check("I1: startup install of the running version recorded -> no restart, no log line",
+                      "taskkill" not in env.names() and read(root / RLOG) == "", read(root / RLOG))
+            else:
+                check("I1: ...without the record -> the restart is owed",
+                      ("taskkill", 34004) in env.calls, str(env.names()))
+
+    # --- I5(b): a give-up resets once the person restarts Desktop by hand ---------------------------
+    with tempfile.TemporaryDirectory() as t:
+        root = restart_tree(Path(t))
+        (root / "data" / "auto_restart.json").write_text(json.dumps(
+            {"2.0": {"restarts": 2, "gave_up": True, "gave_up_at": DESKTOP_START_EPOCH - 600}}))
+        env = Env()
+        ar.main([], project_root=root, ops=env.ops())
+        check("I5b: Desktop started after the give-up -> tries again (restart 1)",
+              ("taskkill", 34004) in env.calls
+              and (state_of(root) or {}).get("2.0", {}).get("restarts") == 1
+              and (state_of(root) or {}).get("2.0", {}).get("gave_up") is False, str(state_of(root)))
+    with tempfile.TemporaryDirectory() as t:
+        root = restart_tree(Path(t))
+        st = {"2.0": {"restarts": 2, "gave_up": True, "gave_up_at": DESKTOP_START_EPOCH + 600}}
+        (root / "data" / "auto_restart.json").write_text(json.dumps(st))
+        env = Env()
+        ar.main([], project_root=root, ops=env.ops())
+        check("I5b: Desktop started before the give-up -> still given up, nothing stopped",
+              "taskkill" not in env.names() and state_of(root) == st, str(state_of(root)))
+    with tempfile.TemporaryDirectory() as t:
+        root = restart_tree(Path(t))
+        st = {"2.0": {"restarts": 2, "gave_up": True, "gave_up_at": DESKTOP_START_EPOCH - 600}}
+        (root / "data" / "auto_restart.json").write_text(json.dumps(st))
+        env = Env()
+        ar.main(["--dry-run"], project_root=root, ops=env.ops())
+        check("I5b: dry run -> says it would try again, writes nothing",
+              state_of(root) == st and "taskkill" not in env.names() and "dry run" in read(root / RLOG),
+              read(root / RLOG))
 
     # --- hygiene -----------------------------------------------------------------------------------
     src = (SCRIPTS / "auto_restart.py").read_text(encoding="utf-8")

@@ -20,14 +20,21 @@ Claude Desktop is stopped:
   1. a development copy is never touched;
   2. ask the release channel, at most hourly (the server's own functions);
   3. is a restart owed? an applicable staged update, or a VERSION file newer
-     than the start of Desktop's main process (an update applied by hand);
+     than the start of Desktop's main process (an update applied by hand) that
+     was not installed at startup (data/startup_installed.json);
   4. is Claude Desktop running? found by executable path, never by name: the
-     Claude Code CLI is also claude.exe, under .local\\bin, and is NEVER stopped;
-  5. has the computer been idle 15 minutes?
-  6. loop guard: at most 2 restarts per version, then one [ERROR] for the team;
-  7. is there a way to reopen it? if not, it is not closed;
-  8. count the restart, stop Desktop's process tree, wait for it to go, install
-     (after recovering any unfinished install), reopen it the way it was installed.
+     Claude Code CLI is also claude.exe, under .local\\bin, and is NEVER stopped.
+     Its main process is the one Desktop process with no Electron --type=; none
+     or several such, and nothing is restarted;
+  5. a give-up for this version is forgotten once Desktop has been started
+     (by hand) after it was recorded;
+  6. has the computer been idle 15 minutes?
+  7. loop guard: at most 2 restarts per version, then one [ERROR] for the team;
+  8. is there a way to reopen it? if not, it is not closed;
+  9. list the processes again and stop only if the same process (pid AND start
+     time) is still Desktop's; count the restart, stop Desktop's process tree,
+     wait (30 s of wall time) for it to go, install (after recovering any
+     unfinished install), reopen it the way it was installed.
 
 Every path derives from the `system` folder (overridable for checks):
 data/auto_restart.json (state), data/logs/auto_restart.txt (one line per run
@@ -110,19 +117,22 @@ def _iso_to_epoch(text):
         return None
 
 
+def desktop_mains(procs) -> list:
+    """Desktop processes whose command line carries no `--type=`: Electron starts
+    every helper (renderer, gpu-process, utility, crashpad-handler) with one, and
+    the main process without."""
+    return [p for p in desktop_processes(procs)
+            if "--type=" not in str(p.get("CommandLine") or "").lower()]
+
+
 def desktop_root(procs: list) -> dict | None:
-    """The main Claude Desktop process: a Desktop process whose parent is not a
-    Desktop process. Stopping its tree stops Desktop and everything it started
-    (its servers, and Claude Code sessions opened inside it) and nothing else.
-    If more than one qualifies, the oldest."""
-    desk = desktop_processes(procs)
-    pids = {_int(p.get("ProcessId")) for p in desk}
-    roots = [p for p in desk if _int(p.get("ParentProcessId")) not in pids]
-    if not roots:
-        return None
-    inf = float("inf")
-    roots.sort(key=lambda p: (_iso_to_epoch(p.get("CreationDate")) or inf, _int(p.get("ProcessId"))))
-    return roots[0]
+    """The main Claude Desktop process, or None when there is not exactly one.
+    Stopping its tree stops Desktop and everything it started (its servers, and
+    Claude Code sessions opened inside it) and nothing else. Parentage is not
+    used: an orphaned helper outliving an old main process has no Desktop parent
+    either, and would be taken for the root (wrong start time, wrong process)."""
+    mains = desktop_mains(procs)
+    return mains[0] if len(mains) == 1 else None
 
 
 def relaunch_command(exe_path: str, start_apps: list) -> list:
@@ -150,13 +160,16 @@ def relaunch_command(exe_path: str, start_apps: list) -> list:
     return []
 
 
-def restart_owed(staged: dict | None, running: str, version_mtime: float, desktop_started: float) -> str:
+def restart_owed(staged: dict | None, running: str, version_mtime: float, desktop_started: float,
+                 startup_installed: str = "") -> str:
     """The version a restart would load: an applicable staged update, else the
-    running VERSION if that file changed after Desktop started, else ""."""
+    running VERSION if that file changed after Desktop started, else "". A
+    VERSION written by the startup install (startup_installed names it) is
+    newer than Desktop's start too, but the server loaded it already."""
     version = au.staged_update_applicable(staged, running)
     if version:
         return version
-    if running and version_mtime > desktop_started:
+    if running and version_mtime > desktop_started and running != startup_installed:
         return running
     return ""
 
@@ -185,13 +198,34 @@ def record_restart(state: dict, version: str) -> dict:
     except (TypeError, ValueError):
         n = RESTART_LIMIT
     new[version] = {"restarts": n + 1, "gave_up": bool(entry.get("gave_up", False))}
+    if "gave_up_at" in entry:
+        new[version]["gave_up_at"] = entry["gave_up_at"]
     return new
 
 
-def _gave_up(state: dict, version: str) -> dict:
+def _gave_up(state: dict, version: str, now: float) -> dict:
+    """A new state with version given up at `now` (epoch seconds)."""
     new = {k: dict(v) if isinstance(v, dict) else v for k, v in (state or {}).items()}
     entry = _restarts(new, version)
-    new[version] = {"restarts": entry.get("restarts", 0), "gave_up": True}
+    new[version] = {"restarts": entry.get("restarts", 0), "gave_up": True, "gave_up_at": now}
+    return new
+
+
+def restarted_since_give_up(state: dict, version: str, desktop_started) -> bool:
+    """True when version was given up on and Desktop's current main process
+    started later than that: the person restarted it by hand, so the automatic
+    restarts may try again. A give-up with no recorded time never resets."""
+    entry = _restarts(state, version)
+    at = entry.get("gave_up_at")
+    if not entry.get("gave_up") or desktop_started is None or isinstance(at, bool) \
+            or not isinstance(at, (int, float)):
+        return False
+    return desktop_started > at
+
+
+def _reset_give_up(state: dict, version: str) -> dict:
+    new = {k: dict(v) if isinstance(v, dict) else v for k, v in (state or {}).items()}
+    new[version] = {"restarts": 0, "gave_up": False}
     return new
 
 
@@ -343,6 +377,8 @@ DEFAULT_OPS = {
     "recover": au.recover_unfinished_apply,
     "auto_apply": au.auto_apply,
     "sleep": time.sleep,
+    "monotonic": time.monotonic,
+    "time": time.time,
 }
 
 
@@ -360,6 +396,15 @@ def _read_state(root: Path) -> dict:
         return data if isinstance(data, dict) else {}
     except Exception:
         return {}
+
+
+def _startup_installed(root: Path) -> str:
+    """The version apply_update last installed at startup, or ""."""
+    try:
+        data = json.loads((root / "data" / "startup_installed.json").read_text(encoding="utf-8"))
+        return str(data.get("version") or "") if isinstance(data, dict) else ""
+    except Exception:
+        return ""
 
 
 def _write_state(root: Path, state: dict) -> None:
@@ -486,13 +531,27 @@ def _run(root: Path, ops: dict, dry: bool, ignore_idle: bool, say) -> int:
     started = _iso_to_epoch(desk.get("CreationDate")) if desk else None
     # An unknown start time cannot prove a hand-applied update is newer than Desktop.
     version = restart_owed(pending, running, version_mtime,
-                           started if started is not None else float("inf"))
+                           started if started is not None else float("inf"),
+                           _startup_installed(root))
     if not version:
         return 0
-    if desk is None:
+    if not desktop_processes(procs):
         say(f"update {version} is waiting; Claude Desktop is not running, so it will "
             f"install when Claude next opens")
         return 0
+    if desk is None:
+        say(f"update {version} is waiting, but Claude Desktop's main process could not be "
+            f"told apart from its helpers ({len(desktop_mains(procs))} candidates), so nothing "
+            f"was restarted")
+        return 0
+
+    state = _read_state(root)
+    if restarted_since_give_up(state, version, started):
+        state = _reset_give_up(state, version)
+        if not dry:
+            _write_state(root, state)
+        say(f"update {version}: Claude Desktop was restarted since automatic restarts stopped, "
+            f"so they start again")
 
     if not ignore_idle:
         idle = float(ops["idle_seconds"]())
@@ -501,7 +560,6 @@ def _run(root: Path, ops: dict, dry: bool, ignore_idle: bool, say) -> int:
                 f"{IDLE_SECONDS_NEEDED} seconds), trying again next run")
             return 0
 
-    state = _read_state(root)
     done = _restarts(state, version).get("restarts", 0)
     if not may_restart(state, version, RESTART_LIMIT):
         if _restarts(state, version).get("gave_up"):
@@ -512,7 +570,7 @@ def _run(root: Path, ops: dict, dry: bool, ignore_idle: bool, say) -> int:
             _error(root, f"Claude Desktop was restarted {done} times to load update {version} and "
                          f"it has still not taken effect; automatic restarts have stopped for this "
                          f"version. Quit and reopen Claude Desktop by hand.")
-            _write_state(root, _gave_up(state, version))
+            _write_state(root, _gave_up(state, version, float(ops["time"]())))
             say(f"update {version}: stopped restarting after {done} restarts and told the team")
         return 0
 
@@ -533,6 +591,15 @@ def _run(root: Path, ops: dict, dry: bool, ignore_idle: bool, say) -> int:
     pid = _int(desk.get("ProcessId"))
     if pid <= 0 or not is_desktop_exe(exe):
         return 0
+    # The pid could have been reused since the first listing (Desktop quit and
+    # something else started). Stop it only if the same process -- same pid AND
+    # same start time -- is still a Desktop executable.
+    again = ops["list_processes"]() or []
+    if not any(_int(p.get("ProcessId")) == pid and p.get("CreationDate") == desk.get("CreationDate")
+               and is_desktop_exe(p.get("ExecutablePath")) for p in again if isinstance(p, dict)):
+        say(f"update {version}: Claude Desktop changed while this check ran, so nothing was "
+            f"stopped; trying again next run")
+        return 0
     # Counted BEFORE anything is stopped: a run that dies part-way still counts,
     # so the loop guard holds whatever happens next.
     _write_state(root, record_restart(state, version))
@@ -541,16 +608,19 @@ def _run(root: Path, ops: dict, dry: bool, ignore_idle: bool, say) -> int:
     outcome = "not installed"
     try:
         ops["taskkill"](pid)
-        gone, waited = False, 0
+        # Wall time, not a count of sleeps: each listing is a PowerShell run that
+        # can take seconds, and the task's own time limit must never be reached
+        # with Desktop closed.
+        gone = False
+        deadline = ops["monotonic"]() + EXIT_WAIT_SECONDS
         while True:
             rows = ops["list_processes"]()
             if rows is not None and not desktop_processes(rows):
                 gone = True
                 break
-            if waited >= EXIT_WAIT_SECONDS:
+            if ops["monotonic"]() >= deadline:
                 break
             ops["sleep"](1)
-            waited += 1
         if not gone:
             outcome = "not installed, Claude Desktop did not close"
             _error(root, f"Claude Desktop did not close within {EXIT_WAIT_SECONDS} seconds for "
