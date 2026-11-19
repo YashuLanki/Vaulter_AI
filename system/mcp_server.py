@@ -445,6 +445,15 @@ def _check_and_stage_update() -> None:
         return  # already on the latest version for this channel
     if not _published_is_newer(remote):
         return  # different, but OLDER -- never offer a downgrade
+    try:
+        from config import DATA_DIR
+        from scripts import apply_update as _au
+        if _au.version_set_aside(Path(DATA_DIR), str(remote_version), remote.get("signature")):
+            log.info(f"[UPDATE] Version {remote_version} failed to install here twice and is set "
+                     f"aside; waiting for a newer release.")
+            return  # downloading it again would only fail again (see apply_update)
+    except Exception:
+        pass
 
     ready_path = PENDING_UPDATE_DIR / "ready.json"
     if ready_path.exists():
@@ -6289,7 +6298,8 @@ def _update_ready() -> str:
         running = _get_code_version()
         # The rule lives in apply_update so the automatic install asks the same one.
         from scripts import apply_update
-        applicable = apply_update.staged_update_applicable(staged, running)
+        from config import DATA_DIR
+        applicable = apply_update.staged_update_applicable(staged, running, Path(DATA_DIR))
         if not applicable:
             at_download = staged.get("current_version_at_download")
             if version and version != running and at_download and running and at_download != running:
@@ -6437,10 +6447,33 @@ def _auto_restart_gave_up() -> str:
 _RESTART_TASK = "Vaulter AI - Update restart"
 _RESTART_TASK_CHECKED = False
 _RESTART_TASK_OK = False
+# How long a tool answer may wait for the task check. Measured 2026-11-19: one
+# Get-ScheduledTask query took 6.7 s on the maintainer's machine, and a missing
+# task costs a query, a registration and a second query. The check finishes in
+# the background past this and sets _RESTART_TASK_OK when it does.
+_RESTART_TASK_WAIT_SECONDS = 4.0
+# What a correct task looks like, besides its action (checked in _task_matches).
+_RESTART_TASK_INTERVAL = "PT15M"
+_RESTART_TASK_LIMIT = "PT1H"
+
+
+def _restart_task_name() -> str:
+    """The task's name, one per Windows user: Task Scheduler names are machine-wide,
+    so two people with Vaulter AI on one computer would otherwise overwrite each
+    other's task at every server start (or fail to, without admin rights)."""
+    user = _re.sub(r'[\\/:*?"<>|]', "", os.environ.get("USERNAME", "")).strip()
+    return f"{_RESTART_TASK} ({user})" if user else _RESTART_TASK
 
 
 def _restart_task_script() -> Path:
     return Path(__file__).resolve().parent / "scripts" / "auto_restart.py"
+
+
+def _restart_task_runner():
+    """pythonw.exe beside this interpreter, or None. The task is never registered
+    with python.exe instead: that opens a console window every 15 minutes."""
+    runner = Path(sys.executable).with_name("pythonw.exe")
+    return runner if runner.is_file() else None
 
 
 def _names_this_install(action_text) -> bool:
@@ -6451,6 +6484,30 @@ def _names_this_install(action_text) -> bool:
     return bool(action_text) and norm(_restart_task_script()) in norm(action_text)
 
 
+def _task_matches(answer) -> bool:
+    """True if the query's answer (one JSON object) describes the task this install
+    would register: one action, run by this install's pythonw.exe, naming this
+    install's auto_restart.py, every 15 minutes, 60-minute limit, interactive
+    logon. Anything else -- another copy's script, a venv rebuilt elsewhere, an
+    older 10-minute limit -- is re-registered. Case- and slash-insensitive."""
+    def norm(text):
+        return str(text or "").replace("/", "\\").lower().strip().strip('"')
+    try:
+        import json
+        info = json.loads(answer) if answer else None
+    except (TypeError, ValueError):
+        return False
+    runner = _restart_task_runner()
+    if not isinstance(info, dict) or runner is None:
+        return False
+    return (norm(info.get("Execute")) == norm(runner)
+            and _names_this_install(info.get("Arguments"))
+            and str(info.get("Count")) == "1"
+            and str(info.get("Interval") or "") == _RESTART_TASK_INTERVAL
+            and str(info.get("Limit") or "") == _RESTART_TASK_LIMIT
+            and str(info.get("LogonType") or "") == "Interactive")
+
+
 def _restart_task(action: str):
     """
     Add, remove or read this computer's update-restart task (every 15 minutes,
@@ -6459,23 +6516,29 @@ def _restart_task(action: str):
     stdin closed, no pipes, values via environment variables. Never asks for
     elevation.
 
-    "query": the task's action(s) as "<executable> <arguments>" lines, "" when
-             there is no such task, None when the question could not be asked.
+    "query": the task as one JSON object (see _task_matches), "" when there is
+             no such task, None when the question could not be asked.
     "add":   "" on success, else what went wrong (kept in a local file only).
     "remove": "".
     """
     import subprocess
     import tempfile
+    from scripts.apply_update import powershell_exe
+    task = _restart_task_name()
     if action == "query":
         ps = ("[Console]::OutputEncoding = [Text.Encoding]::UTF8; "
               "$t = Get-ScheduledTask -TaskName $env:VLT_TASK -ErrorAction SilentlyContinue; "
-              "if ($t) { $t.Actions | ForEach-Object { '{0} {1}' -f $_.Execute, $_.Arguments } }; "
+              "if ($t) { $a = @($t.Actions); $g = @($t.Triggers); "
+              "[pscustomobject]@{ Execute = $a[0].Execute; Arguments = $a[0].Arguments; Count = $a.Count; "
+              "Interval = $(if ($g.Count) { $g[0].Repetition.Interval } else { '' }); "
+              "Limit = $t.Settings.ExecutionTimeLimit; LogonType = \"$($t.Principal.LogonType)\" } "
+              "| ConvertTo-Json -Compress }; "
               "exit 0")  # a missing task is an answer (""), not a failure
         out = Path(tempfile.gettempdir()) / f"vaulter_task_query_{os.getpid()}.txt"
         try:
             with open(out, "w", encoding="utf-8") as fh:
-                r = subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-Command", ps],
-                                   env=dict(os.environ, VLT_TASK=_RESTART_TASK),
+                r = subprocess.run([powershell_exe(), "-NoProfile", "-NonInteractive", "-Command", ps],
+                                   env=dict(os.environ, VLT_TASK=task),
                                    stdin=subprocess.DEVNULL, stdout=fh, stderr=subprocess.DEVNULL,
                                    timeout=30)
             if r.returncode != 0:
@@ -6487,59 +6550,142 @@ def _restart_task(action: str):
             except OSError:
                 pass
     if action == "remove":
-        subprocess.run(["schtasks", "/Delete", "/F", "/TN", _RESTART_TASK], stdin=subprocess.DEVNULL,
+        subprocess.run(["schtasks", "/Delete", "/F", "/TN", task], stdin=subprocess.DEVNULL,
                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=30)
         return ""
     script = _restart_task_script()
-    runner = Path(sys.executable).with_name("pythonw.exe")
-    if not runner.exists():
-        runner = Path(sys.executable)
+    runner = _restart_task_runner()
+    if runner is None:
+        return "pythonw.exe is missing beside this Python"
     # 60 minutes: the run may include the channel check, a 30 s exit wait, a
-    # backup, pip (300 s at most) and a smoke test (120 s at most). If the limit
-    # were reached, Task Scheduler would end the process with Desktop closed and
-    # its relaunch would never run.
+    # backup, pip (300 s at most), a smoke test (120 s at most) and up to two
+    # minutes confirming Desktop came back. If the limit were reached, Task
+    # Scheduler would end the process with Desktop closed and its relaunch would
+    # never run. The principal is the FULL account name (DOMAIN\user or
+    # AzureAD\user): the bare user name does not resolve for a work or school
+    # account, so registration failed on exactly the laptops teammates use.
     ps = ("$a = New-ScheduledTaskAction -Execute $env:VLT_RUNNER -Argument ('\"{0}\"' -f $env:VLT_SCRIPT); "
           "$t = New-ScheduledTaskTrigger -Once -At (Get-Date) -RepetitionInterval (New-TimeSpan -Minutes 15); "
           "$s = New-ScheduledTaskSettingsSet -StartWhenAvailable -ExecutionTimeLimit (New-TimeSpan -Minutes 60) "
           "-MultipleInstances IgnoreNew -DontStopIfGoingOnBatteries -AllowStartIfOnBatteries; "
-          "$p = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType Interactive; "
+          "$p = New-ScheduledTaskPrincipal -UserId ([Security.Principal.WindowsIdentity]::GetCurrent().Name) "
+          "-LogonType Interactive; "
           "Register-ScheduledTask -TaskName $env:VLT_TASK -Action $a -Trigger $t -Settings $s -Principal $p "
           "-Force | Out-Null")
-    env = dict(os.environ, VLT_RUNNER=str(runner), VLT_SCRIPT=str(script), VLT_TASK=_RESTART_TASK)
+    env = dict(os.environ, VLT_RUNNER=str(runner), VLT_SCRIPT=str(script), VLT_TASK=task)
     log_file = Path(__import__("config").LOG_DIR) / "auto_restart_schedule.txt"
     with open(log_file, "w", encoding="utf-8") as fh:
-        r = subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-Command", ps], env=env,
+        r = subprocess.run([powershell_exe(), "-NoProfile", "-NonInteractive", "-Command", ps], env=env,
                            stdin=subprocess.DEVNULL, stdout=fh, stderr=subprocess.STDOUT, timeout=60)
     if r.returncode != 0:
         return log_file.read_text(encoding="utf-8", errors="replace").strip()[:300] or f"exit {r.returncode}"
     return ""
 
 
+def _restart_task_record_path() -> Path:
+    from config import DATA_DIR
+    return Path(DATA_DIR) / "restart_task.json"
+
+
+def _restart_task_spec() -> dict:
+    """What a verification is valid for: a different task name, script, runner or
+    task shape means the record no longer says anything."""
+    return {"task": _restart_task_name(), "script": str(_restart_task_script()),
+            "runner": str(_restart_task_runner() or ""), "interval": _RESTART_TASK_INTERVAL,
+            "limit": _RESTART_TASK_LIMIT}
+
+
+def _restart_task_record(**changes) -> dict:
+    """Read this machine's task-check record; with changes, also write them in.
+    Never raises."""
+    import json
+    path = _restart_task_record_path()
+    rec = _json_object(path) or {}
+    if changes:
+        rec.update(changes)
+        try:
+            tmp = path.with_name(path.name + ".tmp")
+            tmp.write_text(json.dumps(rec), encoding="utf-8")
+            os.replace(tmp, path)
+        except Exception:
+            pass
+    return rec
+
+
+def _restart_task_failed(message: str) -> None:
+    """One log.error a day for a task that cannot be set up (it reaches the team's
+    error reports); later server starts that day log a warning. Policy that
+    blocks registration does not change between starts, and an [ERROR] at every
+    Claude start would bury every other report from that machine."""
+    today = _dt_mod.date.today().isoformat()
+    if _restart_task_record().get("error_day") == today:
+        log.warning(message)
+        return
+    log.error(message)
+    _restart_task_record(error_day=today)
+
+
+def _ensure_restart_task_work() -> None:
+    """The check itself (see _ensure_restart_task). Never raises."""
+    global _RESTART_TASK_OK
+    try:
+        if _restart_task_runner() is None:
+            _restart_task_failed("[AUTO UPDATE] The update-restart task was not set up on this computer "
+                                 "(pythonw.exe is missing beside its Python), so updates here are "
+                                 "offered in chat instead of installing by themselves.")
+            return
+        if _task_matches(_restart_task("query")):
+            ok = True
+        else:
+            err = _restart_task("add")
+            ok = not err and _task_matches(_restart_task("query"))
+            if ok:
+                log.info("[AUTO UPDATE] Restart task set up on this computer.")
+        if ok:
+            _restart_task_record(verified=_dt_mod.date.today().isoformat(), spec=_restart_task_spec())
+            _RESTART_TASK_OK = True
+            return
+        _restart_task_failed("[AUTO UPDATE] The update-restart task could not be set up on this "
+                             "computer, so updates here are offered in chat instead of installing "
+                             "by themselves.")
+    except Exception as e:
+        _restart_task_failed(f"[AUTO UPDATE] The update-restart task could not be checked on this "
+                             f"computer ({type(e).__name__}), so updates here are offered in chat "
+                             f"instead.")
+
+
 def _ensure_restart_task() -> None:
     """
-    Make sure this computer's update-restart task exists AND runs this install's
-    auto_restart.py; register it (-Force) when it is missing or names another
-    copy. Sets _RESTART_TASK_OK only after a verified match, which is what makes
-    _auto_update_active() true. Once per process (flag set BEFORE the call, so
-    a slow or failing one is never retried per tool call). A failure is one
-    log.error per process, so it reaches the team's error reports, with no path
-    in it. Never raises.
+    Make sure this computer's update-restart task exists AND is exactly the task
+    this install would register (_task_matches: this install's pythonw.exe and
+    auto_restart.py, every 15 minutes, 60-minute limit, interactive logon);
+    register it (-Force) when it is missing or differs. Sets _RESTART_TASK_OK
+    only after a verified match, which is what makes _auto_update_active() true.
+    Once per process (flag set BEFORE the work, so a slow or failing check is
+    never retried per tool call).
+
+    Bounded (hardening pass): a task verified today, for this same install and
+    task shape, is trusted without asking PowerShell, so most server starts cost
+    one small file read; otherwise the check runs in a worker thread and a tool
+    answer waits for it at most _RESTART_TASK_WAIT_SECONDS. The same pattern as
+    _get_code_version's bounded git call; the thread ends when the check does.
+    A failure is one log.error a day, so it reaches the team's error reports
+    without repeating at every Claude start, with no path in it. Never raises.
     """
     global _RESTART_TASK_CHECKED, _RESTART_TASK_OK
     try:
         if _RESTART_TASK_CHECKED or not _auto_update_eligible():
             return
         _RESTART_TASK_CHECKED = True
-        if _names_this_install(_restart_task("query")):
+        rec = _restart_task_record()
+        if rec.get("verified") == _dt_mod.date.today().isoformat() and rec.get("spec") == _restart_task_spec():
             _RESTART_TASK_OK = True
             return
-        err = _restart_task("add")
-        if not err and _names_this_install(_restart_task("query")):
-            _RESTART_TASK_OK = True
-            log.info("[AUTO UPDATE] Restart task set up on this computer.")
-            return
-        log.error("[AUTO UPDATE] The update-restart task could not be set up on this computer, "
-                  "so updates here are offered in chat instead of installing by themselves.")
+        import threading
+        worker = threading.Thread(target=_ensure_restart_task_work, name="vaulter-restart-task",
+                                  daemon=True)
+        worker.start()
+        worker.join(_RESTART_TASK_WAIT_SECONDS)
     except Exception as e:
         log.error(f"[AUTO UPDATE] The update-restart task could not be checked on this computer "
                   f"({type(e).__name__}), so updates here are offered in chat instead.")

@@ -1543,6 +1543,13 @@ try:
 
     OURS = str(Path(ms.__file__).resolve().parent / "scripts" / "auto_restart.py")
     OTHER = r"C:\Users\someone\Other Install\system\scripts\auto_restart.py"
+    RUNNER = str(getattr(ms, "_restart_task_runner", lambda: Path(sys.executable).with_name("pythonw.exe"))()
+                 or Path(sys.executable).with_name("pythonw.exe"))
+
+    def task_answer(script=None, runner=None, interval="PT15M", limit="PT1H", logon="Interactive", count=1):
+        """What the scheduler query returns for a task: one JSON object (hardening pass)."""
+        return json.dumps({"Execute": runner or RUNNER, "Arguments": '"' + (script or OURS) + '"',
+                           "Count": count, "Interval": interval, "Limit": limit, "LogonType": logon})
     ms._ensure_restart_task = _real_fns["_ensure_restart_task"]
     if _real_fns["_auto_update_active"] is not None:
         ms._auto_update_active = _real_fns["_auto_update_active"]
@@ -1564,6 +1571,7 @@ try:
         ms._RESTART_TASK_CHECKED = False
         ms._RESTART_TASK_OK = False
         ms._auto_update_eligible = lambda: eligible
+        (_tmp4 / "data" / "restart_task.json").unlink(missing_ok=True)
 
     cap = MsCapture()
     ms.log.addHandler(cap)
@@ -1575,19 +1583,19 @@ try:
               calls == [] and ms._auto_update_active() is False, str(calls))
 
         fresh()
-        calls, ms._restart_task = scheduler([f'C:\\py\\pythonw.exe "{OURS}"'])
+        calls, ms._restart_task = scheduler([task_answer(OURS)])
         ms._ensure_restart_task()
         check("I4: the task already names THIS install -> no re-register, active",
               calls == ["query"] and ms._auto_update_active() is True, str(calls))
 
         fresh()
-        calls, ms._restart_task = scheduler([f'C:\\py\\pythonw.exe "{OTHER}"', f'C:\\py\\pythonw.exe "{OURS}"'])
+        calls, ms._restart_task = scheduler([task_answer(OTHER), task_answer(OURS)])
         ms._ensure_restart_task()
         check("I4: the task names ANOTHER install -> re-registered and verified, active",
               calls == ["query", "add", "query"] and ms._auto_update_active() is True, str(calls))
 
         fresh()
-        calls, ms._restart_task = scheduler(["", f'C:\\py\\pythonw.exe "{OURS.upper().replace(chr(92), "/")}"'])
+        calls, ms._restart_task = scheduler(["", task_answer(OURS.upper().replace(chr(92), "/"), RUNNER.upper().replace(chr(92), "/"))])
         ms._ensure_restart_task()
         ms._ensure_restart_task()
         check("I4: no task -> registered once over two calls, matched case/slash-insensitively",
@@ -1606,7 +1614,7 @@ try:
 
         fresh()
         cap.records.clear()
-        calls, ms._restart_task = scheduler(["", f'C:\\py\\pythonw.exe "{OTHER}"'])
+        calls, ms._restart_task = scheduler(["", task_answer(OTHER)])
         ms._ensure_restart_task()
         check("I4: registered but the re-query still names another install -> not active, one ERROR",
               ms._auto_update_active() is False and len(cap.errors()) == 1, str(calls))
@@ -2142,6 +2150,157 @@ if ar is not None:
     check("6.16 idle time across the 49.7-day tick wrap",
           _ift is not None and _ift(2 ** 32 + 5000, 2 ** 32 - 10000) == 15.0
           and _ift(10 ** 6, 4000) == 996.0, "")
+
+# --- 6.17 the server's restart-task check: bounded, refreshed, quiet -------------------------
+import config  # noqa: E402,F811
+_s6 = {k: getattr(config, k) for k in ("PENDING_UPDATE_DIR", "DATA_DIR", "UPDATES_DIR")}
+_f6 = {k: getattr(ms, k, None) for k in ("_restart_task", "_auto_update_eligible", "_restart_task_runner",
+                                         "_RESTART_TASK_CHECKED", "_RESTART_TASK_OK", "_get_code_version",
+                                         "_GAVE_UP_SHOWN")}
+_t6 = Path(tempfile.mkdtemp())
+try:
+    for k, sub in (("PENDING_UPDATE_DIR", "pending"), ("DATA_DIR", "data"), ("UPDATES_DIR", "updates")):
+        setattr(config, k, _t6 / sub)
+        (_t6 / sub).mkdir(parents=True, exist_ok=True)
+    ms._auto_update_eligible = lambda: True
+    OURS6 = str(Path(ms.__file__).resolve().parent / "scripts" / "auto_restart.py")
+    RUN6 = str(Path(sys.executable).with_name("pythonw.exe"))
+    if hasattr(ms, "_restart_task_runner"):
+        ms._restart_task_runner = lambda: Path(RUN6)
+
+    def ans(**kw):
+        d = {"Execute": RUN6, "Arguments": f'"{OURS6}"', "Count": 1, "Interval": "PT15M", "Limit": "PT1H",
+             "LogonType": "Interactive"}
+        d.update(kw)
+        return json.dumps(d)
+
+    def sched(answers, add_result="", delay=0.0):
+        calls_, q = [], list(answers)
+
+        def fake(action):
+            calls_.append(action)
+            if delay:
+                time.sleep(delay)
+            if action == "query":
+                return q.pop(0) if q else ""
+            return add_result if action == "add" else ""
+        return calls_, fake
+
+    def fresh6(keep_record=False):
+        ms._RESTART_TASK_CHECKED = False
+        ms._RESTART_TASK_OK = False
+        if not keep_record:
+            (_t6 / "data" / "restart_task.json").unlink(missing_ok=True)
+
+    cap6 = MsCapture()
+    ms.log.addHandler(cap6)
+    try:
+        fresh6()
+        calls, ms._restart_task = sched([ans()], delay=8.0)
+        t0 = time.monotonic()
+        ms._ensure_restart_task()
+        took = time.monotonic() - t0
+        check("6.17 a scheduler that hangs 8 s delays the answer by at most ~5 s",
+              took < 6.0, f"{took:.1f}s")
+        time.sleep(max(0.0, 8.6 - took))                   # let the slow stub finish
+
+        fresh6()
+        calls, ms._restart_task = sched([ans()])
+        ms._ensure_restart_task()
+        fresh6(keep_record=True)
+        calls2, ms._restart_task = sched([ans()])
+        ms._ensure_restart_task()
+        check("6.17 verified today: the next server start trusts it without asking PowerShell (6.7 s here)",
+              calls == ["query"] and calls2 == [] and ms._auto_update_active() is True, f"{calls} {calls2}")
+
+        for label, kw in (("its repeat interval changed", {"Interval": "PT10M"}),
+                          ("its time limit changed", {"Limit": "PT10M"}),
+                          ("its runner moved (venv rebuilt elsewhere)", {"Execute": r"C:\old venv\pythonw.exe"}),
+                          ("its logon type changed", {"LogonType": "Password"})):
+            fresh6()
+            calls, ms._restart_task = sched([ans(**kw), ans()])
+            ms._ensure_restart_task()
+            check(f"6.17 an existing task where {label} is re-registered",
+                  calls == ["query", "add", "query"] and ms._auto_update_active() is True, str(calls))
+
+        fresh6()
+        cap6.records.clear()
+        calls, ms._restart_task = sched(["", ""], add_result="Access is denied.")
+        ms._ensure_restart_task()
+        fresh6(keep_record=True)
+        calls, ms._restart_task = sched(["", ""], add_result="Access is denied.")
+        ms._ensure_restart_task()
+        check("6.17 registration blocked by policy: one [ERROR] a day, not one per server start",
+              len(cap6.errors()) == 1, str(cap6.errors()))
+
+        fresh6()
+        cap6.records.clear()
+        if hasattr(ms, "_restart_task_runner"):
+            ms._restart_task_runner = lambda: None
+        calls, ms._restart_task = sched([""])
+        ms._ensure_restart_task()
+        check("6.17 no pythonw.exe: never registered (a console would flash every 15 minutes), not active",
+              hasattr(ms, "_restart_task_runner") and "add" not in calls and ms._auto_update_active() is False,
+              str(calls))
+        if hasattr(ms, "_restart_task_runner"):
+            ms._restart_task_runner = lambda: Path(RUN6)
+    finally:
+        ms.log.removeHandler(cap6)
+
+    _rtn = getattr(ms, "_restart_task_name", None)
+    check("6.17 the task is named per Windows user (Task Scheduler names are machine-wide)",
+          _rtn is not None and os.environ.get("USERNAME", "") in _rtn()
+          and _rtn().startswith("Vaulter AI - Update restart"), _rtn() if _rtn else "")
+    _seg6 = src_ms[src_ms.index("def _restart_task("):src_ms.index("def _ensure_restart_task")]
+    check("6.17 the task principal is the full account name (works for work/school accounts)",
+          "WindowsIdentity]::GetCurrent().Name" in _seg6 and "$env:USERNAME" not in _seg6)
+
+    # chat side with broken state files: never an exception, never a wrong notice
+    ms._get_code_version = lambda: "1.0"
+    body = "ANSWER" * 20
+    for label, ready, state in (("ready.json a list", "[1]", "{}"), ("ready.json empty", "", "{}"),
+                                ("auto_restart.json a list", None, "[1, 2]"),
+                                ("auto_restart.json entries wrong", None, '{"2.0": "yes", "3": [1]}'),
+                                ("auto_restart.json not JSON", None, "{oops")):
+        if ready is None:
+            (_t6 / "pending" / "ready.json").unlink(missing_ok=True)
+        else:
+            (_t6 / "pending" / "ready.json").write_text(ready)
+        (_t6 / "data" / "auto_restart.json").write_text(state)
+        try:
+            ok = (ms._update_ready() == "" and ms._auto_restart_gave_up() == ""
+                  and isinstance(ms._update_message(ms._update_ready(), "", True, ""), str))
+        except Exception as e:  # noqa: BLE001
+            ok = False
+        check(f"6.17 chat side, {label}: no exception, no notice", ok)
+    (_t6 / "pending" / "ready.json").write_text(json.dumps(
+        {"version": "2.0", "zip_filename": "u.zip", "current_version_at_download": "1.0", "signature": "s"}))
+    (_t6 / "data" / "update_failures.json").write_text(json.dumps(
+        {"2.0": {"failures": 2, "set_aside": True, "signature": "s"}}))
+    check("6.17 a set-aside version is not offered in chat", ms._update_ready() == "", ms._update_ready())
+    (_t6 / "updates" / "latest_version_general.json").write_text(json.dumps(
+        {"version": "2.0", "zip_filename": "u.zip", "signature": "s", "force": True}))
+    (_t6 / "pending" / "ready.json").unlink()
+    cap7 = MsCapture()
+    ms.log.addHandler(cap7)
+    try:
+        _ch = getattr(config, "VAULTER_UPDATE_CHANNEL", "general")
+        config.VAULTER_UPDATE_CHANNEL = "general"
+        ms._check_and_stage_update()
+        config.VAULTER_UPDATE_CHANNEL = _ch
+    finally:
+        ms.log.removeHandler(cap7)
+    _msgs = [r_.getMessage() for r_ in cap7.records]
+    check("6.17 the hourly check does not download a set-aside version again",
+          any("set aside" in m for m in _msgs) and not any("missing" in m or "FAILED" in m for m in _msgs),
+          str(_msgs)[:200])
+finally:
+    for k, v in _s6.items():
+        setattr(config, k, v)
+    for k, v in _f6.items():
+        if v is not None:
+            setattr(ms, k, v)
+    shutil.rmtree(_t6, ignore_errors=True)
 
 # --- 6.18 main.py's startup log does not grow without limit --------------------------------------
 if _fn:
