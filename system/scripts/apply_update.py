@@ -45,6 +45,8 @@ reopened after the install.
 
 import base64
 import logging
+import os
+import stat
 import time as _time
 import hashlib
 import json
@@ -79,13 +81,89 @@ def _load_pending() -> dict | None:
     return json.loads(ready_path.read_text())
 
 
+# ---------------------------------------------------------------------------
+# File operations that survive what Windows does to an install (hardening pass,
+# 2026-11-19). Each was reproduced for real in check_auto_update.py section 6:
+#   * a read-only file (attribute set) cannot be deleted or overwritten;
+#   * antivirus, the search indexer or an Explorer preview holds a file for a
+#     moment, so a delete fails once and works a second later;
+#   * a path past 260 characters fails outright while Windows' long-path setting
+#     is off, which is the default (off on the maintainer's machine too), and the
+#     backup folder adds about 33 characters of depth;
+#   * a folder held open (Explorer, a console's current folder) cannot be removed.
+# ---------------------------------------------------------------------------
+
+_RETRY_DELAYS = (0.2, 0.5, 1.0, 2.0)        # ~3.7 s in all, then the error stands
+
+
+def _long(p: Path) -> Path:
+    """p as an extended-length path on Windows (the \\\\?\\ prefix), which lifts the
+    260-character limit for every file call. Unchanged elsewhere."""
+    if sys.platform != "win32":
+        return Path(p)
+    s = str(p)
+    if s.startswith("\\\\?\\"):
+        return Path(s)
+    s = os.path.abspath(s)
+    if s.startswith("\\\\"):
+        return Path("\\\\?\\UNC\\" + s[2:])
+    return Path("\\\\?\\" + s)
+
+
+def _retrying(action, path: Path):
+    """Run action(); on PermissionError clear a read-only attribute and try again
+    after a short wait, a few times. The last error is raised."""
+    for i in range(len(_RETRY_DELAYS) + 1):
+        try:
+            return action()
+        except PermissionError:
+            if i == len(_RETRY_DELAYS):
+                raise
+            try:
+                if os.path.lexists(path):
+                    os.chmod(path, stat.S_IREAD | stat.S_IWRITE)
+            except OSError:
+                pass
+            _time.sleep(_RETRY_DELAYS[i])
+
+
+def _unlink(path: Path) -> None:
+    path = _long(path)          # a too-long plain path reads as "not found", and missing_ok hides it
+    _retrying(lambda: path.unlink(missing_ok=True), path)
+
+
+def _copy(src: Path, dest: Path) -> None:
+    src, dest = _long(src), _long(dest)
+    _retrying(lambda: shutil.copy2(src, dest), dest)
+
+
+def _rmtree(path: Path) -> None:
+    """Delete a folder, read-only files included. Never raises: whatever still
+    cannot go is left, and callers that need it gone check afterwards."""
+    root = _long(path)
+    if not root.exists():
+        return
+    for d, _dirs, files in os.walk(root, topdown=False):
+        for f in files:
+            try:
+                _unlink(Path(d) / f)
+            except OSError:
+                pass
+        try:
+            os.rmdir(d)
+        except OSError:
+            pass
+
+
 def _sync_tree(project_root: Path, src_dir: Path) -> tuple[int, int]:
     """
     Make project_root match src_dir exactly, except for anything under a
     PRESERVED_DIR_NAMES path: delete files src_dir lacks, copy every file
     src_dir has, drop now-empty folders. Returns (copied, deleted). Shared by
     the apply and by the restore of a pre-update backup, so both behave alike.
+    Read-only files, brief locks and over-long paths are handled (see above).
     """
+    project_root, src_dir = _long(project_root), _long(src_dir)
     new_files = {
         p.relative_to(src_dir) for p in src_dir.rglob("*") if p.is_file()
     }
@@ -101,7 +179,7 @@ def _sync_tree(project_root: Path, src_dir: Path) -> tuple[int, int]:
         if _is_preserved(rel):
             continue
         if rel not in new_files:
-            existing.unlink()
+            _unlink(existing)
             deleted += 1
 
     # Step 2: copy every file from the new version into place.
@@ -112,14 +190,19 @@ def _sync_tree(project_root: Path, src_dir: Path) -> tuple[int, int]:
         src = src_dir / rel
         dest = project_root / rel
         dest.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(src, dest)
+        _copy(src, dest)
         updated += 1
 
     # Remove any now-empty directories left behind by step 1 (never
-    # inside a preserved path, and never the project root itself).
+    # inside a preserved path, and never the project root itself). A folder
+    # that cannot be removed (open in Explorer) is left: an empty folder is
+    # harmless, and failing the whole install over it would undo a good update.
     for d in sorted(project_root.rglob("*"), key=lambda p: len(p.parts), reverse=True):
-        if d.is_dir() and not _is_preserved(d.relative_to(project_root)) and not any(d.iterdir()):
-            d.rmdir()
+        try:
+            if d.is_dir() and not _is_preserved(d.relative_to(project_root)) and not any(d.iterdir()):
+                d.rmdir()
+        except OSError:
+            pass
 
     return updated, deleted
 
@@ -350,6 +433,7 @@ def apply_pending_update(project_root: Path = None, *, pip_timeout: int = 600) -
     if not verified:
         return {
             "applied": False,
+            "signature_failed": True,
             "reason": f"the staged package for version {version} failed signature "
                       f"verification at apply time -- refusing to apply it. Delete "
                       f"{zip_path} and the pending update record, then let it re-download.",
@@ -494,6 +578,12 @@ SMOKE_TEST_TIMEOUT = 120
 STARTUP_PIP_TIMEOUT = 60
 STARTUP_SMOKE_TEST_TIMEOUT = 45
 STARTUP_LOCK_WAIT_SECONDS = 60
+# main.py gives the startup installer 120 s and then kills it. Everything the
+# installer starts must be able to finish inside this budget (counted from the
+# installer's own start, lock wait included), with room to spare.
+STARTUP_BUDGET_SECONDS = 100
+STARTUP_MARGIN_SECONDS = 20          # the backup and file copy, which have no timeout of their own
+STARTUP_MIN_PIP_SECONDS = 30         # less than this is not worth starting pip for
 _NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
 
@@ -513,19 +603,126 @@ def running_version(project_root: Path) -> str:
     return lines[0].strip() if lines else ""
 
 
-def staged_update_applicable(pending, running: str) -> str:
+def staged_update_applicable(pending, running: str, data_dir: Path | None = None) -> str:
     """The version worth installing, or "". Not a dict, no version, the version
     already running, or a stage made while a different version was running (the
-    machine has since moved on, so installing it could be a downgrade)."""
+    machine has since moved on, so installing it could be a downgrade). Given
+    data_dir, also "" for a version set aside after failing to install (see
+    version_set_aside): the one place this rule lives, so the installer, the
+    restart task and the chat notice all ask the same question."""
     if not isinstance(pending, dict):
         return ""
     version = pending.get("version")
-    if not version or version == running:
+    if not version or not isinstance(version, (str, int, float)) or version == running:
         return ""
     at_download = pending.get("current_version_at_download")
     if at_download and running and at_download != running:
         return ""
+    if data_dir is not None and version_set_aside(data_dir, str(version), pending.get("signature")):
+        return ""
     return str(version)
+
+
+# ---------------------------------------------------------------------------
+# Versions that keep failing (hardening pass). Without this, a release whose
+# dependencies cannot install (no internet), or whose code cannot start, was put
+# back and then tried again at every start and every idle restart, for ever,
+# with an [ERROR] each time. Two failed installs of one version set it aside
+# until a different version is published (or the same version is re-published
+# with a different package, i.e. a new signature).
+# ---------------------------------------------------------------------------
+
+FAILURE_LIMIT = 2
+
+
+def _failures_path(data_dir: Path) -> Path:
+    return Path(data_dir) / "update_failures.json"
+
+
+def _read_failures(data_dir: Path) -> dict:
+    try:
+        data = json.loads(_failures_path(data_dir).read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+def version_set_aside(data_dir: Path, version: str, signature=None) -> bool:
+    """True if version failed FAILURE_LIMIT times here and the package has not
+    changed since (a different signature means a re-published package: try it)."""
+    entry = _read_failures(data_dir).get(str(version))
+    if not isinstance(entry, dict) or entry.get("set_aside") is not True:
+        return False
+    recorded = entry.get("signature")
+    return not (signature and recorded and recorded != signature)
+
+
+def record_failure(data_dir: Path, version: str, signature=None) -> bool:
+    """Count one failed automatic install of version. True when this failure is
+    the one that sets it aside. Never raises (a record that cannot be written
+    means the version is simply tried again)."""
+    try:
+        data = _read_failures(data_dir)
+        entry = data.get(str(version))
+        entry = entry if isinstance(entry, dict) else {}
+        if signature and entry.get("signature") and entry.get("signature") != signature:
+            entry = {}
+        try:
+            n = max(0, int(entry.get("failures", 0)))
+        except (TypeError, ValueError):
+            n = 0
+        n += 1
+        was = entry.get("set_aside") is True
+        data[str(version)] = {"failures": n, "set_aside": n >= FAILURE_LIMIT,
+                              "signature": str(signature or "")}
+        path = _failures_path(data_dir)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_name(path.name + ".tmp")
+        tmp.write_text(json.dumps(data, indent=2), encoding="utf-8")
+        os.replace(tmp, path)
+        return n >= FAILURE_LIMIT and not was
+    except Exception:
+        return False
+
+
+def discard_stage(data_dir: Path, pending) -> None:
+    """Remove the staged record and its package(s), so the next channel check
+    downloads a fresh copy (or nothing, for a set-aside version). Never raises."""
+    pend = Path(data_dir) / "pending_update"
+    names = ["ready.json"]
+    if isinstance(pending, dict):
+        names += [str(pending.get(k) or "") for k in ("zip_filename", "extras_zip_filename")]
+    for name in names:
+        if not name or Path(name).name != name:
+            continue                       # never follow a path out of the folder
+        try:
+            _unlink(pend / name)
+        except OSError:
+            pass
+
+
+def stage_problem(data_dir: Path, pending, version: str) -> str:
+    """Why the staged package for version cannot be installed as it stands
+    (missing, unreadable, or not shaped like a release), or "". Cheap: no
+    signature check, which apply_pending_update does right before writing."""
+    name = str(pending.get("zip_filename") or "") if isinstance(pending, dict) else ""
+    zip_path = Path(data_dir) / "pending_update" / name
+    if not name or not zip_path.is_file():
+        return "missing"
+    return staged_package_problem(zip_path, version)
+
+
+def set_aside_after_failure(data_dir: Path, pending, version: str, what: str) -> bool:
+    """Count a failed install of version; on the failure that sets it aside, log
+    the one [ERROR] saying so and drop its stage. True if it is now set aside."""
+    signature = pending.get("signature") if isinstance(pending, dict) else None
+    if record_failure(data_dir, version, signature):
+        log.error(f"automatic update to {version} has failed {FAILURE_LIMIT} times ({what}); "
+                  f"it is set aside and will not be tried again until a newer version is "
+                  f"published. This computer stays on the version it has.")
+        discard_stage(data_dir, pending)
+        return True
+    return version_set_aside(data_dir, version, signature)
 
 
 def release_changes_dependencies(project_root: Path, zip_path: Path) -> bool:
@@ -574,22 +771,34 @@ def _count_servers(procs: list, main_py: Path, self_pid: int) -> int:
     return len(roots)
 
 
+def powershell_exe() -> str:
+    """Windows PowerShell by its full path, so a PATH that lost System32's
+    PowerShell folder (it happens: an installer rewriting PATH) does not quietly
+    turn every process listing and task query into "could not tell"."""
+    root = os.environ.get("SystemRoot") or os.environ.get("windir") or r"C:\Windows"
+    p = Path(root) / "System32" / "WindowsPowerShell" / "v1.0" / "powershell.exe"
+    return str(p) if p.is_file() else "powershell"
+
+
 def other_servers_running(project_root: Path) -> bool:
     """True if another MCP server from this install is running. Windows only;
     False on any failure (the caller then proceeds -- a missed server costs one
     update applied under it, which the backup covers). Output goes to a file,
-    never a pipe, for the reason refresh_dependencies gives."""
+    never a pipe, for the reason refresh_dependencies gives, and in UTF-8: with
+    the console's code page an install path holding a letter like 'é' came back
+    mangled and never matched, so a running server went unseen."""
     if sys.platform != "win32":
         return False
-    import os
     out_path = Path(tempfile.gettempdir()) / f"vaulter_procs_{os.getpid()}.json"
     try:
-        script = ("Get-CimInstance Win32_Process -Filter \"Name like 'python%'\" | "
+        script = ("[Console]::OutputEncoding = [Text.Encoding]::UTF8; "
+                  "Get-CimInstance Win32_Process -Filter \"Name like 'python%'\" | "
                   "Select-Object ProcessId, ParentProcessId, CommandLine | ConvertTo-Json -Compress")
         with open(out_path, "w", encoding="utf-8") as fh:
             result = subprocess.run(
-                ["powershell", "-NoProfile", "-NonInteractive", "-Command", script],
+                [powershell_exe(), "-NoProfile", "-NonInteractive", "-Command", script],
                 stdout=fh, stderr=subprocess.DEVNULL, stdin=subprocess.DEVNULL, timeout=20,
+                creationflags=_NO_WINDOW,
             )
         if result.returncode != 0:
             return False
@@ -623,9 +832,11 @@ def _backup_tree(project_root: Path, dest: Path, marker: Path, source_version: s
     """Copy every non-preserved file to dest, then write marker LAST. A backup
     without its marker is partial and must never be restored (a restore deletes
     whatever the backup lacks)."""
-    marker.unlink(missing_ok=True)
-    if dest.exists():
-        shutil.rmtree(dest)
+    _unlink(marker)
+    project_root, dest = _long(project_root), _long(dest)
+    _rmtree(dest)
+    if dest.exists() and any(p.is_file() for p in dest.rglob("*")):
+        raise OSError("an earlier backup folder could not be cleared")
     dest.mkdir(parents=True, exist_ok=True)
     count = 0
     for p in project_root.rglob("*"):
@@ -636,16 +847,16 @@ def _backup_tree(project_root: Path, dest: Path, marker: Path, source_version: s
             continue
         target = dest / rel
         target.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(p, target)
+        _copy(p, target)
         count += 1
-    marker.write_text(json.dumps({"source_version": source_version, "files": count}),
+    _long(marker).write_text(json.dumps({"source_version": source_version, "files": count}),
                       encoding="utf-8")
 
 
 def _discard_backup(dest: Path, marker: Path) -> None:
-    shutil.rmtree(dest, ignore_errors=True)
+    _rmtree(dest)
     try:
-        marker.unlink(missing_ok=True)
+        _unlink(marker)
     except OSError:
         pass
 
@@ -656,8 +867,10 @@ def _backup_is_usable(dest: Path, marker: Path, current_version: str, target_ver
     (a half-applied tree has copied the new VERSION). Any OTHER running version
     means the machine moved on, and a backup of an older tree must not go over it."""
     try:
-        info = json.loads(marker.read_text(encoding="utf-8"))
-        if not dest.is_dir() or current_version not in (info.get("source_version"), target_version):
+        info = json.loads(_long(marker).read_text(encoding="utf-8"))
+        dest = _long(dest)
+        if (not isinstance(info, dict) or not dest.is_dir()
+                or current_version not in (info.get("source_version"), target_version)):
             return False
         return sum(1 for p in dest.rglob("*") if p.is_file()) == info.get("files")
     except Exception:
@@ -684,14 +897,41 @@ def staged_package_problem(zip_path: Path, version: str) -> str:
     return ""
 
 
+# The smoke test's child program. mcp_server's own top level imports only the
+# standard library, so importing it alone proved little; config (every entry
+# point's first import) and the MCP library (a dependency that pip may just have
+# changed) are imported too. config creates folders when it is imported,
+# including in the team's shared folder; a release being TESTED must not do that
+# (if it fails, it is put back, and the folders would stay behind in everyone's
+# folder), so for this child only, creating a folder outside the install does
+# nothing. Nothing else in config writes at import time (checked 2026-11-19).
+_SMOKE_CODE = """\
+import pathlib, sys
+root = pathlib.Path({root!r}).resolve()
+sys.path.insert(0, str(root))
+_mkdir = pathlib.Path.mkdir
+def _mkdir_inside_only(self, *a, **k):
+    try:
+        inside = pathlib.Path(self).resolve().is_relative_to(root)
+    except Exception:
+        inside = False
+    if inside:
+        return _mkdir(self, *a, **k)
+pathlib.Path.mkdir = _mkdir_inside_only
+import config
+import mcp.server.fastmcp
+import mcp_server
+"""
+
+
 def _smoke_test(project_root: Path, timeout: int = SMOKE_TEST_TIMEOUT) -> bool:
-    """Can the freshly installed code be imported at all? `import mcp_server` in a
-    child process (stdin closed, output to a temp file, never pipes). False on a
-    non-zero exit, a timeout, or anything else going wrong. Checks replace this
-    function to force a pass or a failure without importing anything."""
-    import os
+    """Can the freshly installed code be imported at all? config, the MCP library
+    and mcp_server, in a child process (stdin closed, output to a temp file,
+    never pipes); see _SMOKE_CODE. False on a non-zero exit, a timeout, or
+    anything else going wrong. Checks replace this function to force a pass or a
+    failure without importing anything."""
     out = Path(tempfile.gettempdir()) / f"vaulter_smoke_{os.getpid()}_{_time.time_ns()}.txt"
-    code = f"import sys; sys.path.insert(0, {str(project_root)!r}); import mcp_server"
+    code = _SMOKE_CODE.format(root=str(project_root))
     try:
         with open(out, "w", encoding="utf-8", errors="replace") as fh:
             r = subprocess.run([sys.executable, "-c", code], cwd=str(project_root),
@@ -773,11 +1013,59 @@ def _restart_task_gave_up(project_root: Path, version: str) -> bool:
         return False
 
 
-def _lock_is_fresh(lock: Path) -> bool:
+def _pid_alive(pid: int):
+    """True / False if the process is / is not running, None when it cannot be
+    told. Never os.kill(pid, 0) on Windows: there it sends Ctrl+C."""
+    if pid <= 0:
+        return False
+    if sys.platform != "win32":
+        try:
+            os.kill(pid, 0)
+            return True
+        except ProcessLookupError:
+            return False
+        except Exception:
+            return None
     try:
-        return (_time.time() - lock.stat().st_mtime) <= LOCK_STALE_SECONDS
+        import ctypes
+        k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        k32.OpenProcess.restype = ctypes.c_void_p
+        handle = k32.OpenProcess(0x1000, False, int(pid))   # PROCESS_QUERY_LIMITED_INFORMATION
+        if not handle:
+            err = ctypes.get_last_error()
+            return False if err == 87 else (True if err == 5 else None)   # no such pid / access denied
+        try:
+            code = ctypes.c_ulong(0)
+            if not k32.GetExitCodeProcess(ctypes.c_void_p(handle), ctypes.byref(code)):
+                return None
+            return code.value == 259                                    # STILL_ACTIVE
+        finally:
+            k32.CloseHandle(ctypes.c_void_p(handle))
+    except Exception:
+        return None
+
+
+def _lock_is_stale(lock: Path) -> bool:
+    """A lock nobody holds any more: older than LOCK_STALE_SECONDS; dated more than
+    a minute in the FUTURE (written before the clock was put back, it would
+    otherwise look fresh for as long as the clock was off -- and every start
+    would wait for it); or naming a process that is no longer running (an
+    installer killed by main.py's 120 s limit leaves its lock behind)."""
+    try:
+        age = _time.time() - lock.stat().st_mtime
     except OSError:
         return False
+    if age > LOCK_STALE_SECONDS or age < -60:
+        return True
+    try:
+        pid = int(lock.read_text(encoding="utf-8", errors="replace").strip() or "0")
+    except (OSError, ValueError):
+        return False
+    return pid > 0 and pid != os.getpid() and _pid_alive(pid) is False
+
+
+def _lock_is_fresh(lock: Path) -> bool:
+    return lock.exists() and not _lock_is_stale(lock)
 
 
 def _wait_for_lock(lock: Path, seconds: float = STARTUP_LOCK_WAIT_SECONDS, *,
@@ -799,11 +1087,9 @@ def _take_lock(lock: Path) -> bool:
         try:
             fd = os.open(str(lock), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
         except FileExistsError:
-            try:
-                age = _time.time() - lock.stat().st_mtime
-            except OSError:
+            if not lock.exists():
                 continue
-            if age > LOCK_STALE_SECONDS:
+            if _lock_is_stale(lock):
                 try:
                     lock.unlink()
                 except OSError:
@@ -816,7 +1102,8 @@ def _take_lock(lock: Path) -> bool:
     return False
 
 
-def auto_apply(project_root: Path | None = None, *, at_startup: bool = False) -> dict:
+def auto_apply(project_root: Path | None = None, *, at_startup: bool = False,
+               deadline: float | None = None, clock=_time.monotonic) -> dict:
     """
     Install the staged update without asking, but only when that is safe.
     Never raises. Returns {"applied", "version", "reason", "restored"}.
@@ -832,6 +1119,15 @@ def auto_apply(project_root: Path | None = None, *, at_startup: bool = False) ->
     Every file is backed up first and put back ([ERROR], restored=True) if the
     install raises, its dependencies fail to install, or the new code cannot be
     imported in a child process.
+
+    Hardening pass: a staged package that is missing, unreadable, not shaped
+    like a release, or fails its signature is thrown away so the next channel
+    check downloads it again; each failed install of a version is counted, and
+    the second one sets that version aside until a newer one is published
+    (set_aside_after_failure), so nothing retries for ever. `deadline` (a
+    `clock()` value) is the startup budget: steps that could not finish before
+    it are left for the idle restart, because main.py kills the installer at
+    120 s and a step killed from outside cannot undo itself.
     """
     if project_root is None:
         project_root = PROJECT_ROOT
@@ -850,27 +1146,36 @@ def auto_apply(project_root: Path | None = None, *, at_startup: bool = False) ->
                 pending = json.loads(ready.read_text(encoding="utf-8"))
         except Exception:
             pending = None
-        version = staged_update_applicable(pending, running_version(project_root))
+        version = staged_update_applicable(pending, running_version(project_root), data)
         if not version:
             result["reason"] = "no update is waiting for this version"
             return result
         result["version"] = version
 
         zip_path = data / "pending_update" / str(pending.get("zip_filename", ""))
-        if not zip_path.is_file():
+        problem = stage_problem(data, pending, version)
+        if problem == "missing":
+            # The channel check re-downloads only when no record names this
+            # version, so the record goes too -- or it would wait for ever.
+            discard_stage(data, pending)
             result["reason"] = (f"the package for version {version} is not downloaded; it will "
                                 f"be fetched again on the next check")
             return result
-        problem = staged_package_problem(zip_path, version)
         if problem:
             log.error(f"automatic update to {version} refused: the staged package does not "
                       f"look like a Vaulter AI release")
-            result["reason"] = f"the staged package for version {version} was refused: {problem}"
+            discard_stage(data, pending)
+            set_aside_after_failure(data, pending, version, "its package was unusable")
+            result["reason"] = (f"the staged package for version {version} was refused: {problem}; "
+                                f"it will be downloaded again")
             return result
 
+        pip_timeout = STARTUP_PIP_TIMEOUT if at_startup else AUTO_PIP_TIMEOUT
+        smoke_timeout = STARTUP_SMOKE_TEST_TIMEOUT if at_startup else SMOKE_TEST_TIMEOUT
+
         if at_startup:
-            if (release_changes_dependencies(project_root, zip_path)
-                    and not _restart_task_gave_up(project_root, version)):
+            deps_change = release_changes_dependencies(project_root, zip_path)
+            if deps_change and not _restart_task_gave_up(project_root, version):
                 result["reason"] = (f"version {version} changes the dependency list, so the "
                                     f"idle restart will install it")
                 return result
@@ -878,9 +1183,15 @@ def auto_apply(project_root: Path | None = None, *, at_startup: bool = False) ->
                 result["reason"] = (f"another Vaulter AI server is running, so the idle "
                                     f"restart will install version {version}")
                 return result
-
-        pip_timeout = STARTUP_PIP_TIMEOUT if at_startup else AUTO_PIP_TIMEOUT
-        smoke_timeout = STARTUP_SMOKE_TEST_TIMEOUT if at_startup else SMOKE_TEST_TIMEOUT
+            if deadline is not None:
+                # What is left of the startup budget must hold the smoke test, a
+                # margin for the backup and file copy, and (if needed) pip.
+                spare = deadline - clock() - smoke_timeout - STARTUP_MARGIN_SECONDS
+                if spare < 0 or (deps_change and spare < STARTUP_MIN_PIP_SECONDS):
+                    result["reason"] = (f"not enough of the startup time is left to install "
+                                        f"version {version} safely, so the idle restart will")
+                    return result
+                pip_timeout = int(min(pip_timeout, spare))
 
         lock = data / "apply.lock"
         if not _take_lock(lock):
@@ -905,12 +1216,22 @@ def auto_apply(project_root: Path | None = None, *, at_startup: bool = False) ->
                           f"({type(e).__name__}); putting the previous version back")
                 result["restored"] = _restore(project_root, backup, marker, version)
                 result["reason"] = f"the update failed and was undone ({e})"
+                set_aside_after_failure(data, pending, version, "the install failed")
                 return result
 
             if not applied.get("applied"):
                 # Nothing was written (no stage, missing file, bad signature).
                 _discard_backup(backup, marker)
                 result["reason"] = applied.get("reason", "")
+                if applied.get("signature_failed"):
+                    # Verified when it was downloaded, so the copy here changed
+                    # since. Left in place it would block this version for ever
+                    # (the channel check sees it as already downloaded).
+                    log.warning(f"[APPLY] the staged package for {version} failed its signature "
+                                f"check at install time; it is thrown away and will be "
+                                f"downloaded again")
+                    discard_stage(data, pending)
+                    set_aside_after_failure(data, pending, version, "its signature did not verify")
                 return result
 
             if applied.get("dependencies_ok") is False:
@@ -921,6 +1242,7 @@ def auto_apply(project_root: Path | None = None, *, at_startup: bool = False) ->
                 result["restored"] = _restore(project_root, backup, marker, version)
                 result["reason"] = (f"the dependencies of version {version} could not be "
                                     f"installed, so the previous version was put back")
+                set_aside_after_failure(data, pending, version, "its dependencies could not be installed")
                 return result
 
             # Can the new code even be imported? Run with the in-progress note
@@ -932,6 +1254,7 @@ def auto_apply(project_root: Path | None = None, *, at_startup: bool = False) ->
                 result["restored"] = _restore(project_root, backup, marker, version)
                 result["reason"] = (f"version {version} could not be started, so the previous "
                                     f"version was put back")
+                set_aside_after_failure(data, pending, version, "the new version could not be started")
                 return result
             _clear_in_progress(project_root)
 
@@ -951,6 +1274,16 @@ def auto_apply(project_root: Path | None = None, *, at_startup: bool = False) ->
         return result
 
 
+def _only_complete_backup(project_root: Path) -> str:
+    """The version of the one complete pre-update backup, or "" (none, or several)."""
+    try:
+        found = [p.name[len("pre_update_"):-len(".complete")]
+                 for p in (project_root / "data" / "backups").glob("pre_update_*.complete")]
+    except OSError:
+        return ""
+    return found[0] if len(found) == 1 else ""
+
+
 def recover_unfinished_apply(project_root: Path | None = None) -> bool:
     """If an apply began and never finished (marker present) and a backup of the
     version it was replacing exists, put that backup back. True if it did. The
@@ -966,8 +1299,19 @@ def recover_unfinished_apply(project_root: Path | None = None) -> bool:
     try:
         if not note.exists():
             return False
-        version = json.loads(note.read_text(encoding="utf-8")).get("version")
+        try:
+            info = json.loads(note.read_text(encoding="utf-8"))
+            version = info.get("version") if isinstance(info, dict) else None
+        except Exception:
+            version = None
         if not version:
+            # A note emptied or garbled by a process killed while writing it.
+            # Exactly one complete backup says which update it was; anything
+            # else cannot be told, and that is not an error worth reporting.
+            version = _only_complete_backup(project_root)
+        if not version:
+            log.info("[APPLY] an unfinished-update note could not be read, and no single "
+                     "backup matches it; nothing to put back")
             return False
         lock = project_root / "data" / "apply.lock"
         if not _take_lock(lock):
@@ -1057,10 +1401,11 @@ def _auto_cli(startup: bool, project_root: Path | None = None, *,
         handler.setFormatter(logging.Formatter("%(asctime)s  [%(levelname)s]  %(message)s"))
         root_logger.addHandler(handler)
         root_logger.setLevel(logging.INFO)
+        deadline = clock() + STARTUP_BUDGET_SECONDS if startup else None
         if startup:
             _wait_for_lock(project_root / "data" / "apply.lock", sleep=sleep, clock=clock)
         recovered = recover_unfinished_apply(project_root)
-        r = auto_apply(project_root, at_startup=startup)
+        r = auto_apply(project_root, at_startup=startup, deadline=deadline, clock=clock)
         extra = " (previous version put back after an unfinished apply)" if recovered else ""
         print(f"auto-update: applied={r['applied']} version={r['version'] or '-'} "
               f"restored={r['restored']} {r['reason']}{extra}".strip())

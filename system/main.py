@@ -53,7 +53,16 @@ def _auto_install_at_startup(system_dir: Path) -> None:
             return
         logs = data / "logs"
         logs.mkdir(parents=True, exist_ok=True)
-        with open(logs / "auto_install.txt", "ab") as out:
+        log_file = logs / "auto_install.txt"
+        try:
+            # One line per start while something is staged; keep the newest
+            # half once it passes 256 KB, so it can never grow without end.
+            if log_file.stat().st_size > 256 * 1024:
+                tail = log_file.read_bytes()[-128 * 1024:]
+                log_file.write_bytes(tail[tail.find(b"\n") + 1:])
+        except OSError:
+            pass
+        with open(log_file, "ab") as out:
             subprocess.run(
                 [sys.executable, str(system_dir / "scripts" / "apply_update.py"),
                  "--auto", "--startup"],

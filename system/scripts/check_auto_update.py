@@ -586,12 +586,15 @@ if _REAL_SMOKE is not None:
         good = Path(t) / "good"
         good.mkdir()
         (good / "mcp_server.py").write_text("X = 1\n")
+        (good / "config.py").write_text("Y = 1\n")          # the smoke test imports config too
         bad = Path(t) / "bad"
         bad.mkdir()
         (bad / "mcp_server.py").write_text("raise ImportError('broken release')\n")
+        (bad / "config.py").write_text("Y = 1\n")
         slow = Path(t) / "slow"
         slow.mkdir()
         (slow / "mcp_server.py").write_text("import time\ntime.sleep(60)\n")
+        (slow / "config.py").write_text("Y = 1\n")
         check("I2: real smoke test passes on an importable tree", _REAL_SMOKE(good, 60) is True)
         check("I2: real smoke test fails on a tree whose import raises", _REAL_SMOKE(bad, 60) is False)
         t0 = time.monotonic()
@@ -763,7 +766,9 @@ with tempfile.TemporaryDirectory() as t:
         for sub in ("confidentials", ".venv", "data"):
             for p in (r / sub).rglob("*"):
                 rel = p.relative_to(r)
-                if p.is_file() and not ({"backups", "logs"} & set(rel.parts)) and p.name != "apply.lock":
+                # the installer's own bookkeeping (lock, backups, logs, its failure count) is not user data
+                if p.is_file() and not ({"backups", "logs"} & set(rel.parts)) \
+                        and p.name not in ("apply.lock", "update_failures.json"):
                     out[str(rel)] = sha(p)
         return out
     before = kept(root)
@@ -934,13 +939,17 @@ class Env:
 
     def __init__(self, procs=None, after_kill=None, idle=1000.0, start_apps=None,
                  apply_result=None, relist=None, list_cost=0.0, recover_raises=False,
-                 apply_raises=False, relaunch_ok=True, now=DESKTOP_START_EPOCH + 3600):
+                 apply_raises=False, relaunch_ok=True, now=DESKTOP_START_EPOCH + 3600,
+                 appears=True, slept=0.0):
         self.procs = list(DESKTOP_ROWS + CLI_ROWS) if procs is None else procs
         self.after_kill = list(CLI_ROWS) if after_kill is None else after_kill
         self.relist = relist              # what the re-check right before taskkill sees
         self.list_cost = list_cost        # seconds of (fake) wall time each listing takes
         self.recover_raises, self.apply_raises = recover_raises, apply_raises
         self.relaunch_ok = relaunch_ok
+        self.appears = appears            # does Desktop show up again after a relaunch?
+        self.relaunched = False
+        self.slept = slept                # seconds asleep since boot (sleep/wake guard)
         self.clock = 0.0                  # fake monotonic clock
         self.now = now                    # fake epoch time
         self.n_list = 0
@@ -957,8 +966,11 @@ class Env:
             "taskkill": self.taskkill, "relaunch": self.relaunch,
             "idle_seconds": self.idle_seconds, "channel_check": self.channel_check,
             "recover": self.recover, "auto_apply": self.auto_apply, "sleep": self.sleep,
-            "monotonic": self.monotonic, "time": self.time,
+            "monotonic": self.monotonic, "time": self.time, "slept_seconds": self.slept_seconds,
         }
+
+    def slept_seconds(self):
+        return self.slept
 
     def names(self):
         return [c[0] for c in self.calls]
@@ -969,6 +981,8 @@ class Env:
         self.clock += self.list_cost
         if self.n_list == 2 and self.relist is not None and not self.killed:
             return list(self.relist)
+        if self.relaunched and self.appears and self.relaunch_ok:
+            return list(self.procs)
         return list(self.after_kill if self.killed else self.procs)
 
     def monotonic(self):
@@ -988,6 +1002,7 @@ class Env:
 
     def relaunch(self, cmd):
         self.calls.append(("relaunch", list(cmd)))
+        self.relaunched = True
         return self.relaunch_ok
 
     def idle_seconds(self):
@@ -1025,6 +1040,9 @@ def restart_tree(tmp: Path, dev: bool = False, staged: bool = True) -> Path:
     if staged:
         (root / "data" / "pending_update" / "ready.json").write_text(json.dumps(
             {"version": "2.0", "zip_filename": "u.zip", "current_version_at_download": "1.0"}))
+        with zipfile.ZipFile(root / "data" / "pending_update" / "u.zip", "w") as zf:
+            zf.writestr("VERSION", "2.0\n")
+            zf.writestr("main.py", "new main\n")
     if dev:
         (tmp / ".git").write_text("gitdir: elsewhere")
     return root
@@ -1195,7 +1213,8 @@ if ar is not None and all(hasattr(ar, f) for f in AR_NEEDED):
         check("restart: Start menu entry read BEFORE stopping",
               "start_apps" in names and names.index("start_apps") < names.index("taskkill"), str(names))
         check("restart: waits for Desktop to be gone before installing",
-              names.index("taskkill") < max(i for i, n in enumerate(names) if n == "list_processes")
+              names.index("taskkill") < max(i for i, n in enumerate(names[:names.index("auto_apply")])
+                                            if n == "list_processes")
               < names.index("auto_apply"), str(names))
         check("restart: recovers an unfinished apply first, then installs, not at startup",
               names.index("recover") < names.index("auto_apply")
@@ -1698,6 +1717,351 @@ if _claude_md.exists() and _skill_md.exists():      # repo checkout only; never 
           "the give-up reset and the verified task",
           all(k in _block for k in ("requirements.txt", "another server", "import mcp_server",
                                     "main.py", "gave_up_at", "_RESTART_TASK_OK")))
+
+# =============================================================================
+print("\n6. Things that go wrong (hardening pass)")
+# Each check reproduces one unhappy path with throwaway folders and stubs. Real
+# file locks, read-only attributes and over-long paths are made for real (in temp
+# folders), because those are what Windows actually does to an install.
+import stat  # noqa: E402
+import threading  # noqa: E402
+
+
+def real_sync(project_root):
+    """apply_pending_update stand-in that does the real file sync of the staged zip."""
+    au.apply_update(project_root, project_root / "data" / "pending_update" / "u.zip")
+    return {"applied": True, "version": "2.0", "dependencies_ok": True}
+
+
+def failures_of(root: Path):
+    p = root / "data" / "update_failures.json"
+    try:
+        return json.loads(p.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+
+
+# --- 6.1 a read-only program file ------------------------------------------------
+with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as t:
+    root = make_tree(Path(t))
+    os.chmod(root / "a.py", stat.S_IREAD)
+    os.chmod(root / "gone.py", stat.S_IREAD)
+    try:
+        with Stub(real_sync):
+            r = au.auto_apply(root)
+    except Exception as e:  # noqa: BLE001
+        r = {"applied": False, "reason": f"raised {e!r}", "restored": False}
+    check("6.1 a read-only program file: the update still installs",
+          r["applied"] is True and (root / "a.py").read_text() == "new a\n"
+          and not (root / "gone.py").exists(), str(r))
+    check("6.1 ...and the backup (which copied the read-only bit) is cleaned up",
+          not (root / "data" / "backups" / "pre_update_2.0").exists())
+with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as t:
+    root = make_tree(Path(t))
+    before = snapshot(root)
+    os.chmod(root / "a.py", stat.S_IREAD)
+
+    def sync_then_break(project_root):
+        au.apply_update(project_root, project_root / "data" / "pending_update" / "u.zip")
+        raise RuntimeError("late failure")
+    with Stub(sync_then_break):
+        r = au.auto_apply(root)
+    check("6.1 a read-only file and a failed install: the restore still puts every file back",
+          r["restored"] is True and snapshot(root) == before, str(r))
+
+# --- 6.2 a file held open (antivirus, indexer, Explorer preview) --------------------
+with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as t:
+    root = make_tree(Path(t))
+    held = open(root / "gone.py", "rb")          # Python opens without delete sharing
+    threading.Timer(0.6, held.close).start()      # ...and lets go a moment later
+    with Stub(real_sync):
+        r = au.auto_apply(root)
+    held.close()
+    check("6.2 a file locked for a moment: retried, and the update installs",
+          r["applied"] is True and not (root / "gone.py").exists(), str(r))
+with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as t:
+    root = make_tree(Path(t))
+    before = snapshot(root)
+    held = open(root / "gone.py", "rb")
+    try:
+        with Stub(real_sync):
+            r = au.auto_apply(root)
+    finally:
+        held.close()
+    check("6.2 a file locked throughout: the install is undone, nothing half-new",
+          r["applied"] is False and r["restored"] is True and snapshot(root) == before, str(r))
+
+# --- 6.3 a folder that empties out is open in Explorer (cannot be removed) ----------
+with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as t:
+    root = make_tree(Path(t))
+    (root / "oldpkg").mkdir()
+    (root / "oldpkg" / "only.py").write_text("removed upstream\n")
+    here = os.getcwd()
+    os.chdir(root / "oldpkg")                     # a process inside it holds the folder
+    try:
+        with Stub(real_sync):
+            r = au.auto_apply(root)
+    finally:
+        os.chdir(here)
+    check("6.3 an emptied folder that cannot be removed does not fail the update",
+          r["applied"] is True and not (root / "oldpkg" / "only.py").exists(), str(r))
+
+# --- 6.4 paths over Windows' 260-character limit -------------------------------------
+with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as t:
+    deep = Path(t).resolve()
+    while len(str(deep)) < 218:
+        deep = deep / ("d" * max(1, min(40, 217 - len(str(deep)))))
+    deep.mkdir(parents=True, exist_ok=True)
+    root = make_tree(deep)                        # ~225 chars: the backup folder lands past 260
+    try:
+        with Stub(real_sync):
+            r = au.auto_apply(root)
+    except Exception as e:  # noqa: BLE001
+        r = {"applied": False, "reason": f"raised {e!r}", "restored": False}
+    check(f"6.4 an install {len(str(root))} characters deep (backup past 260): installs",
+          r["applied"] is True and (root / "c.py").exists(), r["reason"][:120])
+    check("6.4 ...and leaves no backup behind",
+          not any(p.name.startswith("pre_update") for p in (root / "data").rglob("*"))
+          if (root / "data").exists() else False)
+
+# --- 6.5 disk full during the restore: kept for the next start -----------------------
+with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as t:
+    root = make_tree(Path(t))
+    before = snapshot(root)
+    real_sync_tree = au._sync_tree
+    n = {"calls": 0}
+
+    def full_on_restore(project_root, src):
+        n["calls"] += 1
+        if n["calls"] == 1:
+            raise OSError(28, "No space left on device")
+        return real_sync_tree(project_root, src)
+
+    def half_then_full(project_root):
+        (project_root / "a.py").write_text("half\n")
+        raise OSError(28, "No space left on device")
+    au._sync_tree = lambda pr, src: full_on_restore(pr, src)
+    try:
+        with Stub(half_then_full):
+            r = au.auto_apply(root)
+    finally:
+        au._sync_tree = real_sync_tree
+    check("6.5 disk full during the restore: reported, backup and note kept",
+          r["restored"] is False and (root / "data" / "apply_in_progress.json").exists()
+          and au._marker_path(root, "2.0").exists(), str(r))
+    check("6.5 ...and the next start puts the old version back",
+          au.recover_unfinished_apply(root) is True and snapshot(root) == before)
+
+# --- 6.6 a corrupt staged zip is thrown away and fetched again; twice sets it aside --
+with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as t:
+    root = make_tree(Path(t))
+    pend = root / "data" / "pending_update"
+    good_zip = (pend / "u.zip").read_bytes()
+    ready_text = (pend / "ready.json").read_text()
+    (pend / "u.zip").write_bytes(good_zip[:40])   # truncated download
+    with Capture() as cap, Stub(ok_apply) as s:
+        r1 = au.auto_apply(root)
+    check("6.6 a truncated staged zip: refused, nothing installed",
+          r1["applied"] is False and s.calls == 0, r1["reason"])
+    check("6.6 ...and the stage is thrown away so the next check downloads it again",
+          not (pend / "ready.json").exists() and not (pend / "u.zip").exists())
+    (pend / "u.zip").write_bytes(good_zip[:40])
+    (pend / "ready.json").write_text(ready_text)
+    with Capture() as cap2, Stub(ok_apply):
+        au.auto_apply(root)
+        r3 = au.auto_apply(root)
+    _f = failures_of(root) or {}
+    check("6.6 the same version refused twice: set aside, with one [ERROR] saying so",
+          (_f.get("2.0") or {}).get("set_aside") is True
+          and sum("set aside" in m for m in cap.errors() + cap2.errors()) == 1,
+          f"{_f} {cap.errors() + cap2.errors()}")
+    check("6.6 ...a set-aside version is no longer 'applicable'",
+          au.staged_update_applicable(json.loads(ready_text), "1.0", data_dir=root / "data") == ""
+          if "data_dir" in inspect.signature(au.staged_update_applicable).parameters else False)
+
+# --- 6.7 ready.json names a zip that is not there ---------------------------------------
+with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as t:
+    root = make_tree(Path(t))
+    (root / "data" / "pending_update" / "u.zip").unlink()
+    with Stub(ok_apply):
+        r = au.auto_apply(root)
+    check("6.7 a missing staged zip: the record is cleared so the next check re-downloads it",
+          r["applied"] is False and not (root / "data" / "pending_update" / "ready.json").exists(),
+          r["reason"])
+
+# --- 6.8 the signature fails at install time ---------------------------------------------
+with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as t:
+    root = make_tree(Path(t))
+    import config as _cfg6  # noqa: E402
+    _saved6 = (_cfg6.PENDING_UPDATE_DIR, getattr(_cfg6, "APPLY_IN_PROGRESS_FILE", None))
+    _cfg6.PENDING_UPDATE_DIR = root / "data" / "pending_update"
+    try:
+        real = au.apply_pending_update(root)    # the zip is unsigned: a real verification failure
+    finally:
+        _cfg6.PENDING_UPDATE_DIR = _saved6[0]
+    check("6.8 a signature failure at install time is marked as one",
+          real.get("applied") is False and real.get("signature_failed") is True, str(real)[:160])
+    with Capture() as cap, Stub(lambda pr: dict(real)):
+        r = au.auto_apply(root)
+    check("6.8 ...auto_apply throws the stage away (re-downloaded) and counts it",
+          not (root / "data" / "pending_update" / "ready.json").exists()
+          and ((failures_of(root) or {}).get("2.0") or {}).get("failures") == 1, str(failures_of(root)))
+    check("6.8 ...and says so in the log", any("signature" in m for m in
+                                              [x.getMessage() for x in cap.records]))
+
+# --- 6.9 a release that fails to start, twice: set aside until a newer one -----------------
+with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as t:
+    root = make_tree(Path(t))
+    before = snapshot(root)
+    set_smoke(lambda pr, timeout=120: False)
+    try:
+        with Capture() as cap, Stub(ok_apply) as s:
+            r1 = au.auto_apply(root)
+            r2 = au.auto_apply(root)
+            r3 = au.auto_apply(root)
+    finally:
+        set_smoke(_passing_smoke)
+    check("6.9 smoke test fails twice: restored both times", r1["restored"] and r2["restored"]
+          and snapshot(root) == before, f"{r1} {r2}")
+    check("6.9 ...the third attempt does not install again", s.calls == 2 and r3["applied"] is False,
+          f"{s.calls} {r3['reason']}")
+    check("6.9 ...one [ERROR] says it is set aside", sum("set aside" in m for m in cap.errors()) == 1,
+          str(cap.errors()))
+    check("6.9 ...and its stage is gone", not (root / "data" / "pending_update" / "ready.json").exists())
+    # a NEWER version is tried normally
+    pend = root / "data" / "pending_update"
+    with zipfile.ZipFile(pend / "v3.zip", "w") as zf:
+        zf.writestr("VERSION", "3.0\n")
+        zf.writestr("main.py", "x\n")
+    (pend / "ready.json").write_text(json.dumps({"version": "3.0", "zip_filename": "v3.zip"}))
+    with Stub(ok_apply) as s:
+        r = au.auto_apply(root)
+    check("6.9 ...a newer version is installed normally", r["applied"] is True and s.calls == 1, str(r))
+
+# --- 6.10 a corrupt in-progress note -------------------------------------------------------
+for label, content in (("empty", ""), ("not JSON", "{oops"), ("a list", "[1, 2]"), ("null", "null")):
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as t:
+        root = make_tree(Path(t))
+        (root / "data" / "apply_in_progress.json").write_text(content)
+        with Capture() as cap:
+            got = au.recover_unfinished_apply(root)
+        check(f"6.10 in-progress note {label}: no [ERROR], nothing restored",
+              got is False and cap.errors() == [], str(cap.errors()))
+with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as t:
+    root = make_tree(Path(t))
+    before = snapshot(root)
+    au._backup_tree(root, au._backup_dir(root, "2.0"), au._marker_path(root, "2.0"), "1.0")
+    (root / "a.py").write_text("half written\n")
+    (root / "data" / "apply_in_progress.json").write_text("")      # killed while writing the note
+    check("6.10 an empty note beside exactly one complete backup: that backup is restored",
+          au.recover_unfinished_apply(root) is True and snapshot(root) == before)
+
+# --- 6.11 the install lock: a dead holder, and a clock that went backwards -----------------
+with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as t:
+    root = make_tree(Path(t))
+    lock = root / "data" / "apply.lock"
+    with open(Path(t) / "pid.txt", "w") as _pf:
+        subprocess.run([sys.executable, "-c", "import os; print(os.getpid())"],
+                       stdin=subprocess.DEVNULL, stdout=_pf, stderr=subprocess.DEVNULL, timeout=60)
+    lock.write_text((Path(t) / "pid.txt").read_text().strip())
+    with Stub(ok_apply) as s:
+        r = au.auto_apply(root)
+    check("6.11 a lock left by a process that has died is taken over at once",
+          r["applied"] is True, r["reason"])
+    lock.write_text(str(os.getpid()))                 # alive: this process
+    with Stub(ok_apply) as s:
+        r = au.auto_apply(root)
+    check("6.11 a lock held by a live process is respected", r["applied"] is False and s.calls == 0)
+    lock.write_text("held")
+    future = time.time() + 7200                       # written before the clock was put back
+    os.utime(lock, (future, future))
+    with Stub(ok_apply):
+        (root / "data" / "pending_update" / "ready.json").write_text(
+            json.dumps({"version": "2.0", "zip_filename": "u.zip"}))
+        r = au.auto_apply(root)
+    check("6.11 a lock dated in the future (clock moved back) is not held forever",
+          r["applied"] is True, r["reason"])
+
+# --- 6.12 startup never runs past main.py's 120 s limit ----------------------------------------
+with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as t:
+    root = make_tree(Path(t))
+    lock = root / "data" / "apply.lock"
+    lock.write_text(str(os.getpid()))
+    clk = {"t": 0.0}
+
+    def slow_sleep(sec):
+        clk["t"] += sec
+        if clk["t"] >= 59:
+            lock.unlink(missing_ok=True)              # the idle install finished at 59 s
+    with Stub(ok_apply) as s, contextlib.redirect_stdout(io.StringIO()) as out:
+        au._auto_cli(True, root, sleep=slow_sleep, clock=lambda: clk["t"])
+    check("6.12 after a 59 s wait for the lock, startup leaves the install for later",
+          s.calls == 0 and "applied=False" in out.getvalue(), out.getvalue().strip())
+with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as t:
+    root = make_tree(Path(t), new_requirements=b"pkg==2\n")
+    (root / "data" / "auto_restart.json").write_text(json.dumps({"2.0": {"restarts": 2, "gave_up": True}}))
+    with Stub(ok_apply) as s, contextlib.redirect_stdout(io.StringIO()):
+        au._auto_cli(True, root, sleep=lambda x: None, clock=lambda: 0.0)
+    pip_t = (s.kwargs[0] if s.kwargs else {}).get("pip_timeout", 10 ** 6)
+    check("6.12 a startup install with pip keeps pip + smoke test inside the startup budget",
+          s.calls == 1 and pip_t + au.STARTUP_SMOKE_TEST_TIMEOUT <= getattr(au, "STARTUP_BUDGET_SECONDS", 0),
+          f"pip {pip_t}")
+
+# --- 6.13 PowerShell: full path, UTF-8 output for non-ASCII install paths ----------------------
+check("6.13 PowerShell is called by its full path when it exists",
+      hasattr(au, "powershell_exe") and Path(au.powershell_exe()).is_file(), getattr(au, "powershell_exe", lambda: "")())
+_osr = inspect.getsource(au.other_servers_running)
+check("6.13 the server count reads PowerShell's output as UTF-8 (an 'é' in the path must still match)",
+      "OutputEncoding" in _osr and "powershell_exe()" in _osr)
+
+# --- 6.14 the smoke test also imports config and the MCP library, writing nothing outside -------
+if _REAL_SMOKE is not None:
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as t:
+        outside = Path(t) / "team folder" / "would be created"
+        good = Path(t) / "good"
+        good.mkdir()
+        (good / "mcp_server.py").write_text("X = 1\n")
+        (good / "config.py").write_text(f"from pathlib import Path\nPath({str(outside)!r}).mkdir(parents=True, "
+                                        f"exist_ok=True)\n(Path(__file__).parent / 'data').mkdir(exist_ok=True)\n")
+        badcfg = Path(t) / "badcfg"
+        badcfg.mkdir()
+        (badcfg / "mcp_server.py").write_text("X = 1\n")
+        (badcfg / "config.py").write_text("raise RuntimeError('config broken in this release')\n")
+        check("6.14 a release whose config cannot be imported fails the smoke test",
+              _REAL_SMOKE(badcfg, 60) is False)
+        ok = _REAL_SMOKE(good, 60)
+        check("6.14 the smoke test passes an importable tree and creates nothing outside it",
+              ok is True and not outside.exists() and (good / "data").is_dir(), f"ok={ok}")
+    check("6.14 the smoke test imports config, mcp.server.fastmcp and mcp_server",
+          all(f"import {m}" in getattr(au, "_SMOKE_CODE", "") for m in ("config", "mcp.server.fastmcp", "mcp_server")))
+
+# --- 6.15 a --force rollback installs through the automatic path -----------------------------
+with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as t:
+    root = make_tree(Path(t))
+    pend = root / "data" / "pending_update"
+    with zipfile.ZipFile(pend / "old.zip", "w") as zf:
+        zf.writestr("VERSION", "0.9\n")
+        zf.writestr("main.py", "older main\n")
+    (pend / "ready.json").write_text(json.dumps({"version": "0.9", "zip_filename": "old.zip", "force": True,
+                                                 "current_version_at_download": "1.0"}))
+    with Stub(ok_apply) as s:
+        r = au.auto_apply(root)
+    check("6.15 a rollback (older version, staged while 1.0 ran) installs automatically", r["applied"] is True,
+          r["reason"])
+
+# --- 6.18 main.py's startup log does not grow without limit --------------------------------------
+if _fn:
+    _ns["subprocess"] = _sub(_fake_run)
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as t:
+        sd = Path(t) / "system"
+        (sd / "data" / "pending_update").mkdir(parents=True)
+        (sd / "data" / "pending_update" / "ready.json").write_text("{}")
+        (sd / "data" / "logs").mkdir()
+        (sd / "data" / "logs" / "auto_install.txt").write_bytes(b"old line\n" * 60000)   # 540 KB
+        _fn(sd)
+        size = (sd / "data" / "logs" / "auto_install.txt").stat().st_size
+        check("6.18 auto_install.txt is trimmed once it passes 256 KB", size <= 256 * 1024, f"{size} bytes")
+
 
 failed = [r for r in RESULTS if not r[1]]
 print(f"\n{len(RESULTS) - len(failed)} passed, {len(failed)} failed")
