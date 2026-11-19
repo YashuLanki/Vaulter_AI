@@ -508,6 +508,391 @@ with tempfile.TemporaryDirectory() as t:
           not any(isinstance(h, logging.FileHandler) for h in logging.getLogger().handlers))
 
 
+# =============================================================================
+print("\n3. Idle restart")
+# Every external effect is a stub passed in `ops`: no check here lists, stops or
+# starts a real process, reads real idle time or asks the real release channel.
+try:
+    import auto_restart as ar  # noqa: E402
+except Exception as _e:  # noqa: BLE001
+    ar = None
+    check("auto_restart imports", False, f"{type(_e).__name__}: {_e}")
+
+AR_NEEDED = ("desktop_root", "relaunch_command", "restart_owed", "may_restart",
+             "record_restart", "idle_seconds", "main")
+for fn in AR_NEEDED:
+    check(f"auto_restart.{fn} exists", ar is not None and hasattr(ar, fn))
+
+STORE_EXE = r"C:\Program Files\WindowsApps\Claude_6.6395.0.0_x64__pzs8sxrjxfjjc\app\claude.exe"
+CLI_EXE = r"C:\Users\x\.local\bin\claude.exe"
+CLASSIC_EXE = r"C:\Users\x\AppData\Local\AnthropicClaude\app-0.9.0\claude.exe"
+DESKTOP_START = "2026-11-19T08:00:00.1234567-07:00"   # PowerShell's 'o' format, 7 digits
+DESKTOP_START_EPOCH = 1795100400.123456               # the same instant, seconds since 1970 UTC
+
+
+def row(pid, ppid, exe, created=DESKTOP_START):
+    return {"ProcessId": pid, "ParentProcessId": ppid, "ExecutablePath": exe,
+            "CommandLine": f'"{exe}"', "CreationDate": created}
+
+
+# Recorded on this machine 2026-11-19: Desktop parent 34004 (its parent 12308 is
+# not Desktop) with eight children; four Claude Code CLI processes.
+DESKTOP_ROWS = [row(34004, 12308, STORE_EXE)] + [
+    row(p, 34004, STORE_EXE, "2026-11-19T08:00:05.0000000-07:00")
+    for p in (24540, 9492, 9420, 4912, 21040, 35000, 22996, 22764)]
+CLI_ROWS = [row(15912, 8356, CLI_EXE), row(18916, 7284, CLI_EXE),
+            row(33016, 18292, CLI_EXE), row(18024, 33524, CLI_EXE)]
+CLI_PIDS = {r["ProcessId"] for r in CLI_ROWS}
+START_APPS = [{"Name": "Claude", "AppID": "Claude_pzs8sxrjxfjjc!Claude"}]
+STORE_CMD = ["explorer.exe", "shell:AppsFolder\\Claude_pzs8sxrjxfjjc!Claude"]
+
+
+class Env:
+    """A stubbed world for auto_restart.main. `calls` records every effect in order."""
+
+    def __init__(self, procs=None, after_kill=None, idle=1000.0, start_apps=None,
+                 apply_result=None):
+        self.procs = list(DESKTOP_ROWS + CLI_ROWS) if procs is None else procs
+        self.after_kill = list(CLI_ROWS) if after_kill is None else after_kill
+        self.killed = False
+        self.idle = idle
+        self.apps = START_APPS if start_apps is None else start_apps
+        self.apply_result = apply_result or {"applied": True, "version": "2.0",
+                                             "reason": "", "restored": False}
+        self.calls = []
+
+    def ops(self):
+        return {
+            "list_processes": self.list_processes, "start_apps": self.start_apps,
+            "taskkill": self.taskkill, "relaunch": self.relaunch,
+            "idle_seconds": self.idle_seconds, "channel_check": self.channel_check,
+            "recover": self.recover, "auto_apply": self.auto_apply, "sleep": self.sleep,
+        }
+
+    def names(self):
+        return [c[0] for c in self.calls]
+
+    def list_processes(self):
+        self.calls.append(("list_processes",))
+        return list(self.after_kill if self.killed else self.procs)
+
+    def start_apps(self):
+        self.calls.append(("start_apps",))
+        return self.apps
+
+    def taskkill(self, pid):
+        self.calls.append(("taskkill", pid))
+        self.killed = True
+        return 0
+
+    def relaunch(self, cmd):
+        self.calls.append(("relaunch", list(cmd)))
+        return True
+
+    def idle_seconds(self):
+        self.calls.append(("idle_seconds",))
+        return self.idle
+
+    def channel_check(self):
+        self.calls.append(("channel_check",))
+
+    def recover(self, project_root):
+        self.calls.append(("recover", project_root))
+        return False
+
+    def auto_apply(self, project_root, at_startup=False):
+        self.calls.append(("auto_apply", project_root, at_startup))
+        return dict(self.apply_result)
+
+    def sleep(self, seconds):
+        self.calls.append(("sleep", seconds))
+
+
+def restart_tree(tmp: Path, dev: bool = False, staged: bool = True) -> Path:
+    """A temp `system/` on 1.0 with 2.0 staged (made while 1.0 ran); VERSION
+    written well before Desktop started, so only the stage makes a restart owed."""
+    root = tmp / "system"
+    (root / "data" / "pending_update").mkdir(parents=True)
+    (root / "VERSION").write_text("1.0\n")
+    old = DESKTOP_START_EPOCH - 86400
+    os.utime(root / "VERSION", (old, old))
+    if staged:
+        (root / "data" / "pending_update" / "ready.json").write_text(json.dumps(
+            {"version": "2.0", "zip_filename": "u.zip", "current_version_at_download": "1.0"}))
+    if dev:
+        (tmp / ".git").write_text("gitdir: elsewhere")
+    return root
+
+
+def read(p: Path) -> str:
+    return p.read_text(encoding="utf-8") if p.exists() else ""
+
+
+def state_of(root: Path):
+    p = root / "data" / "auto_restart.json"
+    return json.loads(p.read_text(encoding="utf-8")) if p.exists() else None
+
+
+RLOG = Path("data") / "logs" / "auto_restart.txt"
+VLOG = Path("data") / "logs" / "vaulter.log"
+ERROR_LINE = re.compile(r"^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d,\d{3}  \[ERROR\]  .+$", re.M)
+_real_state_before = (PROJECT_ROOT / "data" / "auto_restart.json").exists()
+_real_rlog_before = read(PROJECT_ROOT / RLOG)
+
+if ar is not None and all(hasattr(ar, f) for f in AR_NEEDED):
+    # --- desktop_root ---------------------------------------------------------
+    r = ar.desktop_root(CLI_ROWS + DESKTOP_ROWS)
+    check("desktop_root picks the WindowsApps parent (34004)",
+          r is not None and r["ProcessId"] == 34004, str(r and r["ProcessId"]))
+    check("desktop_root: only Claude Code CLI processes -> None", ar.desktop_root(CLI_ROWS) is None)
+    check("desktop_root: no processes -> None", ar.desktop_root([]) is None)
+    tricky = [row(50, 1, r"C:\Users\x\.local\bin\AnthropicClaude\claude.exe"),
+              row(51, 1, r"C:\Users\x\.local\bin\WindowsApps\Claude_1\claude.exe")]
+    check("desktop_root: never a .local\\bin path, even one naming Desktop's folders",
+          ar.desktop_root(tricky) is None)
+    under = DESKTOP_ROWS + [row(60, 34004, CLI_EXE)]
+    r = ar.desktop_root(under)
+    check("desktop_root: a Claude Code child of Desktop does not change the root",
+          r is not None and r["ProcessId"] == 34004)
+    classic = [row(70, 9, CLASSIC_EXE), row(71, 70, CLASSIC_EXE)] + CLI_ROWS
+    r = ar.desktop_root(classic)
+    check("desktop_root: a classic AnthropicClaude install's parent",
+          r is not None and r["ProcessId"] == 70)
+    lower = [dict(row(80, 9, STORE_EXE.lower().replace("\\", "/")))]
+    check("desktop_root: path match is case- and slash-insensitive",
+          (ar.desktop_root(lower) or {}).get("ProcessId") == 80)
+    check("desktop_root: a row with no ExecutablePath is skipped",
+          ar.desktop_root([{"ProcessId": 5, "ParentProcessId": 1, "ExecutablePath": None,
+                            "CommandLine": None, "CreationDate": ""}]) is None)
+
+    # --- relaunch_command ------------------------------------------------------
+    rc = ar.relaunch_command
+    check("relaunch_command: Store install -> explorer shell:AppsFolder\\<AppID>",
+          rc(STORE_EXE, START_APPS) == STORE_CMD, str(rc(STORE_EXE, START_APPS)))
+    check("relaunch_command: classic install -> its own executable",
+          rc(CLASSIC_EXE, []) == [CLASSIC_EXE])
+    check("relaunch_command: Store install with no Start entry -> []", rc(STORE_EXE, []) == [])
+    check("relaunch_command: an entry for another package family is not used",
+          rc(STORE_EXE, [{"Name": "Claude", "AppID": "Claude_otherpub!Claude"}]) == [])
+    check("relaunch_command: a name that is not exactly Claude is not used",
+          rc(STORE_EXE, [{"Name": "Claude Code", "AppID": "Claude_pzs8sxrjxfjjc!Claude"}]) == [])
+    check("relaunch_command: the right entry is found among others",
+          rc(STORE_EXE, [{"Name": "Notepad", "AppID": "x!y"}] + START_APPS) == STORE_CMD)
+    check("relaunch_command: an unknown path -> []", rc(CLI_EXE, START_APPS) == [])
+    check("relaunch_command: an empty path -> []", rc("", START_APPS) == [])
+
+    # --- restart_owed ------------------------------------------------------------
+    staged = {"version": "2.0", "current_version_at_download": "1.0"}
+    ro = ar.restart_owed
+    check("restart_owed: an applicable staged update is owed",
+          ro(staged, "1.0", 100.0, 200.0) == "2.0")
+    check("restart_owed: VERSION changed after Desktop started (applied by hand) -> running",
+          ro(None, "2.0", 300.0, 200.0) == "2.0")
+    check("restart_owed: neither -> nothing", ro(None, "1.0", 100.0, 200.0) == "")
+    check("restart_owed: a superseded stage is not owed",
+          ro({"version": "2.0", "current_version_at_download": "0.9"}, "1.0", 100.0, 200.0) == "")
+    check("restart_owed: the version already running is not owed",
+          ro({"version": "1.0"}, "1.0", 100.0, 200.0) == "")
+
+    # --- loop guard ----------------------------------------------------------------
+    check("may_restart: true at 0", ar.may_restart({}, "2.0") is True)
+    check("may_restart: true at 1", ar.may_restart({"2.0": {"restarts": 1, "gave_up": False}}, "2.0") is True)
+    check("may_restart: false at 2", ar.may_restart({"2.0": {"restarts": 2, "gave_up": False}}, "2.0") is False)
+    check("may_restart: false once given up",
+          ar.may_restart({"2.0": {"restarts": 0, "gave_up": True}}, "2.0") is False)
+    check("may_restart: another version's count does not apply",
+          ar.may_restart({"1.9": {"restarts": 2, "gave_up": True}}, "2.0") is True)
+    s0 = {}
+    s1 = ar.record_restart(s0, "2.0")
+    s2 = ar.record_restart(s1, "2.0")
+    check("record_restart counts per version",
+          s1 == {"2.0": {"restarts": 1, "gave_up": False}}
+          and s2 == {"2.0": {"restarts": 2, "gave_up": False}}, str(s2))
+    check("record_restart does not change the dict it was given", s0 == {})
+
+    idle = ar.idle_seconds()
+    check("idle_seconds returns a float >= 0", isinstance(idle, float) and idle >= 0, str(idle))
+
+    # --- main: development copy -----------------------------------------------------
+    with tempfile.TemporaryDirectory() as t:
+        root = restart_tree(Path(t), dev=True)
+        env = Env()
+        rc_ = ar.main(["--dry-run"], project_root=root, ops=env.ops())
+        check("dev copy, --dry-run: returns 0", rc_ == 0, str(rc_))
+        check("dev copy, --dry-run: taskkill never called", "taskkill" not in env.names(), str(env.names()))
+        check("dev copy, --dry-run: nothing else run either (no channel check, apply, relaunch)",
+              not {"channel_check", "auto_apply", "recover", "relaunch"} & set(env.names()))
+        check("dev copy, --dry-run: logs 'development copy, not restarting'",
+              "development copy, not restarting" in read(root / RLOG), read(root / RLOG))
+        check("dev copy, --dry-run: no state file", state_of(root) is None)
+        env = Env()
+        ar.main([], project_root=root, ops=env.ops())
+        check("dev copy, real run: refuses before anything is run", env.names() == [], str(env.names()))
+
+    # --- main: nothing owed -----------------------------------------------------------
+    with tempfile.TemporaryDirectory() as t:
+        root = restart_tree(Path(t), staged=False)
+        env = Env()
+        check("nothing owed: returns 0", ar.main([], project_root=root, ops=env.ops()) == 0)
+        check("nothing owed: nothing stopped", "taskkill" not in env.names())
+        check("nothing owed: no log line", read(root / RLOG) == "", read(root / RLOG))
+        check("nothing owed: the hourly channel check still ran", "channel_check" in env.names())
+
+    # --- main: applied by hand after Desktop started ------------------------------------
+    with tempfile.TemporaryDirectory() as t:
+        root = restart_tree(Path(t), staged=False)
+        later = DESKTOP_START_EPOCH + 60
+        os.utime(root / "VERSION", (later, later))
+        env = Env(apply_result={"applied": False, "version": "", "reason": "no update", "restored": False})
+        ar.main([], project_root=root, ops=env.ops())
+        check("VERSION newer than Desktop's start: restarts to load it",
+              ("taskkill", 34004) in env.calls and "relaunch" in env.names(), str(env.names()))
+        check("...and counts it against the running version", state_of(root) == {"1.0": {"restarts": 1, "gave_up": False}},
+              str(state_of(root)))
+
+    # --- main: Desktop not running ---------------------------------------------------------
+    with tempfile.TemporaryDirectory() as t:
+        root = restart_tree(Path(t))
+        env = Env(procs=list(CLI_ROWS))
+        ar.main([], project_root=root, ops=env.ops())
+        check("no Desktop: nothing stopped (Claude Code left alone)", "taskkill" not in env.names())
+        check("no Desktop: says so in the log", "not running" in read(root / RLOG), read(root / RLOG))
+    with tempfile.TemporaryDirectory() as t:
+        root = restart_tree(Path(t))
+        env = Env(procs=None)
+        env.list_processes = lambda: (env.calls.append(("list_processes",)), None)[1]
+        ar.main([], project_root=root, ops=env.ops())
+        check("process list unreadable: nothing stopped", "taskkill" not in env.names())
+
+    # --- main: not idle ------------------------------------------------------------------------
+    with tempfile.TemporaryDirectory() as t:
+        root = restart_tree(Path(t))
+        env = Env(idle=899.0)
+        ar.main([], project_root=root, ops=env.ops())
+        check("idle 899 s: nothing stopped", "taskkill" not in env.names())
+        check("idle 899 s: logged as in use", "in use" in read(root / RLOG), read(root / RLOG))
+        check("idle 899 s: no restart recorded", state_of(root) is None)
+        env = Env(idle=899.0)
+        ar.main(["--ignore-idle"], project_root=root, ops=env.ops())
+        check("--ignore-idle: restarts anyway", ("taskkill", 34004) in env.calls)
+
+    # --- main: the restart -----------------------------------------------------------------------
+    with tempfile.TemporaryDirectory() as t:
+        root = restart_tree(Path(t))
+        env = Env(idle=900.0)
+        rc_ = ar.main([], project_root=root, ops=env.ops())
+        names = env.names()
+        kills = [c for c in env.calls if c[0] == "taskkill"]
+        check("restart: returns 0", rc_ == 0)
+        check("restart: stops exactly Desktop's root, once", kills == [("taskkill", 34004)], str(kills))
+        check("restart: never a Claude Code pid", not any(c[1] in CLI_PIDS for c in kills))
+        check("restart: Start menu entry read BEFORE stopping",
+              "start_apps" in names and names.index("start_apps") < names.index("taskkill"), str(names))
+        check("restart: waits for Desktop to be gone before installing",
+              names.index("taskkill") < max(i for i, n in enumerate(names) if n == "list_processes")
+              < names.index("auto_apply"), str(names))
+        check("restart: recovers an unfinished apply first, then installs, not at startup",
+              names.index("recover") < names.index("auto_apply")
+              and ("auto_apply", root, False) in env.calls, str(names))
+        check("restart: reopens through the Start menu entry, after installing",
+              ("relaunch", STORE_CMD) in env.calls and names.index("relaunch") > names.index("auto_apply"))
+        check("restart: recorded", state_of(root) == {"2.0": {"restarts": 1, "gave_up": False}},
+              str(state_of(root)))
+        check("restart: one log line naming the version",
+              len(read(root / RLOG).splitlines()) == 1 and "2.0" in read(root / RLOG), read(root / RLOG))
+
+    # --- main: cannot reopen -> never stop ----------------------------------------------------------
+    with tempfile.TemporaryDirectory() as t:
+        root = restart_tree(Path(t))
+        env = Env(start_apps=[])
+        ar.main([], project_root=root, ops=env.ops())
+        check("no way to reopen it: Desktop is not stopped", "taskkill" not in env.names(), str(env.names()))
+        check("no way to reopen it: logged", "reopen" in read(root / RLOG), read(root / RLOG))
+        check("no way to reopen it: no restart recorded", state_of(root) is None)
+
+    # --- main: Desktop will not close ---------------------------------------------------------------
+    with tempfile.TemporaryDirectory() as t:
+        root = restart_tree(Path(t))
+        env = Env(after_kill=list(DESKTOP_ROWS + CLI_ROWS))
+        ar.main([], project_root=root, ops=env.ops())
+        check("Desktop still running after the wait: nothing installed",
+              "auto_apply" not in env.names() and "recover" not in env.names(), str(env.names()))
+        check("...waited about 30 s in total",
+              29 <= sum(c[1] for c in env.calls if c[0] == "sleep") <= 31)
+        check("...an [ERROR] line for the team", ERROR_LINE.search(read(root / VLOG)) is not None,
+              read(root / VLOG))
+
+    # --- main: giving up --------------------------------------------------------------------------
+    with tempfile.TemporaryDirectory() as t:
+        root = restart_tree(Path(t))
+        (root / "data" / "auto_restart.json").write_text(
+            json.dumps({"2.0": {"restarts": 2, "gave_up": False}}))
+        envs = [Env(), Env()]
+        for e in envs:
+            ar.main([], project_root=root, ops=e.ops())
+        vtext = read(root / VLOG)
+        check("give up, run twice: nothing stopped either time",
+              all("taskkill" not in e.names() for e in envs))
+        check("give up, run twice: exactly one [ERROR] line",
+              len(ERROR_LINE.findall(vtext)) == 1 and vtext.count("[ERROR]") == 1, vtext)
+        check("give up: the [ERROR] line names the version", "2.0" in vtext)
+        check("give up: recorded as given up",
+              state_of(root) == {"2.0": {"restarts": 2, "gave_up": True}}, str(state_of(root)))
+
+    # --- main: --dry-run on a real install changes nothing --------------------------------------------
+    with tempfile.TemporaryDirectory() as t:
+        root = restart_tree(Path(t))
+        before = {str(p.relative_to(root)): sha(p) for p in root.rglob("*") if p.is_file()}
+        env = Env()
+        rc_ = ar.main(["--dry-run", "--ignore-idle"], project_root=root, ops=env.ops())
+        after = {str(p.relative_to(root)): sha(p) for p in root.rglob("*") if p.is_file()
+                 and p.relative_to(root) != RLOG}
+        check("dry run, everything owed: returns 0", rc_ == 0)
+        check("dry run: no channel check, stop, install or reopen",
+              not {"channel_check", "taskkill", "recover", "auto_apply", "relaunch"} & set(env.names()),
+              str(env.names()))
+        check("dry run: no file changed except its own log line", after == before)
+        check("dry run: says what it would do",
+              "dry run" in read(root / RLOG) and "2.0" in read(root / RLOG), read(root / RLOG))
+
+    # --- channel check is asked only through the stub, and not when due-gated off ------------------------
+    with tempfile.TemporaryDirectory() as t:
+        root = restart_tree(Path(t))
+        env = Env(idle=0.0)
+        boom = {"n": 0}
+
+        def failing_check():
+            boom["n"] += 1
+            raise RuntimeError("channel unreachable")
+        ops = env.ops()
+        ops["channel_check"] = failing_check
+        rc_ = ar.main([], project_root=root, ops=ops)
+        check("a failing channel check does not stop the run", rc_ == 0 and boom["n"] == 1
+              and "idle_seconds" in env.names(), str(env.names()))
+
+    # --- hygiene -----------------------------------------------------------------------------------
+    src = (SCRIPTS / "auto_restart.py").read_text(encoding="utf-8")
+    n_calls = len(re.findall(r"subprocess\.(?:run|Popen)\(", src))
+    check("every subprocess call closes stdin", n_calls > 0
+          and src.count("stdin=subprocess.DEVNULL") >= n_calls, f"{n_calls} calls")
+    check("no pipes, no capture_output", "PIPE" not in src and "capture_output" not in src)
+    def _call_args(text, start):
+        depth, i = 0, start
+        while i < len(text):
+            depth += {"(": 1, ")": -1}.get(text[i], 0)
+            if depth == 0 and text[i] == ")":
+                return text[start:i]
+            i += 1
+        return text[start:]
+    _runs = [_call_args(src, m.end() - 1) for m in re.finditer(r"subprocess\.run\(", src)]
+    check("every subprocess.run has a timeout",
+          bool(_runs) and all("timeout=" in a for a in _runs), f"{len(_runs)} calls")
+    check("mcp_server is imported only lazily", not re.search(r"^(import|from) mcp_server", src, re.M))
+    check("the checks wrote nothing to this machine's real state or log",
+          (PROJECT_ROOT / "data" / "auto_restart.json").exists() == _real_state_before
+          and read(PROJECT_ROOT / RLOG) == _real_rlog_before)
+
+
 failed = [r for r in RESULTS if not r[1]]
 print(f"\n{len(RESULTS) - len(failed)} passed, {len(failed)} failed")
 sys.exit(1 if failed else 0)
