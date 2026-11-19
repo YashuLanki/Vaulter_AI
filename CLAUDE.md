@@ -57,6 +57,7 @@ python system/scripts/check_find.py                 # does find-in-document find
 python system/scripts/check_report_page.py          # does the screening report page work in a browser
 python system/scripts/check_term_sheet_page.py      # does the mini term sheet dashboard work in a browser
 python system/scripts/check_deal_tracker.py         # 68 checks on the deal tracker, made-up data only (Excel + Edge parts skip if absent)
+python system/scripts/check_auto_update.py          # 193 checks on automatic updates and the idle restart
 ```
 
 There is no lint/test framework configured (no pytest, no linter config) — the three
@@ -777,6 +778,11 @@ do for the user:
   untouched. **Returns "" whenever it cannot tell**, since a spurious "please restart" is worse
   than silence: it teaches people to ignore the request.
 
+**Superseded for real installs on 2026-11-19: updates are now silent and automatic** (see the
+auto-update section). The wording below, which tells Claude to ask before applying, survives only on
+development copies and non-Windows machines (`_auto_update_active()` is false there); on a real
+install chat says nothing about updates unless the restart task gave up.
+
 **And a WAITING update is announced the same way (`_with_pending_notice`, 2026-09-02).** The note
 above only ever covered a restart already owed. Whether a new version was *available* was announced
 in exactly one place — `check_system_health` — and that tool's automatic call is a **request to
@@ -849,7 +855,8 @@ Three details are load-bearing:
   one question, the rule belongs in one of them and the other two must ask it.**
 
 Twelve checks in `check_portfolio_comparison.py` §6 hold the shape: the notice appears on an
-ordinary answer and names the version, tells Claude to ask before applying, leaves the answer
+ordinary answer and names the version, tells Claude to ask before applying (dev copies only since
+2026-11-19), leaves the answer
 intact, never doubles up on `check_system_health`, never touches a structured result, stays silent
 when nothing is staged **and when the staged version is the one already running** (the phantom
 update this codebase has already paid for once), survives a wrong-shaped marker, and gates as
@@ -1179,19 +1186,51 @@ or its error would wait a whole conversation to travel. Asserted end to end: sim
 line → shared folder. The general rule: **when a failure mode produces silence, something has to
 turn the silence into a signal — a detector that only recognises error text cannot see it.**
 
-**Applying stays entirely inside the Claude Desktop conversation — no terminal, ever.**
-Once the user says yes, Claude calls the `apply_pending_update` MCP tool, which calls
+**Applying no longer needs the conversation (2026-11-19, see the next section); this is the
+manual path, and what dev copies still do.** Once the user says yes, Claude calls the `apply_pending_update` MCP tool, which calls
 straight into `system/scripts/apply_update.py::apply_pending_update()`: syncs the new version's files into
 place, then re-runs `pip install -r system/requirements.txt` with the same interpreter already
 running the project (so a fix that adds/changes a dependency doesn't leave the app broken
 for want of an uninstalled package), then clears the staging area. `system/scripts/apply_update.py`'s own
 `python system/scripts/apply_update.py` CLI entry point (with a y/N prompt) still exists as a manual/
-troubleshooting fallback, but is not the expected path. Either way, this first version of
-the mechanism is deliberately confirm-then-apply, not fully automatic with zero human
-involvement, given the "could break every instance at once" blast radius a bug in auto-apply
-would have — the human decision just happens in chat instead of a terminal. The one manual
-step that can't be automated at all: fully quitting and reopening Claude Desktop afterward,
-since an MCP server can't restart its own parent application.
+troubleshooting fallback, but is not the expected path. The first version of the
+mechanism was deliberately confirm-then-apply, given the "could break every instance at once"
+blast radius a bug in auto-apply would have. **The owner reversed that on 2026-11-19** (see
+"Fully automatic updates" below): on a real install nobody is asked anything.
+
+**Fully automatic updates, and a Claude Desktop restart nobody approves (2026-11-19).** Owner's
+words: teammates should not have to run a health check, say yes, or quit and reopen Claude. Three
+parts; the design, with the reasoning, is `docs/superpowers/specs/2026-11-19-auto-update-restart-design.md`.
+
+1. **Install at startup.** `main.py mcp` runs `apply_update.py --auto --startup` in a separate
+   process before importing config, so the new code is what loads. `auto_apply` is guarded: it
+   refuses a development copy (the repo checkout must never be overwritten by a release) and a
+   downgrade, takes a lock, backs up the program files it will replace, and restores them if the
+   sync fails. Results go to `data/logs/vaulter.log`.
+2. **A scheduled task restarts Claude Desktop.** `scripts/auto_restart.py`, task "Vaulter AI -
+   Update restart" every 15 minutes, registered by the server (`_ensure_restart_task`, interactive
+   logon, because idle time and the Store relaunch only work in the person's own session). Hourly
+   it checks the channel; when an update is owed and the computer has been idle 15 minutes it stops
+   Claude Desktop's process tree, installs, and reopens it. Claude Code is never touched.
+3. **Chat stays silent.** `_update_message` / `_auto_update_active` / `_auto_restart_gave_up`: no
+   update talk in conversation, except one line asking the person to quit and reopen Claude if the
+   task gave up. Dev copies and non-Windows keep the old ask-first wording.
+
+**Five decisions made at build time (builder's calls, owner can overrule):** (a) a failed install
+restores the backup, never leaves `system/` half old and half new, and an unfinished apply marker
+plus a backup is restored at the next start; (b) the install mostly happens while Desktop is
+closed (stop, install, reopen), and startup install skips a release that changes
+`requirements.txt` so startup never waits on pip; (c) an exclusive `data/apply.lock` stops two
+servers installing at once; (d) the task, not just the server, checks the channel, so an idle
+machine still updates within hours; (e) at most 2 restarts per version, then one `[ERROR]` for the
+team, state in `data/auto_restart.json`.
+
+**The canary test is now the only gate before everyone.** Nobody is asked, so a bad release
+reaches every machine within hours of `--promote`. Publish to canary, watch it, only then promote
+(see the publish-release skill). Known limits: "idle" means no keyboard or mouse, so a long task
+Claude is running alone is ended by the restart; the release that carries all this still reaches
+each teammate the old way, once (they say yes and restart), and every update after it is automatic.
+`check_auto_update.py` holds the 193 checks.
 
 **Every published package is signed, and every instance verifies before trusting a download
 (2026-08-07).** Before this, anyone with write access to the shared OneDrive update folder —

@@ -22,6 +22,10 @@ step is there before changing it.
 - **Only one machine can publish.** The signing key lives on the maintainer's computer and
   nowhere else. If you are not on that machine, the publish will fail at step 3 and that is
   correct behaviour, not a bug to work around.
+- **Publishing now installs on every machine with nobody asked (2026-11-19).** Each teammate's
+  Vaulter AI installs the release by itself and Claude Desktop is restarted after the computer has
+  been idle 15 minutes. The canary step is therefore the only gate: do not promote until it has
+  been seen working.
 - **Nothing here is urgent.** If any step looks wrong, stop and ask. An unpublished fix
   costs a day; a bad release costs everyone's trust in the update prompt.
 
@@ -35,6 +39,7 @@ step is there before changing it.
 python system/scripts/check_screener.py
 python system/scripts/check_portfolio_comparison.py
 python system/scripts/check_answers.py
+python system/scripts/check_auto_update.py
 ```
 
 **Every one must pass before anything is published.** If a check fails, do not publish —
