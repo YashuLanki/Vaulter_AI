@@ -78,6 +78,7 @@ IDLE_SECONDS_NEEDED = 900
 RESTART_LIMIT = 2
 EXIT_WAIT_SECONDS = 30
 REOPEN_WAIT_SECONDS = 60             # how long a reopened Desktop has to show up, per try
+REOPENED_RECHECK_SECONDS = 5         # a new Desktop must still be there this much later
 WOKE_SLEEP_SECONDS = 60              # asleep longer than this since the last run = "just woke"
 LOG_FORMAT = "%(asctime)s  [%(levelname)s]  %(message)s"   # what the error reports scan for
 _LOG_MAX_BYTES = 256 * 1024
@@ -571,6 +572,10 @@ def _reopen(ops: dict, cmd: list):
     whether or not the app it was asked for ever opens."""
     could_tell = False
     started_once = False
+    # A classic install is started through its stub launcher, AnthropicClaude\\claude.exe,
+    # which is itself a Desktop path with no --type=: seeing it proves nothing (review M-5).
+    launcher = _norm(cmd[0]) if cmd else ""
+    stub = launcher if launcher.endswith("\\anthropicclaude\\claude.exe") else None
     for _ in range(2):
         try:
             started = bool(ops["relaunch"](cmd))
@@ -584,7 +589,7 @@ def _reopen(ops: dict, cmd: list):
             rows = ops["list_processes"]()
             if rows is not None:
                 could_tell = True
-                if desktop_mains(rows):
+                if any(_norm(m.get("ExecutablePath")) != stub for m in desktop_mains(rows)):
                     return True
             if ops["monotonic"]() >= deadline:
                 break
@@ -678,11 +683,10 @@ def _run(root: Path, ops: dict, dry: bool, ignore_idle: bool, say) -> int:
             if not dry:
                 with _vaulter_log(root):
                     au.discard_stage(root / "data", pending)
-                    if problem != "missing":
+                    if problem != "missing" and not au.set_aside_after_failure(
+                            root / "data", pending, staged_v, "its package was unusable"):
                         _error(root, f"the staged package for update {staged_v} was unusable; it "
                                      f"was thrown away and will be downloaded again")
-                        au.set_aside_after_failure(root / "data", pending, staged_v,
-                                                   "its package was unusable")
             pending = None
     try:
         version_mtime = (root / "VERSION").stat().st_mtime
@@ -806,7 +810,16 @@ def _run(root: Path, ops: dict, dry: bool, ignore_idle: bool, say) -> int:
             if ops["monotonic"]() >= deadline:
                 break
             ops["sleep"](1)
-        reopened_meanwhile = gone and any(_key(p) not in tree for p in desktop_mains(rows))
+        new_mains = {_key(p) for p in desktop_mains(rows) if _key(p) not in tree} if gone else set()
+        reopened_meanwhile = False
+        if new_mains:
+            # Seen once is not enough: a short-lived claude.exe with no --type=
+            # (a Squirrel hook, the stub launcher) would otherwise leave Claude
+            # closed (review M-4). It must still be there a few seconds later.
+            ops["sleep"](REOPENED_RECHECK_SECONDS)
+            again_rows = ops["list_processes"]()
+            reopened_meanwhile = again_rows is None or bool(
+                new_mains & {_key(p) for p in desktop_mains(again_rows)})
         if not gone:
             outcome = "not installed, Claude Desktop did not close"
             # Reopen unless its main process is still there: helpers hanging on

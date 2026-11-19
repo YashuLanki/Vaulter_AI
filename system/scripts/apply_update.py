@@ -373,6 +373,8 @@ def refresh_dependencies(project_root: Path, timeout: int = 600) -> tuple[bool, 
                 stdin=subprocess.DEVNULL, text=True, timeout=timeout,
             )
         output = out_path.read_text(encoding="utf-8", errors="replace")
+    except subprocess.TimeoutExpired:
+        return False, f"pip timed out after {timeout} s"
     except Exception as e:
         return False, str(e)
     finally:
@@ -446,6 +448,7 @@ def apply_pending_update(project_root: Path = None, *, pip_timeout: int = 600) -
         from config import APPLY_IN_PROGRESS_FILE
         Path(APPLY_IN_PROGRESS_FILE).write_text(json.dumps({
             "version": version,
+            "signature": pending.get("signature") or "",
             "started": __import__("datetime").datetime.now().isoformat(timespec="seconds"),
         }), encoding="utf-8")
     except Exception:
@@ -553,6 +556,7 @@ def apply_pending_update(project_root: Path = None, *, pip_timeout: int = 600) -
         "dependencies_ok": deps_ok,
         "dependencies_skipped": deps_skipped,
         "dependencies_message": deps_message,
+        "dependencies_timed_out": (not deps_ok) and str(deps_message).startswith("pip timed out"),
     }
 
 
@@ -689,9 +693,23 @@ def discard_stage(data_dir: Path, pending) -> None:
     """Remove the staged record and its package(s), so the next channel check
     downloads a fresh copy (or nothing, for a set-aside version). Never raises."""
     pend = Path(data_dir) / "pending_update"
-    names = ["ready.json"]
+    # Only if ready.json still names the stage that was judged (review M-7):
+    # another process may have staged a different version since it was read.
+    names = []
+    try:
+        now = json.loads((pend / "ready.json").read_text(encoding="utf-8"))
+    except Exception:
+        now = None                          # gone or unreadable: nothing else of ours to keep
+    same = not isinstance(now, dict) or not isinstance(pending, dict) or (
+        str(now.get("version")) == str(pending.get("version"))
+        and (not pending.get("zip_filename") or now.get("zip_filename") == pending.get("zip_filename")))
+    if same:
+        names.append("ready.json")
     if isinstance(pending, dict):
-        names += [str(pending.get(k) or "") for k in ("zip_filename", "extras_zip_filename")]
+        keep = {str(now.get(k) or "") for k in ("zip_filename", "extras_zip_filename")} \
+            if isinstance(now, dict) and not same else set()
+        names += [n for n in (str(pending.get(k) or "") for k in ("zip_filename", "extras_zip_filename"))
+                  if n not in keep]
     for name in names:
         if not name or Path(name).name != name:
             continue                       # never follow a path out of the folder
@@ -951,14 +969,18 @@ def _in_progress_path(project_root: Path) -> Path:
     return project_root / "data" / "apply_in_progress.json"
 
 
-def _write_in_progress(project_root: Path, version: str) -> None:
+def _write_in_progress(project_root: Path, version: str, signature: str = "",
+                       counted: bool = False) -> None:
     """The note recover_unfinished_apply looks for. Written around the steps of
     an automatic install that run AFTER apply_pending_update has cleared its own
     note (the smoke test, a restore), so a process killed there is still
-    recovered at the next start."""
+    recovered at the next start. `counted`: this failure is already in
+    update_failures.json (a restore), so the recovery must not count it twice."""
     try:
         _in_progress_path(project_root).write_text(json.dumps({
             "version": version,
+            "signature": signature or "",
+            "counted": bool(counted),
             "started": __import__("datetime").datetime.now().isoformat(timespec="seconds"),
         }), encoding="utf-8")
     except Exception:
@@ -976,7 +998,7 @@ def _restore(project_root: Path, backup: Path, marker: Path, version: str) -> bo
     """Put the pre-update backup back. True on success (backup and note then
     removed). On failure the backup and the in-progress note stay, so the next
     start's recovery tries again."""
-    _write_in_progress(project_root, version)
+    _write_in_progress(project_root, version, counted=True)
     try:
         _sync_tree(project_root, backup)
     except Exception as e:
@@ -1162,10 +1184,10 @@ def auto_apply(project_root: Path | None = None, *, at_startup: bool = False,
                                 f"be fetched again on the next check")
             return result
         if problem:
-            log.error(f"automatic update to {version} refused: the staged package does not "
-                      f"look like a Vaulter AI release")
             discard_stage(data, pending)
-            set_aside_after_failure(data, pending, version, "its package was unusable")
+            if not set_aside_after_failure(data, pending, version, "its package was unusable"):
+                log.error(f"automatic update to {version} refused: the staged package does not "
+                          f"look like a Vaulter AI release")
             result["reason"] = (f"the staged package for version {version} was refused: {problem}; "
                                 f"it will be downloaded again")
             return result
@@ -1234,6 +1256,19 @@ def auto_apply(project_root: Path | None = None, *, at_startup: bool = False,
                     set_aside_after_failure(data, pending, version, "its signature did not verify")
                 return result
 
+            if applied.get("dependencies_ok") is False and at_startup \
+                    and applied.get("dependencies_timed_out"):
+                # Cut off by the startup budget, not refused by pip: put the old
+                # version back and leave it for the idle restart (300 s), without
+                # counting it against the release (review M-3).
+                log.warning(f"[APPLY] the dependencies of {version} did not finish installing "
+                            f"within the startup time; the previous version was put back and "
+                            f"the idle restart will install it")
+                result["restored"] = _restore(project_root, backup, marker, version)
+                result["reason"] = (f"the dependencies of version {version} did not finish within "
+                                    f"the startup time, so the idle restart will install it")
+                return result
+
             if applied.get("dependencies_ok") is False:
                 # The old requirements.txt comes back with the restore, so the
                 # next attempt sees a change and runs pip again.
@@ -1247,7 +1282,7 @@ def auto_apply(project_root: Path | None = None, *, at_startup: bool = False,
 
             # Can the new code even be imported? Run with the in-progress note
             # in place, so a process killed during it is recovered next start.
-            _write_in_progress(project_root, version)
+            _write_in_progress(project_root, version, str(pending.get("signature") or ""))
             if not _smoke_test(project_root, smoke_timeout):
                 log.error(f"automatic update to {version}: the new version could not be "
                           f"started (test import failed); putting the previous version back")
@@ -1301,9 +1336,10 @@ def recover_unfinished_apply(project_root: Path | None = None) -> bool:
             return False
         try:
             info = json.loads(note.read_text(encoding="utf-8"))
-            version = info.get("version") if isinstance(info, dict) else None
+            info = info if isinstance(info, dict) else {}
         except Exception:
-            version = None
+            info = {}
+        version = info.get("version")
         if not version:
             # A note emptied or garbled by a process killed while writing it.
             # Exactly one complete backup says which update it was; anything
@@ -1325,6 +1361,13 @@ def recover_unfinished_apply(project_root: Path | None = None) -> bool:
             _sync_tree(project_root, backup)
             _discard_backup(backup, marker)
             log.error(f"an update to {version} did not finish; the previous version was put back")
+            if not info.get("counted"):
+                # An install killed part-way (main.py's 120 s, the task's time
+                # limit) is a failure like any other: without this it was put
+                # back and tried again at every start (review M-2).
+                set_aside_after_failure(project_root / "data",
+                                        {"version": str(version), "signature": info.get("signature") or None},
+                                        str(version), "it did not finish installing")
             return True
         finally:
             try:

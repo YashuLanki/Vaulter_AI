@@ -2347,9 +2347,9 @@ for every listing.""".replace(
                     what = f" What it changes: {str(staged['notes']).strip()[:600]}."
             except Exception:
                 what = ""
-        active = _auto_update_active()
+        active = _update_wording_active()
         return _update_message(ready, waiting, active,
-                               _gave_up_to_show() if active else "",
+                               _gave_up_to_show() if _auto_update_active() else "",
                                what=what, version=_get_code_version())
 
     @mcp.tool()
@@ -2819,9 +2819,10 @@ for every listing.""".replace(
             if _ready:
                 staged = _json_object(Path(PENDING_UPDATE_DIR) / "ready.json") or {}
                 _notes = f" — {staged['notes']}" if staged.get("notes") else ""
-            _active = _auto_update_active()
+            _active = _update_wording_active()
             _lines, _issues = _health_update_text(
-                _ready, _waiting, _active, _auto_restart_gave_up() if _active else "", _notes)
+                _ready, _waiting, _active, _auto_restart_gave_up() if _auto_update_active() else "",
+                _notes)
             lines.extend(_lines)
             issues.extend(_issues)
         except Exception:
@@ -6411,6 +6412,19 @@ def _auto_update_active() -> bool:
         return False
 
 
+def _update_wording_active() -> bool:
+    """Whether chat must stay silent about a waiting update or an owed restart:
+    automatic updating is verified (_auto_update_active), OR the first task check
+    on this install is still running in its worker and nothing says yet that it
+    failed. In that second case silence is the safe answer: asking the person to
+    install would have them install under a live server, which is what automatic
+    updating exists to avoid (review I-1, 2026-11-19). Never raises."""
+    try:
+        return _auto_update_active() or (bool(_RESTART_TASK_PENDING) and _auto_update_eligible())
+    except Exception:
+        return False
+
+
 _GAVE_UP_SHOWN = False
 
 
@@ -6447,6 +6461,7 @@ def _auto_restart_gave_up() -> str:
 _RESTART_TASK = "Vaulter AI - Update restart"
 _RESTART_TASK_CHECKED = False
 _RESTART_TASK_OK = False
+_RESTART_TASK_PENDING = False      # the first check on this install is still running
 # How long a tool answer may wait for the task check. Measured 2026-11-19: one
 # Get-ScheduledTask query took 6.7 s on the maintainer's machine, and a missing
 # task costs a query, a registration and a second query. The check finishes in
@@ -6500,7 +6515,7 @@ def _task_matches(answer) -> bool:
     runner = _restart_task_runner()
     if not isinstance(info, dict) or runner is None:
         return False
-    return (norm(info.get("Execute")) == norm(runner)
+    return (_runner_acceptable(info.get("Execute"), runner)
             and _names_this_install(info.get("Arguments"))
             and str(info.get("Count")) == "1"
             and str(info.get("Interval") or "") == _RESTART_TASK_INTERVAL
@@ -6508,7 +6523,26 @@ def _task_matches(answer) -> bool:
             and str(info.get("LogonType") or "") == "Interactive")
 
 
-def _restart_task(action: str):
+def _runner_acceptable(execute, runner) -> bool:
+    """The task's runner is fine if it is this server's pythonw.exe, or any
+    pythonw.exe that exists inside this install's own folder (its venv). Claude
+    Desktop and Claude Code may run this server under different interpreters;
+    re-registering to whichever started last made the task flip at every start
+    (review M-10, 2026-11-19)."""
+    def norm(text):
+        return str(text or "").replace("/", "\\").lower().strip().strip('"')
+    if norm(execute) == norm(runner):
+        return True
+    try:
+        exe = Path(str(execute or "").strip().strip('"'))
+        install = Path(__file__).resolve().parent.parent
+        return (exe.name.lower() == "pythonw.exe" and exe.is_file()
+                and norm(exe.resolve()).startswith(norm(install) + "\\"))
+    except (OSError, ValueError):
+        return False
+
+
+def _restart_task(action: str, task: str | None = None):
     """
     Add, remove or read this computer's update-restart task (every 15 minutes,
     only while the person is logged on, in their own session: idle time reads 0
@@ -6524,7 +6558,7 @@ def _restart_task(action: str):
     import subprocess
     import tempfile
     from scripts.apply_update import powershell_exe
-    task = _restart_task_name()
+    task = task or _restart_task_name()
     if action == "query":
         ps = ("[Console]::OutputEncoding = [Text.Encoding]::UTF8; "
               "$t = Get-ScheduledTask -TaskName $env:VLT_TASK -ErrorAction SilentlyContinue; "
@@ -6626,9 +6660,32 @@ def _restart_task_failed(message: str) -> None:
     _restart_task_record(error_day=today)
 
 
+def _remove_legacy_restart_task() -> None:
+    """Remove the task as the branch first named it, machine-wide "Vaulter AI -
+    Update restart", but only when its action runs THIS install's
+    auto_restart.py: another user's install is never touched (review M-1).
+    Never raises."""
+    try:
+        if _restart_task_name() == _RESTART_TASK:
+            return                      # no user name: that IS our task
+        answer = _restart_task("query", task=_RESTART_TASK)
+        if not answer:
+            return
+        import json
+        info = json.loads(answer)
+        if isinstance(info, dict) and _names_this_install(info.get("Arguments")):
+            _restart_task("remove", task=_RESTART_TASK)
+            log.info("[AUTO UPDATE] Removed this install's task under its old shared name.")
+    except Exception:
+        pass
+
+
 def _ensure_restart_task_work() -> None:
-    """The check itself (see _ensure_restart_task). Never raises."""
-    global _RESTART_TASK_OK
+    """The check itself (see _ensure_restart_task). Sets _RESTART_TASK_OK to what
+    it found (so a re-verification that fails withdraws an earlier day's trust)
+    and clears _RESTART_TASK_PENDING. Never raises."""
+    global _RESTART_TASK_OK, _RESTART_TASK_PENDING
+    ok = False
     try:
         if _restart_task_runner() is None:
             _restart_task_failed("[AUTO UPDATE] The update-restart task was not set up on this computer "
@@ -6644,15 +6701,19 @@ def _ensure_restart_task_work() -> None:
                 log.info("[AUTO UPDATE] Restart task set up on this computer.")
         if ok:
             _restart_task_record(verified=_dt_mod.date.today().isoformat(), spec=_restart_task_spec())
-            _RESTART_TASK_OK = True
+            _remove_legacy_restart_task()
             return
         _restart_task_failed("[AUTO UPDATE] The update-restart task could not be set up on this "
                              "computer, so updates here are offered in chat instead of installing "
                              "by themselves.")
     except Exception as e:
+        ok = False
         _restart_task_failed(f"[AUTO UPDATE] The update-restart task could not be checked on this "
                              f"computer ({type(e).__name__}), so updates here are offered in chat "
                              f"instead.")
+    finally:
+        _RESTART_TASK_OK = ok
+        _RESTART_TASK_PENDING = False
 
 
 def _ensure_restart_task() -> None:
@@ -6665,28 +6726,38 @@ def _ensure_restart_task() -> None:
     Once per process (flag set BEFORE the work, so a slow or failing check is
     never retried per tool call).
 
-    Bounded (hardening pass): a task verified today, for this same install and
-    task shape, is trusted without asking PowerShell, so most server starts cost
-    one small file read; otherwise the check runs in a worker thread and a tool
-    answer waits for it at most _RESTART_TASK_WAIT_SECONDS. The same pattern as
+    Bounded (hardening pass): a task verified on any day, for this same install
+    and task shape, is trusted at once (and re-checked in the worker once a day);
+    otherwise the check runs in a worker thread, a tool answer waits for it at
+    most _RESTART_TASK_WAIT_SECONDS, and until it answers chat says nothing about
+    updates (_update_wording_active). The same pattern as
     _get_code_version's bounded git call; the thread ends when the check does.
     A failure is one log.error a day, so it reaches the team's error reports
     without repeating at every Claude start, with no path in it. Never raises.
     """
-    global _RESTART_TASK_CHECKED, _RESTART_TASK_OK
+    global _RESTART_TASK_CHECKED, _RESTART_TASK_OK, _RESTART_TASK_PENDING
     try:
         if _RESTART_TASK_CHECKED or not _auto_update_eligible():
             return
         _RESTART_TASK_CHECKED = True
         rec = _restart_task_record()
-        if rec.get("verified") == _dt_mod.date.today().isoformat() and rec.get("spec") == _restart_task_spec():
+        if rec.get("verified") and rec.get("spec") == _restart_task_spec():
+            # Verified on some day for this same install and task shape: trusted
+            # at once (review I-1: with a today-only rule, the first conversation
+            # of every day asked the person to install, because one query takes
+            # longer than the answer waits). Re-checked in the worker below
+            # unless that was today; a re-check that fails withdraws it.
             _RESTART_TASK_OK = True
-            return
+            if rec.get("verified") == _dt_mod.date.today().isoformat():
+                return
+        else:
+            _RESTART_TASK_PENDING = True     # never verified: chat stays silent until it answers
         import threading
         worker = threading.Thread(target=_ensure_restart_task_work, name="vaulter-restart-task",
                                   daemon=True)
         worker.start()
-        worker.join(_RESTART_TASK_WAIT_SECONDS)
+        # Already trusted from an earlier day: the re-check needs no waiting for.
+        worker.join(0 if _RESTART_TASK_OK else _RESTART_TASK_WAIT_SECONDS)
     except Exception as e:
         log.error(f"[AUTO UPDATE] The update-restart task could not be checked on this computer "
                   f"({type(e).__name__}), so updates here are offered in chat instead.")
@@ -6874,8 +6945,8 @@ def _with_pending_notice(tool_name: str, result):
 
         # Automatic updating is active: the scheduled task installs and restarts
         # by itself, so chat says nothing -- unless that task has given up.
-        if _auto_update_active():
-            if _gave_up_to_show():
+        if _update_wording_active():
+            if _auto_update_active() and _gave_up_to_show():
                 return result + "\n\n---\nNote for Claude, not an error: " + _GAVE_UP_LINE
             return result
 

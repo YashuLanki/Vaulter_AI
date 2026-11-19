@@ -940,7 +940,7 @@ class Env:
     def __init__(self, procs=None, after_kill=None, idle=1000.0, start_apps=None,
                  apply_result=None, relist=None, list_cost=0.0, recover_raises=False,
                  apply_raises=False, relaunch_ok=True, now=DESKTOP_START_EPOCH + 3600,
-                 appears=True, slept=0.0):
+                 appears=True, slept=0.0, after_kill_seq=None):
         self.procs = list(DESKTOP_ROWS + CLI_ROWS) if procs is None else procs
         self.after_kill = list(CLI_ROWS) if after_kill is None else after_kill
         self.relist = relist              # what the re-check right before taskkill sees
@@ -950,6 +950,7 @@ class Env:
         self.appears = appears            # does Desktop show up again after a relaunch?
         self.relaunched = False
         self.slept = slept                # seconds asleep since boot (sleep/wake guard)
+        self.after_kill_seq = list(after_kill_seq or [])   # listings after the kill, one per call
         self.clock = 0.0                  # fake monotonic clock
         self.now = now                    # fake epoch time
         self.n_list = 0
@@ -983,6 +984,8 @@ class Env:
             return list(self.relist)
         if self.relaunched and self.appears and self.relaunch_ok:
             return list(self.procs)
+        if self.killed and self.after_kill_seq:
+            return list(self.after_kill_seq.pop(0))
         return list(self.after_kill if self.killed else self.procs)
 
     def monotonic(self):
@@ -1557,7 +1560,9 @@ try:
     def scheduler(query_answers, add_result=""):
         calls_, answers = [], list(query_answers)
 
-        def fake(action):
+        def fake(action, task=None):
+            if task is not None:
+                return ""                 # the old shared-name task: absent here
             calls_.append(action)
             if action == "query":
                 a = answers.pop(0) if answers else ""
@@ -2188,7 +2193,9 @@ try:
     def sched(answers, add_result="", delay=0.0):
         calls_, q = [], list(answers)
 
-        def fake(action):
+        def fake(action, task=None):
+            if task is not None:
+                return ""
             calls_.append(action)
             if delay:
                 time.sleep(delay)
@@ -2325,6 +2332,282 @@ if _fn:
         _fn(sd)
         size = (sd / "data" / "logs" / "auto_install.txt").stat().st_size
         check("6.18 auto_install.txt is trimmed once it passes 256 KB", size <= 256 * 1024, f"{size} bytes")
+
+
+# =============================================================================
+print("\n7. Fix round (review of the hardening pass)")
+
+# --- 7.1 (I-1) the first conversation of the day never asks to install --------------------
+_s7 = {k: getattr(config, k) for k in ("PENDING_UPDATE_DIR", "DATA_DIR", "UPDATE_CHECK_STAMP_FILE")}
+_f7 = {k: getattr(ms, k, None) for k in ("_restart_task", "_auto_update_eligible", "_restart_task_runner",
+                                         "_RESTART_TASK_CHECKED", "_RESTART_TASK_OK", "_RESTART_TASK_PENDING",
+                                         "_get_code_version", "_write_install_checkin",
+                                         "_ensure_deal_tracker_daily_run", "_check_and_stage_update",
+                                         "_GAVE_UP_SHOWN")}
+_t7 = Path(tempfile.mkdtemp())
+try:
+    for k, sub in (("PENDING_UPDATE_DIR", "pending"), ("DATA_DIR", "data")):
+        setattr(config, k, _t7 / sub)
+        (_t7 / sub).mkdir(parents=True, exist_ok=True)
+    config.UPDATE_CHECK_STAMP_FILE = _t7 / "stamp.txt"
+    (_t7 / "stamp.txt").write_text("fresh")                 # the hourly channel check is not due
+    ms._auto_update_eligible = lambda: True
+    ms._get_code_version = lambda: "1.0"
+    ms._write_install_checkin = lambda *a, **k: None
+    ms._ensure_deal_tracker_daily_run = lambda *a, **k: ""
+    ms._check_and_stage_update = lambda *a, **k: None
+    RUN7 = Path(sys.executable).with_name("pythonw.exe")
+    ms._restart_task_runner = lambda: RUN7
+    OURS7 = str(Path(ms.__file__).resolve().parent / "scripts" / "auto_restart.py")
+    GOOD7 = json.dumps({"Execute": str(RUN7), "Arguments": f'"{OURS7}"', "Count": 1,
+                        "Interval": "PT15M", "Limit": "PT1H", "LogonType": "Interactive"})
+    (_t7 / "pending" / "ready.json").write_text(json.dumps(
+        {"version": "2.0", "zip_filename": "u.zip", "current_version_at_download": "1.0"}))
+
+    def slow_sched(answers, delay, add_result="", legacy=None):
+        calls_, q = [], list(answers)
+
+        def fake(action, task=None):
+            if task is not None:
+                if legacy is not None:
+                    legacy.append((action, task))
+                    return legacy_answer[0] if action == "query" else ""
+                return ""
+            calls_.append(action)
+            time.sleep(delay)
+            if action == "query":
+                return q.pop(0) if q else ""
+            return add_result if action == "add" else ""
+        return calls_, fake
+    legacy_answer = [""]
+
+    def fresh7():
+        ms._RESTART_TASK_CHECKED = False
+        ms._RESTART_TASK_OK = False
+        if hasattr(ms, "_RESTART_TASK_PENDING"):
+            ms._RESTART_TASK_PENDING = False
+        ms._GAVE_UP_SHOWN = False
+
+    body = "ANSWER" * 20
+    fresh7()
+    (_t7 / "data" / "restart_task.json").unlink(missing_ok=True)       # never verified on this install
+    calls, ms._restart_task = slow_sched([GOOD7], delay=6.0)
+    t0 = time.monotonic()
+    got = ms._with_pending_notice("search_documents", body)
+    took = time.monotonic() - t0
+    check("7.1 I-1: never verified, task check slower than the 4 s wait, update staged: the answer "
+          "does NOT ask to install", got == body, got[len(body):][:160])
+    check("7.1 ...and the answer still came back within about 5 s", took < 6.0, f"{took:.1f}s")
+    _wording = getattr(ms, "_update_wording_active", ms._auto_update_active)()
+    check("7.1 ...check_for_update's wording for that moment says nothing either",
+          "Say nothing" in ms._update_message(ms._update_ready(), "", _wording, ""))
+    time.sleep(max(0.0, 6.5 - took))
+    check("7.1 ...once the check answers (task found), automatic updating is active",
+          ms._auto_update_active() is True)
+
+    # a record from yesterday is trusted at once; re-verification runs in the worker
+    yesterday = (__import__("datetime").date.today() - __import__("datetime").timedelta(days=1)).isoformat()
+    spec = ms._restart_task_spec()
+    fresh7()
+    (_t7 / "data" / "restart_task.json").write_text(json.dumps({"verified": yesterday, "spec": spec}))
+    calls, ms._restart_task = slow_sched([GOOD7], delay=2.0)
+    t0 = time.monotonic()
+    ms._ensure_restart_task()
+    check("7.1 I-1(a): a task verified yesterday is trusted on the first call, without waiting",
+          ms._auto_update_active() is True and time.monotonic() - t0 < 1.0, f"{time.monotonic() - t0:.1f}s")
+    time.sleep(2.5)
+    check("7.1 ...and is re-verified in the background the same day", calls[:1] == ["query"]
+          and json.loads((_t7 / "data" / "restart_task.json").read_text()).get("verified")
+          == __import__("datetime").date.today().isoformat(), str(calls))
+    fresh7()
+    (_t7 / "data" / "restart_task.json").write_text(json.dumps({"verified": yesterday, "spec": spec}))
+    calls, ms._restart_task = slow_sched(["", ""], delay=0.2, add_result="Access is denied.")
+    ms._ensure_restart_task()
+    time.sleep(1.0)
+    check("7.1 ...a re-verification that fails withdraws yesterday's trust",
+          ms._auto_update_active() is False, str(calls))
+
+    # --- 7.2 (M-1) the old shared-name task goes only when it runs THIS install -------------
+    for label, script, want in (("this install's", OURS7, True),
+                                ("another install's", r"C:\Users\someone\Other\system\scripts\auto_restart.py", False)):
+        fresh7()
+        (_t7 / "data" / "restart_task.json").unlink(missing_ok=True)
+        legacy = []
+        legacy_answer[0] = json.dumps({"Execute": str(RUN7), "Arguments": f'"{script}"', "Count": 1,
+                                       "Interval": "PT15M", "Limit": "PT1H", "LogonType": "Interactive"})
+        calls, ms._restart_task = slow_sched([GOOD7], delay=0.0, legacy=legacy)
+        ms._ensure_restart_task()
+        time.sleep(0.3)
+        removed = ("remove", "Vaulter AI - Update restart") in legacy
+        check(f"7.2 M-1: the old shared-name task running {label} script is "
+              f"{'removed' if want else 'left alone'}", removed is want, str(legacy))
+    legacy_answer[0] = ""
+
+    # --- 7.3 (M-10) a working pythonw inside this install's own folder is accepted ----------
+    _inst = Path(ms.__file__).resolve().parent.parent
+    _fake_venv = _inst / ".vlt_check_venv_tmp" / "Scripts"
+    _fake_venv.mkdir(parents=True, exist_ok=True)
+    (_fake_venv / "pythonw.exe").write_bytes(b"")
+    try:
+        ms._restart_task_runner = lambda: Path(r"C:\Other Python\pythonw.exe")   # this server's Python differs
+        _in = json.dumps({"Execute": str(_fake_venv / "pythonw.exe"), "Arguments": f'"{OURS7}"', "Count": 1,
+                          "Interval": "PT15M", "Limit": "PT1H", "LogonType": "Interactive"})
+        _out = json.dumps({"Execute": r"C:\Elsewhere\pythonw.exe", "Arguments": f'"{OURS7}"', "Count": 1,
+                           "Interval": "PT15M", "Limit": "PT1H", "LogonType": "Interactive"})
+        check("7.3 M-10: the task's runner is a pythonw inside this install: accepted, no re-register",
+              ms._task_matches(_in) is True)
+        check("7.3 ...a runner that does not exist outside the install is still re-registered",
+              ms._task_matches(_out) is False)
+    finally:
+        shutil.rmtree(_inst / ".vlt_check_venv_tmp", ignore_errors=True)
+        ms._restart_task_runner = lambda: RUN7
+
+    # --- 7.4 the real query's JSON shape (as PowerShell's ConvertTo-Json -Compress prints it) ---
+    _ps_json = ('{"Execute":' + json.dumps(str(RUN7)) + ',"Arguments":' + json.dumps(f'"{OURS7}"')
+                + ',"Count":1,"Interval":"PT15M","Limit":"PT1H","LogonType":"Interactive"}')
+    _recorded_other = ('{"Execute":' + json.dumps(str(RUN7)) + ',"Arguments":' + json.dumps(f'"{OURS7}"')
+                       + ',"Count":1,"Interval":"P1D","Limit":"PT2H","LogonType":"Interactive"}')
+    check("7.4 the query's real JSON shape for a correct task is matched", ms._task_matches(_ps_json) is True)
+    check("7.4 ...and the shape recorded live for another task (P1D, PT2H) is not",
+          ms._task_matches(_recorded_other) is False)
+finally:
+    for k, v in _s7.items():
+        setattr(config, k, v)
+    for k, v in _f7.items():
+        if v is not None:
+            setattr(ms, k, v)
+    shutil.rmtree(_t7, ignore_errors=True)
+
+# --- 7.5 (M-2) an install killed part-way and restored at the next start counts ------------
+with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as t:
+    root = make_tree(Path(t))
+    ready = json.loads((root / "data" / "pending_update" / "ready.json").read_text())
+    ready["signature"] = "sigA"
+    (root / "data" / "pending_update" / "ready.json").write_text(json.dumps(ready))
+    with Capture() as cap:
+        for _ in range(2):
+            au._backup_tree(root, au._backup_dir(root, "2.0"), au._marker_path(root, "2.0"), "1.0")
+            (root / "a.py").write_text("half written\n")                 # killed during the copy
+            (root / "data" / "apply_in_progress.json").write_text(
+                json.dumps({"version": "2.0", "signature": "sigA", "started": "x"}))
+            au.recover_unfinished_apply(root)
+            (root / "data" / "apply_in_progress.json").unlink(missing_ok=True)
+    _f = (failures_of(root) or {}).get("2.0") or {}
+    check("7.5 M-2: killed twice and restored twice: set aside, one [ERROR] says so",
+          _f.get("set_aside") is True and sum("set aside" in m for m in cap.errors()) == 1, f"{_f}")
+    check("7.5 ...and its stage is gone (not tried at a third start)",
+          not (root / "data" / "pending_update" / "ready.json").exists())
+with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as t:
+    root = make_tree(Path(t))
+    au._backup_tree(root, au._backup_dir(root, "2.0"), au._marker_path(root, "2.0"), "1.0")
+    (root / "data" / "apply_in_progress.json").write_text(
+        json.dumps({"version": "2.0", "counted": True, "started": "x"}))
+    au.recover_unfinished_apply(root)
+    check("7.5 ...a restore that was itself interrupted is not counted twice", failures_of(root) is None,
+          str(failures_of(root)))
+
+# --- 7.6 (M-3) pip cut off by the startup budget is not the release's fault ----------------
+with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as t:
+    root = make_tree(Path(t), new_requirements=b"pkg==2\n")
+    (root / "data" / "auto_restart.json").write_text(json.dumps({"2.0": {"restarts": 2, "gave_up": True}}))
+
+    def pip_cut(project_root):
+        (project_root / "a.py").write_text("new a\n")
+        return {"applied": True, "version": "2.0", "dependencies_ok": False,
+                "dependencies_timed_out": True, "dependencies_message": "pip timed out after 35 s"}
+    before = snapshot(root)
+    with Stub(pip_cut), contextlib.redirect_stdout(io.StringIO()):
+        au._auto_cli(True, root, sleep=lambda x: None, clock=lambda: 0.0)
+    check("7.6 M-3: a startup pip timeout puts the old version back and is not counted",
+          snapshot(root) == before and failures_of(root) is None
+          and (root / "data" / "pending_update" / "ready.json").exists(), str(failures_of(root)))
+    req = Path(t) / "req"
+    req.mkdir()
+    (req / "requirements.txt").write_text("")                         # empty: nothing pip could install
+    ok_, msg_ = au.refresh_dependencies(req, timeout=0.001)
+    check("7.6 ...refresh_dependencies reports its own timeout as one", ok_ is False
+          and msg_.startswith("pip timed out"), msg_[:80])
+
+# --- 7.7 (M-7) discard_stage leaves a newer stage alone ------------------------------------------
+with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as t:
+    root = make_tree(Path(t))
+    pend = root / "data" / "pending_update"
+    judged = json.loads((pend / "ready.json").read_text())
+    (pend / "v3.zip").write_bytes(b"x")
+    (pend / "ready.json").write_text(json.dumps({"version": "3.0", "zip_filename": "v3.zip"}))   # restaged since
+    au.discard_stage(root / "data", judged)
+    check("7.7 M-7: a stage rewritten for another version since it was judged is kept",
+          (pend / "ready.json").exists() and (pend / "v3.zip").exists() and not (pend / "u.zip").exists())
+
+# --- 7.8 (M-8) one [ERROR], not two, when an unusable stage is the one set aside -----------------
+with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as t:
+    root = restart_tree(Path(t))
+    (root / "data" / "pending_update" / "u.zip").write_bytes(b"PK\x03\x04 not a zip")
+    (root / "data" / "update_failures.json").write_text(json.dumps(
+        {"2.0": {"failures": 1, "set_aside": False, "signature": ""}}))
+    ar.main([], project_root=root, ops=Env().ops())
+    vt = read(root / VLOG)
+    check("7.8 M-8: restart task sets an unusable stage aside with exactly one [ERROR]",
+          len(ERROR_LINE.findall(vt)) == 1 and "set aside" in vt, vt)
+with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as t:
+    root = make_tree(Path(t))
+    (root / "data" / "pending_update" / "u.zip").write_bytes(b"PK\x03\x04 not a zip")
+    (root / "data" / "update_failures.json").write_text(json.dumps(
+        {"2.0": {"failures": 1, "set_aside": False, "signature": ""}}))
+    with Capture() as cap, Stub(ok_apply):
+        au.auto_apply(root)
+    check("7.8 ...and so does the installer", len(cap.errors()) == 1 and "set aside" in cap.errors()[0],
+          str(cap.errors()))
+
+# --- 7.9 (M-4) a new Desktop seen once, then gone, does not stop the install ----------------------
+if ar is not None:
+    BLIP = row(991, 5, STORE_EXE, "2026-11-19T09:30:00.0000000-07:00")      # a short-lived claude.exe
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as t:
+        root = restart_tree(Path(t))
+        env = Env(after_kill_seq=[[BLIP] + CLI_ROWS, list(CLI_ROWS)])
+        ar.main([], project_root=root, ops=env.ops())
+        check("7.9 M-4: a new Desktop main seen in one listing only: installed and reopened",
+              "auto_apply" in env.names() and "relaunch" in env.names(), str(env.names()))
+
+    # --- 7.10 (M-5) the Squirrel stub alone does not confirm a reopen -----------------------------
+    _stub_exe = r"C:\Users\x\AppData\Local\AnthropicClaude\claude.exe"
+    for label, rows_, want in (("only the stub launcher", [row(5, 1, _stub_exe)], False),
+                               ("the real app-<version> main", [row(6, 1, CLASSIC_EXE)], True)):
+        clk7 = {"t": 0.0}
+        ops7 = {"relaunch": lambda cmd: True, "list_processes": lambda: list(rows_),
+                "monotonic": lambda: clk7["t"], "sleep": lambda sec: clk7.__setitem__("t", clk7["t"] + sec)}
+        check(f"7.10 M-5: after starting the stub, {label} -> reopened is {want}",
+              ar._reopen(ops7, [_stub_exe]) is want)
+
+# --- 7.11 6.13 for real: a server process whose path holds 'é' is seen ---------------------------
+with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as t:
+    fake_sys = Path(t) / "vlt test 'é" / "Vaulter AI" / "system"
+    with open(Path(t) / "dummy.txt", "w") as _dfh:
+        dummy = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(15)",
+                                  str(fake_sys / "main.py"), "mcp"],
+                                 stdin=subprocess.DEVNULL, stdout=_dfh, stderr=subprocess.STDOUT)
+        try:
+            time.sleep(1.0)
+            seen = au.other_servers_running(fake_sys)
+        finally:
+            dummy.wait(timeout=60)
+    check("7.11 a server running from a path with 'é' is seen (real PowerShell, real UTF-8 decode)",
+          seen is True, str(seen))
+
+# --- 7.12 6.12 with a worst-case clock: slow PowerShell eats the budget --------------------------
+with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as t:
+    root = make_tree(Path(t), new_requirements=b"pkg==2\n")
+    (root / "data" / "auto_restart.json").write_text(json.dumps({"2.0": {"restarts": 2, "gave_up": True}}))
+    clk12 = {"t": 0.0}
+    _osr_real = au.other_servers_running
+    au.other_servers_running = lambda pr: (clk12.__setitem__("t", clk12["t"] + 12.0), False)[1]
+    try:
+        with Stub(ok_apply) as s, contextlib.redirect_stdout(io.StringIO()) as out:
+            au._auto_cli(True, root, sleep=lambda x: None, clock=lambda: clk12["t"])
+    finally:
+        au.other_servers_running = _osr_real
+    check("7.12 a 12 s server count leaves too little time for pip at startup: left for the idle restart",
+          s.calls == 0 and "startup time" in out.getvalue(), out.getvalue().strip())
 
 
 failed = [r for r in RESULTS if not r[1]]
