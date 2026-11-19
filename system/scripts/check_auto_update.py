@@ -893,6 +893,109 @@ if ar is not None and all(hasattr(ar, f) for f in AR_NEEDED):
           and read(PROJECT_ROOT / RLOG) == _real_rlog_before)
 
 
+# =============================================================================
+print("\n4. What the chat says")
+import shutil  # noqa: E402
+import mcp_server as ms  # noqa: E402
+
+_real = {k: getattr(config, k) for k in ("PENDING_UPDATE_DIR", "INSTALLS_DIR", "DATA_DIR", "UPDATE_CHECK_STAMP_FILE")}
+_real_fns = {k: getattr(ms, k, None) for k in ("_auto_update_active", "_write_install_checkin",
+             "_ensure_deal_tracker_daily_run", "_ensure_restart_task", "_restart_task", "_RESTART_TASK_CHECKED")}
+_tmp4 = Path(tempfile.mkdtemp())
+try:
+    # the pure wording function (the check_for_update tool itself is never called: its upkeep writes
+    # the team's shared folder)
+    um = getattr(ms, "_update_message", None)
+    check("_update_message exists", um is not None)
+    if um is not None:
+        check("not active, update ready: the old 'ready to install' wording",
+              "ready to install" in um("abc1234", "", False, "") and "apply_pending_update" in um("abc1234", "", False, ""))
+        check("not active, restart owed: the old restart wording",
+              "quit and reopen" in um("", "abc1234", False, "").lower())
+        check("not active, nothing owed: says nothing", "Say nothing" in um("", "", False, ""))
+        check("active, update ready: says nothing", "Say nothing" in um("abc1234", "", True, "")
+              and "ready to install" not in um("abc1234", "", True, ""))
+        check("active, restart owed: says nothing", "Say nothing" in um("", "abc1234", True, ""))
+        check("active, gave up: asks for a full quit", "Quit" in um("abc1234", "", True, "abc1234"))
+
+    # notice behaviour, with every side effect stubbed and the shared/real paths redirected
+    for k, v in (("PENDING_UPDATE_DIR", _tmp4 / "pending"), ("INSTALLS_DIR", _tmp4 / "installs"),
+                 ("DATA_DIR", _tmp4 / "data"), ("UPDATE_CHECK_STAMP_FILE", _tmp4 / "stamp.txt")):
+        setattr(config, k, v)
+        if k != "UPDATE_CHECK_STAMP_FILE":
+            v.mkdir(parents=True, exist_ok=True)
+    (_tmp4 / "stamp.txt").write_text("frozen")
+    ms._write_install_checkin = lambda *a, **k: None
+    ms._ensure_deal_tracker_daily_run = lambda *a, **k: ""
+    ms._ensure_restart_task = lambda *a, **k: None
+    (_tmp4 / "pending" / "ready.json").write_text(json.dumps({"version": "zzzzzz9", "zip_filename": "f.zip"}))
+    body = "ANSWER" * 40
+
+    ms._auto_update_active = lambda: True
+    check("active + update staged: the notice adds nothing", ms._with_pending_notice("x", body) == body)
+    (_tmp4 / "data" / "auto_restart.json").write_text(
+        json.dumps({"zzzzzz9": {"restarts": 2, "gave_up": True}}))
+    _gu = ms._with_pending_notice("x", body)
+    check("active + gave up: the notice asks for a full quit", "Quit" in _gu and _gu.startswith(body))
+    check("_auto_restart_gave_up names the version", getattr(ms, "_auto_restart_gave_up", lambda: "")() == "zzzzzz9")
+    (_tmp4 / "data" / "auto_restart.json").unlink()
+    check("no state file: not gave up", getattr(ms, "_auto_restart_gave_up", lambda: "x")() == "")
+
+    ms._auto_update_active = lambda: False
+    check("not active: the old 'ready to install' wording returns",
+          "ready to install" in ms._with_pending_notice("x", body))
+
+    # the real predicate
+    check("_auto_update_active is False on a development copy (this tree is one)",
+          _real_fns["_auto_update_active"]() is False)
+
+    # registration, with the scheduler call stubbed
+    ms._ensure_restart_task = _real_fns["_ensure_restart_task"]
+    calls = []
+    ms._restart_task = lambda action: (calls.append(action), "not found" if action == "exists" else "")[1]
+    ms._RESTART_TASK_CHECKED = False
+    ms._auto_update_active = lambda: False
+    ms._ensure_restart_task()
+    check("not active: _restart_task is never called", calls == [], str(calls))
+    ms._auto_update_active = lambda: True
+    ms._ensure_restart_task()
+    ms._ensure_restart_task()
+    check("active, not found: 'add' called exactly once over two calls",
+          calls == ["exists", "add"], str(calls))
+    calls.clear()
+    ms._RESTART_TASK_CHECKED = False
+    ms._restart_task = lambda action: (calls.append(action), "")[1]
+    ms._ensure_restart_task()
+    check("active, already registered: no 'add'", calls == ["exists"], str(calls))
+    ms._RESTART_TASK_CHECKED = False
+
+    def _boom(action):
+        raise RuntimeError("schtasks missing")
+    ms._restart_task = _boom
+    try:
+        ms._ensure_restart_task()
+        check("a failing scheduler never raises", True)
+    except Exception as e:
+        check("a failing scheduler never raises", False, str(e))
+
+    src_ms = (PROJECT_ROOT / "mcp_server.py").read_text(encoding="utf-8")
+    try:
+        seg = src_ms[src_ms.index("def _restart_task"):src_ms.index("def _ensure_restart_task")]
+    except ValueError:
+        seg = ""
+    check("the task: name, interactive principal, 15 minutes, env vars, stdin closed",
+          "Vaulter AI - Update restart" in src_ms and "-LogonType Interactive" in seg
+          and "-Minutes 15" in seg and "VLT_RUNNER" in seg and "stdin=subprocess.DEVNULL" in seg
+          and "auto_restart_schedule.txt" in seg and "-RunLevel" not in seg and "-Password" not in seg)
+finally:
+    for k, v in _real.items():
+        setattr(config, k, v)
+    for k, v in _real_fns.items():
+        if v is not None:
+            setattr(ms, k, v)
+    shutil.rmtree(_tmp4, ignore_errors=True)
+
+
 failed = [r for r in RESULTS if not r[1]]
 print(f"\n{len(RESULTS) - len(failed)} passed, {len(failed)} failed")
 sys.exit(1 if failed else 0)
