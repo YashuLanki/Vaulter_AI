@@ -200,6 +200,18 @@ def _restart_pending() -> str:
     return now
 
 
+def _capture_startup_version() -> None:
+    """Record the version this process loaded, once, as the server is created --
+    not on the first check_for_update, which may come long after an update has
+    already rewritten the VERSION file under this process. Never raises."""
+    global _VERSION_AT_STARTUP
+    if _VERSION_AT_STARTUP is None:
+        try:
+            _VERSION_AT_STARTUP = _get_code_version()
+        except Exception:
+            pass
+
+
 def _get_code_version() -> str:
     """
     Best-effort version of the running code, for check_system_health,
@@ -2109,16 +2121,19 @@ def _library_nicknames() -> str:
 def create_mcp_server():
     from mcp.server.fastmcp import FastMCP
 
+    _capture_startup_version()
+
     mcp = FastMCP(
         name="Vaulter AI Property Intelligence",
         instructions="""Before doing anything else in a brand-new conversation, call
-check_for_update() once. It only says whether a newer version of Vaulter AI is waiting
-to be installed (or installed and waiting for a restart). If it says the user is up to
-date, say nothing about it at all and just proceed with whatever the user asked. If it
-says an update is waiting, tell the user in one plain sentence and ask whether they want
-it installed now -- alongside their answer, never instead of it. Do not call it again
-later in the same conversation; if an update arrives mid-conversation, a note on a later
-tool answer will say so.
+check_for_update() once. Its answer says exactly what, if anything, to tell the user
+about updates -- usually nothing at all, since on most computers updates install by
+themselves. If it says to say nothing, say nothing about it and just proceed with whatever
+the user asked. Only when the answer itself asks you to tell the user something (on a
+computer where updates are not automatic, that includes asking whether to install one),
+do it in one plain sentence, alongside their answer, never instead of it. Do not call it
+again later in the same conversation; if something needs saying mid-conversation, a note
+on a later tool answer will say so.
 
 check_system_health() is the fuller check (document library, shared folder, portfolio
 file, out-of-date summaries). Call it only when the user asks whether things are working,
@@ -2287,14 +2302,15 @@ for every listing.""".replace(
     @mcp.tool()
     def check_for_update() -> str:
         """
-        Say whether a newer version of Vaulter AI is waiting for this user.
+        Say whether anything about Vaulter AI updates needs the user's attention.
         Call this once, automatically, at the start of every new conversation.
 
-        If it says the user is up to date, say NOTHING about it and carry on
-        with what they asked. If an update is ready, tell them in one plain
-        sentence and ask whether they want it installed now; if yes, call
-        apply_pending_update. If a restart is owed, tell them to fully quit
-        and reopen Claude Desktop. Never delay their answer for this.
+        Do exactly what its answer says. Usually that is to say NOTHING about
+        it and carry on with what they asked: on most computers updates install
+        and load by themselves. Only when the answer itself asks you to tell the
+        user something (on a computer where updates are not automatic, that can
+        include asking before installing) do so in one plain sentence. Never
+        delay their answer for this.
         """
         # The quiet upkeep check_system_health used to do at the start of
         # every conversation -- staging an update, leaving this machine's
@@ -2324,7 +2340,7 @@ for every listing.""".replace(
                 what = ""
         active = _auto_update_active()
         return _update_message(ready, waiting, active,
-                               _auto_restart_gave_up() if active else "",
+                               _gave_up_to_show() if active else "",
                                what=what, version=_get_code_version())
 
     @mcp.tool()
@@ -2427,7 +2443,7 @@ for every listing.""".replace(
         # it writes an error line, and the reporter has to see it in this same
         # pass or it waits a whole conversation.
         for _stage_check in (_report_unfinished_apply, _check_and_stage_update,
-                             _check_and_stage_org_settings,
+                             _check_and_stage_org_settings, _ensure_restart_task,
                              _write_install_checkin, _report_errors_to_team):
             _ts = _t.perf_counter()
             try:
@@ -2774,48 +2790,34 @@ for every listing.""".replace(
         _v = _get_code_version()
         lines.append(f"Code version: {_v}")
 
-        # An update applied but not yet restarted into. Said EVERY conversation
-        # until they actually restart, because until then the code answering is
-        # not the code they were told they had -- and the restart is the one
-        # step in this whole path that nothing can do for them.
-        _waiting = _restart_pending()
-        if _waiting:
-            lines.append(f"  Version {_waiting} is installed but NOT yet running: this "
-                         f"connection still has the older code loaded.")
-            issues.append(
-                f"Vaulter AI was updated to {_waiting} but Claude Desktop has not been "
-                f"restarted since, so the old code is still running. Tell the user to fully "
-                f"quit and reopen Claude Desktop -- not just close the window. Nothing else "
-                f"is needed and nothing is broken meanwhile."
-            )
-        log.info(f"[MCP] check_system_health: done in {_t.perf_counter()-_t0:.1f}s")
-
+        # An update applied but not yet restarted into, and an update downloaded
+        # and waiting. Where updates are automatic the restart task loads both by
+        # itself, so neither is an issue for the person; elsewhere both still
+        # ask (see _health_update_text, which follows check_for_update's rule).
+        #
+        # Ask _update_ready rather than reading the marker directly. It is the
+        # one place that knows when a stage does NOT deserve announcing: equal
+        # to the version already running, or superseded because this install
+        # got current some other way since the download. Reading the file raw
+        # here meant this tool offered a DOWNGRADE -- measured on the
+        # development copy, which was offered 79065b0 while running 258e968,
+        # three commits newer.
         try:
             from config import PENDING_UPDATE_DIR
-            # Ask _update_ready rather than reading the marker directly. It
-            # is the one place that knows when a stage does NOT deserve
-            # announcing: equal to the version already running, or superseded
-            # because this install got current some other way since the
-            # download. Reading the file raw here meant this tool offered a
-            # DOWNGRADE -- measured on the development copy, which was offered
-            # 79065b0 while running 258e968, three commits newer. That guard
-            # already existed in _update_ready and _install_problems; this was
-            # the third place asking the same question and the only one
-            # without it.
-            waiting = _update_ready()
-            if waiting:
+            _waiting = _restart_pending()
+            _ready = _update_ready()
+            _notes = ""
+            if _ready:
                 staged = _json_object(Path(PENDING_UPDATE_DIR) / "ready.json") or {}
-                notes = f" — {staged['notes']}" if staged.get("notes") else ""
-                lines.append(f"  A new version ({waiting}) is downloaded and "
-                              f"ready{notes}. Ask the user if they'd like it installed now; if "
-                              f"so, call apply_pending_update (this is never done "
-                              f"automatically without asking first).")
-                issues.append(
-                    f"A new version ({waiting}) is ready — ask the user if "
-                    f"they'd like it applied now, and if so, call apply_pending_update."
-                )
+                _notes = f" — {staged['notes']}" if staged.get("notes") else ""
+            _active = _auto_update_active()
+            _lines, _issues = _health_update_text(
+                _ready, _waiting, _active, _auto_restart_gave_up() if _active else "", _notes)
+            lines.extend(_lines)
+            issues.extend(_issues)
         except Exception:
             pass  # update-check reporting is a nicety, never worth failing the whole check over
+        log.info(f"[MCP] check_system_health: done in {_t.perf_counter()-_t0:.1f}s")
 
         # ── Pending org-wide settings ─────────────────────────────
         # Deliberately generic -- never names the specific key or
@@ -6316,6 +6318,10 @@ def _update_message(ready: str, waiting: str, active: bool, gave_up: str,
     if active:
         if gave_up:
             return _GAVE_UP_LINE
+        if waiting or ready:
+            return (f"Version {waiting or ready} of Vaulter AI will install automatically: "
+                    f"Claude restarts by itself once the computer has been idle for 15 "
+                    f"minutes. Say nothing about this.")
         return f"Up to date ({version}). Say nothing about this."
     if waiting:
         return (f"Vaulter AI was updated to {waiting}, but Claude Desktop has not "
@@ -6330,9 +6336,50 @@ def _update_message(ready: str, waiting: str, active: bool, gave_up: str,
     return f"Up to date ({version}). Say nothing about this."
 
 
-def _auto_update_active() -> bool:
-    """True where the scheduled task keeps this install current by itself: Windows,
-    and not somebody's working copy. Never raises."""
+def _health_update_text(ready: str, waiting: str, active: bool, gave_up: str,
+                        notes: str = "") -> tuple[list, list]:
+    """
+    check_system_health's lines and issues about updates: the same active /
+    not-active rule as _update_message. Pure, so the checks can test it. Where
+    updates are automatic nothing is an issue for the person unless the
+    restart task has given up.
+    """
+    lines, issues = [], []
+    if waiting:
+        lines.append(f"  Version {waiting} is installed but NOT yet running: this "
+                     f"connection still has the older code loaded."
+                     + (" Claude restarts by itself once the computer has been idle."
+                        if active else ""))
+        if not active:
+            # Said every conversation until they restart: until then the code
+            # answering is not the code they were told they had.
+            issues.append(
+                f"Vaulter AI was updated to {waiting} but Claude Desktop has not been "
+                f"restarted since, so the old code is still running. Tell the user to fully "
+                f"quit and reopen Claude Desktop -- not just close the window. Nothing else "
+                f"is needed and nothing is broken meanwhile."
+            )
+    if ready:
+        if active:
+            lines.append(f"  A new version ({ready}) is downloaded{notes}. It installs "
+                         f"automatically; nothing is needed from the user.")
+        else:
+            lines.append(f"  A new version ({ready}) is downloaded and "
+                         f"ready{notes}. Ask the user if they'd like it installed now; if "
+                         f"so, call apply_pending_update (this is never done "
+                         f"automatically without asking first).")
+            issues.append(
+                f"A new version ({ready}) is ready — ask the user if "
+                f"they'd like it applied now, and if so, call apply_pending_update."
+            )
+    if active and gave_up:
+        issues.append(_GAVE_UP_LINE)
+    return lines, issues
+
+
+def _auto_update_eligible() -> bool:
+    """Windows, and not somebody's working copy: where the restart task may keep
+    this install current by itself. Never raises."""
     try:
         if sys.platform != "win32":
             return False
@@ -6340,6 +6387,33 @@ def _auto_update_active() -> bool:
         return not apply_update.is_development_copy(Path(__file__).parent)
     except Exception:
         return False
+
+
+def _auto_update_active() -> bool:
+    """True only where the restart task is VERIFIED to keep THIS install current:
+    eligible, and _ensure_restart_task found or registered a task naming this
+    install's auto_restart.py in this process. Until then the old ask-first
+    wording applies, so a machine whose task is missing, broken or pointing at
+    another copy is never told to say nothing. Never raises."""
+    try:
+        return bool(_RESTART_TASK_OK) and _auto_update_eligible()
+    except Exception:
+        return False
+
+
+_GAVE_UP_SHOWN = False
+
+
+def _gave_up_to_show() -> str:
+    """The version the restart task gave up on, at most once per server process
+    (a line on every answer is a line people learn to skip), else ""."""
+    global _GAVE_UP_SHOWN
+    if _GAVE_UP_SHOWN:
+        return ""
+    version = _auto_restart_gave_up()
+    if version:
+        _GAVE_UP_SHOWN = True
+    return version
 
 
 def _auto_restart_gave_up() -> str:
@@ -6362,33 +6436,71 @@ def _auto_restart_gave_up() -> str:
 
 _RESTART_TASK = "Vaulter AI - Update restart"
 _RESTART_TASK_CHECKED = False
+_RESTART_TASK_OK = False
 
 
-def _restart_task(action: str) -> str:
+def _restart_task_script() -> Path:
+    return Path(__file__).resolve().parent / "scripts" / "auto_restart.py"
+
+
+def _names_this_install(action_text) -> bool:
+    """True if a task action (executable and arguments) names THIS install's
+    auto_restart.py. Case- and slash-insensitive."""
+    def norm(text):
+        return str(text or "").replace("/", "\\").lower()
+    return bool(action_text) and norm(_restart_task_script()) in norm(action_text)
+
+
+def _restart_task(action: str):
     """
-    Add, remove or look for this computer's update-restart task (every 15
-    minutes, only while the person is logged on, in their own session: idle
-    time reads 0 and the Store relaunch fails anywhere else). Returns "" on
-    success ("exists": "" means it exists), else what went wrong. Modelled on
-    _deal_tracker_task: stdin closed, no pipes, values via environment
-    variables. Never asks for elevation.
+    Add, remove or read this computer's update-restart task (every 15 minutes,
+    only while the person is logged on, in their own session: idle time reads 0
+    and the Store relaunch fails anywhere else). Modelled on _deal_tracker_task:
+    stdin closed, no pipes, values via environment variables. Never asks for
+    elevation.
+
+    "query": the task's action(s) as "<executable> <arguments>" lines, "" when
+             there is no such task, None when the question could not be asked.
+    "add":   "" on success, else what went wrong (kept in a local file only).
+    "remove": "".
     """
     import subprocess
-    if action == "exists":
-        r = subprocess.run(["schtasks", "/Query", "/TN", _RESTART_TASK], stdin=subprocess.DEVNULL,
-                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=30)
-        return "" if r.returncode == 0 else "not found"
+    import tempfile
+    if action == "query":
+        ps = ("[Console]::OutputEncoding = [Text.Encoding]::UTF8; "
+              "$t = Get-ScheduledTask -TaskName $env:VLT_TASK -ErrorAction SilentlyContinue; "
+              "if ($t) { $t.Actions | ForEach-Object { '{0} {1}' -f $_.Execute, $_.Arguments } }; "
+              "exit 0")  # a missing task is an answer (""), not a failure
+        out = Path(tempfile.gettempdir()) / f"vaulter_task_query_{os.getpid()}.txt"
+        try:
+            with open(out, "w", encoding="utf-8") as fh:
+                r = subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-Command", ps],
+                                   env=dict(os.environ, VLT_TASK=_RESTART_TASK),
+                                   stdin=subprocess.DEVNULL, stdout=fh, stderr=subprocess.DEVNULL,
+                                   timeout=30)
+            if r.returncode != 0:
+                return None
+            return out.read_text(encoding="utf-8-sig", errors="replace").strip()
+        finally:
+            try:
+                out.unlink(missing_ok=True)
+            except OSError:
+                pass
     if action == "remove":
         subprocess.run(["schtasks", "/Delete", "/F", "/TN", _RESTART_TASK], stdin=subprocess.DEVNULL,
                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=30)
         return ""
-    script = Path(__file__).resolve().parent / "scripts" / "auto_restart.py"
+    script = _restart_task_script()
     runner = Path(sys.executable).with_name("pythonw.exe")
     if not runner.exists():
         runner = Path(sys.executable)
+    # 60 minutes: the run may include the channel check, a 30 s exit wait, a
+    # backup, pip (300 s at most) and a smoke test (120 s at most). If the limit
+    # were reached, Task Scheduler would end the process with Desktop closed and
+    # its relaunch would never run.
     ps = ("$a = New-ScheduledTaskAction -Execute $env:VLT_RUNNER -Argument ('\"{0}\"' -f $env:VLT_SCRIPT); "
           "$t = New-ScheduledTaskTrigger -Once -At (Get-Date) -RepetitionInterval (New-TimeSpan -Minutes 15); "
-          "$s = New-ScheduledTaskSettingsSet -StartWhenAvailable -ExecutionTimeLimit (New-TimeSpan -Minutes 10) "
+          "$s = New-ScheduledTaskSettingsSet -StartWhenAvailable -ExecutionTimeLimit (New-TimeSpan -Minutes 60) "
           "-MultipleInstances IgnoreNew -DontStopIfGoingOnBatteries -AllowStartIfOnBatteries; "
           "$p = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType Interactive; "
           "Register-ScheduledTask -TaskName $env:VLT_TASK -Action $a -Trigger $t -Settings $s -Principal $p "
@@ -6405,25 +6517,32 @@ def _restart_task(action: str) -> str:
 
 def _ensure_restart_task() -> None:
     """
-    Register the update-restart task on this computer if automatic updating is
-    active and the task is missing. At most one query per process (flag set
-    BEFORE the call, so a slow or failing one is never retried per tool call).
-    Never raises.
+    Make sure this computer's update-restart task exists AND runs this install's
+    auto_restart.py; register it (-Force) when it is missing or names another
+    copy. Sets _RESTART_TASK_OK only after a verified match, which is what makes
+    _auto_update_active() true. Once per process (flag set BEFORE the call, so
+    a slow or failing one is never retried per tool call). A failure is one
+    log.error per process, so it reaches the team's error reports, with no path
+    in it. Never raises.
     """
-    global _RESTART_TASK_CHECKED
+    global _RESTART_TASK_CHECKED, _RESTART_TASK_OK
     try:
-        if _RESTART_TASK_CHECKED or not _auto_update_active():
+        if _RESTART_TASK_CHECKED or not _auto_update_eligible():
             return
         _RESTART_TASK_CHECKED = True
-        if not _restart_task("exists"):
+        if _names_this_install(_restart_task("query")):
+            _RESTART_TASK_OK = True
             return
         err = _restart_task("add")
-        if err:
-            log.warning(f"[AUTO UPDATE] Could not set up the restart task here: {err}")
-        else:
+        if not err and _names_this_install(_restart_task("query")):
+            _RESTART_TASK_OK = True
             log.info("[AUTO UPDATE] Restart task set up on this computer.")
+            return
+        log.error("[AUTO UPDATE] The update-restart task could not be set up on this computer, "
+                  "so updates here are offered in chat instead of installing by themselves.")
     except Exception as e:
-        log.warning(f"[AUTO UPDATE] Restart task check failed (continuing): {e}")
+        log.error(f"[AUTO UPDATE] The update-restart task could not be checked on this computer "
+                  f"({type(e).__name__}), so updates here are offered in chat instead.")
 
 
 _DEAL_TRACKER_TASK = "Vaulter AI - Deal Tracker daily"
@@ -6609,7 +6728,7 @@ def _with_pending_notice(tool_name: str, result):
         # Automatic updating is active: the scheduled task installs and restarts
         # by itself, so chat says nothing -- unless that task has given up.
         if _auto_update_active():
-            if _auto_restart_gave_up():
+            if _gave_up_to_show():
                 return result + "\n\n---\nNote for Claude, not an error: " + _GAVE_UP_LINE
             return result
 

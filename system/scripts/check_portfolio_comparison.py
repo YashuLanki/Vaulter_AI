@@ -1079,8 +1079,10 @@ def main() -> int:
             # three commits OLDER than the one it was running. Three functions
             # answered "is an update waiting"; only two of them checked.
             _srv_src = Path(_ms.__file__).read_text(encoding="utf-8")
+            _health_src = _srv_src[_srv_src.find("def check_system_health"):
+                                   _srv_src.find("def apply_pending_update")]
             check("the health check asks that guard, not the marker directly",
-                  "waiting = _update_ready()" in _srv_src
+                  "= _update_ready()" in _health_src
                   and "_json.loads(ready_path.read_text())" not in _srv_src)
         finally:
             if _wasrdy is None:

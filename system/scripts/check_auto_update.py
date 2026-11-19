@@ -1444,7 +1444,11 @@ import mcp_server as ms  # noqa: E402
 
 _real = {k: getattr(config, k) for k in ("PENDING_UPDATE_DIR", "INSTALLS_DIR", "DATA_DIR", "UPDATE_CHECK_STAMP_FILE")}
 _real_fns = {k: getattr(ms, k, None) for k in ("_auto_update_active", "_write_install_checkin",
-             "_ensure_deal_tracker_daily_run", "_ensure_restart_task", "_restart_task", "_RESTART_TASK_CHECKED")}
+             "_ensure_deal_tracker_daily_run", "_ensure_restart_task", "_restart_task", "_RESTART_TASK_CHECKED",
+             "_auto_update_eligible", "_RESTART_TASK_OK", "_GAVE_UP_SHOWN", "_VERSION_AT_STARTUP")}
+_MISSING = object()
+_real_flags = {k: getattr(ms, k, _MISSING) for k in ("_RESTART_TASK_CHECKED", "_RESTART_TASK_OK",
+               "_GAVE_UP_SHOWN", "_VERSION_AT_STARTUP")}
 _tmp4 = Path(tempfile.mkdtemp())
 try:
     # the pure wording function (the check_for_update tool itself is never called: its upkeep writes
@@ -1461,6 +1465,12 @@ try:
               and "ready to install" not in um("abc1234", "", True, ""))
         check("active, restart owed: says nothing", "Say nothing" in um("", "abc1234", True, ""))
         check("active, gave up: asks for a full quit", "Quit" in um("abc1234", "", True, "abc1234"))
+        _m1 = um("abc1234", "", True, "", version="old0001")
+        check("M1: active, update waiting: 'will install automatically', not 'Up to date (<old>)'",
+              "install automatically" in _m1 and "Up to date" not in _m1 and "old0001" not in _m1, _m1)
+        _m1 = um("", "abc1234", True, "", version="old0001")
+        check("M1: active, restart owed: automatic wording, not 'Up to date'",
+              "automatically" in _m1 and "Up to date" not in _m1 and "Say nothing" in _m1, _m1)
 
     # notice behaviour, with every side effect stubbed and the shared/real paths redirected
     for k, v in (("PENDING_UPDATE_DIR", _tmp4 / "pending"), ("INSTALLS_DIR", _tmp4 / "installs"),
@@ -1479,8 +1489,15 @@ try:
     check("active + update staged: the notice adds nothing", ms._with_pending_notice("x", body) == body)
     (_tmp4 / "data" / "auto_restart.json").write_text(
         json.dumps({"zzzzzz9": {"restarts": 2, "gave_up": True}}))
+    ms._GAVE_UP_SHOWN = False
     _gu = ms._with_pending_notice("x", body)
     check("active + gave up: the notice asks for a full quit", "Quit" in _gu and _gu.startswith(body))
+    check("I5a: ...and only once per server process", ms._with_pending_notice("x", body) == body)
+    ms._GAVE_UP_SHOWN = False
+    _gs = getattr(ms, "_gave_up_to_show", None)
+    check("I5a: _gave_up_to_show names it once, then nothing",
+          _gs is not None and _gs() == "zzzzzz9" and _gs() == "", "")
+    ms._GAVE_UP_SHOWN = False
     check("_auto_restart_gave_up names the version", getattr(ms, "_auto_restart_gave_up", lambda: "")() == "zzzzzz9")
     (_tmp4 / "data" / "auto_restart.json").unlink()
     check("no state file: not gave up", getattr(ms, "_auto_restart_gave_up", lambda: "x")() == "")
@@ -1493,34 +1510,138 @@ try:
     check("_auto_update_active is False on a development copy (this tree is one)",
           _real_fns["_auto_update_active"]() is False)
 
-    # registration, with the scheduler call stubbed
-    ms._ensure_restart_task = _real_fns["_ensure_restart_task"]
-    calls = []
-    ms._restart_task = lambda action: (calls.append(action), "not found" if action == "exists" else "")[1]
-    ms._RESTART_TASK_CHECKED = False
-    ms._auto_update_active = lambda: False
-    ms._ensure_restart_task()
-    check("not active: _restart_task is never called", calls == [], str(calls))
-    ms._auto_update_active = lambda: True
-    ms._ensure_restart_task()
-    ms._ensure_restart_task()
-    check("active, not found: 'add' called exactly once over two calls",
-          calls == ["exists", "add"], str(calls))
-    calls.clear()
-    ms._RESTART_TASK_CHECKED = False
-    ms._restart_task = lambda action: (calls.append(action), "")[1]
-    ms._ensure_restart_task()
-    check("active, already registered: no 'add'", calls == ["exists"], str(calls))
-    ms._RESTART_TASK_CHECKED = False
+    # registration (I4), with the scheduler calls stubbed: query -> the task's action text
+    class MsCapture(logging.Handler):
+        def __init__(self):
+            super().__init__(logging.DEBUG)
+            self.records = []
 
-    def _boom(action):
-        raise RuntimeError("schtasks missing")
-    ms._restart_task = _boom
+        def emit(self, record):
+            self.records.append(record)
+
+        def errors(self):
+            return [r_.getMessage() for r_ in self.records if r_.levelno >= logging.ERROR]
+
+    OURS = str(Path(ms.__file__).resolve().parent / "scripts" / "auto_restart.py")
+    OTHER = r"C:\Users\someone\Other Install\system\scripts\auto_restart.py"
+    ms._ensure_restart_task = _real_fns["_ensure_restart_task"]
+    if _real_fns["_auto_update_active"] is not None:
+        ms._auto_update_active = _real_fns["_auto_update_active"]
+
+    def scheduler(query_answers, add_result=""):
+        calls_, answers = [], list(query_answers)
+
+        def fake(action):
+            calls_.append(action)
+            if action == "query":
+                a = answers.pop(0) if answers else ""
+                if isinstance(a, Exception):
+                    raise a
+                return a
+            return add_result if action == "add" else ""
+        return calls_, fake
+
+    def fresh(eligible=True):
+        ms._RESTART_TASK_CHECKED = False
+        ms._RESTART_TASK_OK = False
+        ms._auto_update_eligible = lambda: eligible
+
+    cap = MsCapture()
+    ms.log.addHandler(cap)
     try:
+        fresh(eligible=False)
+        calls, ms._restart_task = scheduler([""])
         ms._ensure_restart_task()
-        check("a failing scheduler never raises", True)
-    except Exception as e:
-        check("a failing scheduler never raises", False, str(e))
+        check("I4: not eligible (Mac, dev copy): the scheduler is never asked, not active",
+              calls == [] and ms._auto_update_active() is False, str(calls))
+
+        fresh()
+        calls, ms._restart_task = scheduler([f'C:\\py\\pythonw.exe "{OURS}"'])
+        ms._ensure_restart_task()
+        check("I4: the task already names THIS install -> no re-register, active",
+              calls == ["query"] and ms._auto_update_active() is True, str(calls))
+
+        fresh()
+        calls, ms._restart_task = scheduler([f'C:\\py\\pythonw.exe "{OTHER}"', f'C:\\py\\pythonw.exe "{OURS}"'])
+        ms._ensure_restart_task()
+        check("I4: the task names ANOTHER install -> re-registered and verified, active",
+              calls == ["query", "add", "query"] and ms._auto_update_active() is True, str(calls))
+
+        fresh()
+        calls, ms._restart_task = scheduler(["", f'C:\\py\\pythonw.exe "{OURS.upper().replace(chr(92), "/")}"'])
+        ms._ensure_restart_task()
+        ms._ensure_restart_task()
+        check("I4: no task -> registered once over two calls, matched case/slash-insensitively",
+              calls == ["query", "add", "query"] and ms._auto_update_active() is True, str(calls))
+
+        fresh()
+        cap.records.clear()
+        calls, ms._restart_task = scheduler(["", ""], add_result="Access is denied.")
+        ms._ensure_restart_task()
+        ms._ensure_restart_task()
+        check("I4: registration fails -> not active (old ask-first wording applies)",
+              ms._auto_update_active() is False, str(calls))
+        check("I4: ...exactly one ERROR, once per process, with no path in it",
+              len(cap.errors()) == 1 and "\\" not in cap.errors()[0] and "auto_restart.py" not in cap.errors()[0],
+              str(cap.errors()))
+
+        fresh()
+        cap.records.clear()
+        calls, ms._restart_task = scheduler(["", f'C:\\py\\pythonw.exe "{OTHER}"'])
+        ms._ensure_restart_task()
+        check("I4: registered but the re-query still names another install -> not active, one ERROR",
+              ms._auto_update_active() is False and len(cap.errors()) == 1, str(calls))
+
+        fresh()
+        cap.records.clear()
+        calls, ms._restart_task = scheduler([RuntimeError("powershell missing")], add_result="failed")
+        try:
+            ms._ensure_restart_task()
+            raised = False
+        except Exception:
+            raised = True
+        check("I4: a failing scheduler never raises, is not active", not raised
+              and ms._auto_update_active() is False)
+    finally:
+        ms.log.removeHandler(cap)
+
+    # M1: what check_for_update's description and the server's instructions tell Claude
+    import asyncio  # noqa: E402
+    ms._VERSION_AT_STARTUP = None
+    _srv = ms.create_mcp_server()
+    check("M7: the startup version is captured when the server is created",
+          ms._VERSION_AT_STARTUP is not None, repr(ms._VERSION_AT_STARTUP))
+    _tools = {t_.name: t_ for t_ in asyncio.run(_srv.list_tools())}
+    _desc = (_tools["check_for_update"].description or "") if "check_for_update" in _tools else ""
+    check("M1: check_for_update's description no longer tells Claude to ask",
+          _desc and "ask whether they want it installed" not in _desc
+          and "exactly what its answer says" in _desc, _desc[:300])
+    _instr = getattr(_srv, "instructions", "") or ""
+    check("M1: the server instructions no longer tell Claude to ask about a waiting update",
+          "ask whether they want\nit installed now" not in _instr and "ask whether they want it installed now" not in _instr)
+
+    # M2: the health check's update text follows the same active/inactive rule
+    hut = getattr(ms, "_health_update_text", None)
+    check("M2: _health_update_text exists", hut is not None)
+    if hut is not None:
+        l_, i_ = hut("abc1234", "", True, "", "")
+        check("M2: active, update ready: a line saying it installs automatically, no issue",
+              i_ == [] and any("automatically" in x for x in l_) and not any("apply_pending_update" in x for x in l_),
+              str((l_, i_)))
+        l_, i_ = hut("abc1234", "", False, "", "")
+        check("M2: not active, update ready: the ask-first issue", any("apply_pending_update" in x for x in i_),
+              str(i_))
+        l_, i_ = hut("", "abc1234", True, "", "")
+        check("M2: active, restart owed: no issue", i_ == [], str(i_))
+        l_, i_ = hut("", "abc1234", False, "", "")
+        check("M2: not active, restart owed: the quit-and-reopen issue",
+              any("quit and reopen" in x.lower() for x in i_), str(i_))
+        l_, i_ = hut("abc1234", "", True, "abc1234", "")
+        check("M2: active, gave up: asks for a full quit", any("Quit" in x for x in i_), str(i_))
+    _src = (PROJECT_ROOT / "mcp_server.py").read_text(encoding="utf-8")
+    _health = _src[_src.index("def check_system_health"):_src.index("def apply_pending_update")]
+    check("M2: check_system_health uses _health_update_text and sets up the restart task",
+          "_health_update_text(" in _health and "_ensure_restart_task" in _health)
 
     src_ms = (PROJECT_ROOT / "mcp_server.py").read_text(encoding="utf-8")
     try:
@@ -1531,11 +1652,20 @@ try:
           "Vaulter AI - Update restart" in src_ms and "-LogonType Interactive" in seg
           and "-Minutes 15" in seg and "VLT_RUNNER" in seg and "stdin=subprocess.DEVNULL" in seg
           and "auto_restart_schedule.txt" in seg and "-RunLevel" not in seg and "-Password" not in seg)
+    check("C1: the task's time limit is 60 minutes",
+          "-ExecutionTimeLimit (New-TimeSpan -Minutes 60)" in seg and "-Minutes 10)" not in seg)
+    check("I4: the query reads the task's action through env vars, output to a file, stdin closed",
+          "Get-ScheduledTask -TaskName $env:VLT_TASK" in seg and ".Actions" in seg
+          and seg.count("stdin=subprocess.DEVNULL") >= 3 and "PIPE" not in seg and "capture_output" not in seg)
 finally:
     for k, v in _real.items():
         setattr(config, k, v)
     for k, v in _real_fns.items():
-        if v is not None:
+        if v is not None and not k.isupper() and not k.startswith("_RESTART") and not k.startswith("_GAVE") \
+                and k != "_VERSION_AT_STARTUP":
+            setattr(ms, k, v)
+    for k, v in _real_flags.items():
+        if v is not _MISSING:
             setattr(ms, k, v)
     shutil.rmtree(_tmp4, ignore_errors=True)
 
