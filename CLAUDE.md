@@ -1311,7 +1311,7 @@ Known limits: "idle" means no keyboard or mouse, so a long task Claude is runnin
 the restart; the release that carries all this still reaches each teammate the old way, once (they
 say yes and restart), and every update after it is automatic; signing the marker's own fields
 (version, force) in `release.py` is deferred, so someone with write access to the team folder could
-still re-offer an older signed release. `check_auto_update.py` holds the 362 checks.
+still re-offer an older signed release. `check_auto_update.py` holds the 363 checks.
 
 **Every published package is signed, and every instance verifies before trusting a download
 (2026-08-07).** Before this, anyone with write access to the shared OneDrive update folder —

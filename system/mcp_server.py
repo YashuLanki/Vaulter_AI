@@ -6562,8 +6562,9 @@ def _restart_task(action: str):
     # minutes confirming Desktop came back. If the limit were reached, Task
     # Scheduler would end the process with Desktop closed and its relaunch would
     # never run. The principal is the FULL account name (DOMAIN\user or
-    # AzureAD\user): the bare user name does not resolve for a work or school
-    # account, so registration failed on exactly the laptops teammates use.
+    # AzureAD\user): an unqualified name is looked up local accounts first, so a
+    # same-named local account would get the task. (The bare name did register
+    # on the maintainer's Azure AD machine; the full name is simply unambiguous.)
     ps = ("$a = New-ScheduledTaskAction -Execute $env:VLT_RUNNER -Argument ('\"{0}\"' -f $env:VLT_SCRIPT); "
           "$t = New-ScheduledTaskTrigger -Once -At (Get-Date) -RepetitionInterval (New-TimeSpan -Minutes 15); "
           "$s = New-ScheduledTaskSettingsSet -StartWhenAvailable -ExecutionTimeLimit (New-TimeSpan -Minutes 60) "

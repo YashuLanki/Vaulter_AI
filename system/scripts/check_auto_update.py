@@ -1945,6 +1945,17 @@ with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as t:
     with Stub(ok_apply) as s:
         r = au.auto_apply(root)
     check("6.9 ...a newer version is installed normally", r["applied"] is True and s.calls == 1, str(r))
+with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as t:
+    root = make_tree(Path(t), new_requirements=b"pkg==2\n")         # needs pip; no internet
+
+    def deps_fail(project_root):
+        (project_root / "a.py").write_text("new a\n")
+        return {"applied": True, "version": "2.0", "dependencies_ok": False}
+    with Capture() as cap, Stub(deps_fail) as s:
+        rs = [au.auto_apply(root) for _ in range(3)]
+    check("6.9 dependencies that cannot install (offline), twice: restored, then set aside, not tried a third time",
+          rs[0]["restored"] and rs[1]["restored"] and s.calls == 2 and rs[2]["applied"] is False
+          and sum("set aside" in m for m in cap.errors()) == 1, f"{s.calls} {cap.errors()}")
 
 # --- 6.10 a corrupt in-progress note -------------------------------------------------------
 for label, content in (("empty", ""), ("not JSON", "{oops"), ("a list", "[1, 2]"), ("null", "null")):
@@ -2252,7 +2263,7 @@ try:
           _rtn is not None and os.environ.get("USERNAME", "") in _rtn()
           and _rtn().startswith("Vaulter AI - Update restart"), _rtn() if _rtn else "")
     _seg6 = src_ms[src_ms.index("def _restart_task("):src_ms.index("def _ensure_restart_task")]
-    check("6.17 the task principal is the full account name (works for work/school accounts)",
+    check("6.17 the task principal is the full account name (never a same-named local account)",
           "WindowsIdentity]::GetCurrent().Name" in _seg6 and "$env:USERNAME" not in _seg6)
 
     # chat side with broken state files: never an exception, never a wrong notice
