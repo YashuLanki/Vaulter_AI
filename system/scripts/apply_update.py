@@ -549,12 +549,17 @@ def _count_servers(procs: list, main_py: Path, self_pid: int) -> int:
         if target in norm and norm.rstrip().endswith(" mcp"):
             matching[pid] = ppid
     roots = {pid for pid, ppid in matching.items() if ppid not in matching}
-    own = self_pid
-    seen = set()
-    while own in matching and matching[own] in matching and own not in seen:
-        seen.add(own)
-        own = matching[own]
-    roots.discard(own)
+    # Our own server is the first matching ROOT among our ancestors. Walk through
+    # non-matching ones too: the `--auto --startup` CLI is a child of its server.
+    parent_of = {pid: ppid for pid, ppid, _ in procs}
+    cur = self_pid
+    for _ in range(64):
+        if cur in matching and matching[cur] not in matching:
+            roots.discard(cur)
+            break
+        cur = parent_of.get(cur)
+        if cur is None:
+            break
     return len(roots)
 
 
@@ -597,10 +602,21 @@ def _backup_dir(project_root: Path, version: str) -> Path:
     return project_root / "data" / "backups" / f"pre_update_{version}"
 
 
-def _backup_tree(project_root: Path, dest: Path) -> None:
+def _marker_path(project_root: Path, version: str) -> Path:
+    # A sibling of the backup folder, NOT inside it: the folder is synced back
+    # into the tree on restore, so a marker inside would be copied into it.
+    return project_root / "data" / "backups" / f"pre_update_{version}.complete"
+
+
+def _backup_tree(project_root: Path, dest: Path, marker: Path, source_version: str) -> None:
+    """Copy every non-preserved file to dest, then write marker LAST. A backup
+    without its marker is partial and must never be restored (a restore deletes
+    whatever the backup lacks)."""
+    marker.unlink(missing_ok=True)
     if dest.exists():
         shutil.rmtree(dest)
     dest.mkdir(parents=True, exist_ok=True)
+    count = 0
     for p in project_root.rglob("*"):
         if not p.is_file():
             continue
@@ -610,6 +626,29 @@ def _backup_tree(project_root: Path, dest: Path) -> None:
         target = dest / rel
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(p, target)
+        count += 1
+    marker.write_text(json.dumps({"source_version": source_version, "files": count}),
+                      encoding="utf-8")
+
+
+def _discard_backup(dest: Path, marker: Path) -> None:
+    shutil.rmtree(dest, ignore_errors=True)
+    try:
+        marker.unlink(missing_ok=True)
+    except OSError:
+        pass
+
+
+def _backup_is_usable(dest: Path, marker: Path, current_version: str) -> bool:
+    """Complete (marker present, file count matches) and made from the version
+    now installed -- a backup of some older tree must not be put over a newer one."""
+    try:
+        info = json.loads(marker.read_text(encoding="utf-8"))
+        if not dest.is_dir() or info.get("source_version") != current_version:
+            return False
+        return sum(1 for p in dest.rglob("*") if p.is_file()) == info.get("files")
+    except Exception:
+        return False
 
 
 def _take_lock(lock: Path) -> bool:
@@ -685,9 +724,21 @@ def auto_apply(project_root: Path | None = None, *, at_startup: bool = False) ->
             result["reason"] = "another update is already in progress"
             return result
         backup = _backup_dir(project_root, version)
+        marker = _marker_path(project_root, version)
+        try:
+            _backup_tree(project_root, backup, marker, running_version(project_root))
+        except Exception as e:
+            _discard_backup(backup, marker)
+            log.error(f"[ERROR] could not back up before updating to {version} "
+                      f"({type(e).__name__}: {e}); nothing was changed")
+            result["reason"] = f"the backup could not be made, so nothing was changed ({e})"
+            try:
+                lock.unlink(missing_ok=True)
+            except OSError:
+                pass
+            return result
         try:
             try:
-                _backup_tree(project_root, backup)
                 applied = apply_pending_update(project_root)
             except Exception as e:
                 log.error(f"[ERROR] automatic update to {version} failed "
@@ -695,13 +746,14 @@ def auto_apply(project_root: Path | None = None, *, at_startup: bool = False) ->
                 try:
                     _sync_tree(project_root, backup)
                     result["restored"] = True
+                    _discard_backup(backup, marker)
                 except Exception as e2:
                     log.error(f"[ERROR] could not put the previous version back: {e2}")
                 result["reason"] = f"the update failed and was undone ({e})"
                 return result
             result["applied"] = bool(applied.get("applied"))
             result["reason"] = applied.get("reason", "")
-            shutil.rmtree(backup, ignore_errors=True)
+            _discard_backup(backup, marker)
             return result
         finally:
             try:
@@ -728,10 +780,11 @@ def recover_unfinished_apply(project_root: Path | None = None) -> bool:
         if not version:
             return False
         backup = _backup_dir(project_root, str(version))
-        if not backup.is_dir():
+        marker = _marker_path(project_root, str(version))
+        if not _backup_is_usable(backup, marker, running_version(project_root)):
             return False
         _sync_tree(project_root, backup)
-        shutil.rmtree(backup, ignore_errors=True)
+        _discard_backup(backup, marker)
         log.error(f"[ERROR] an update to {version} did not finish; "
                   f"the previous version was put back")
         return True
