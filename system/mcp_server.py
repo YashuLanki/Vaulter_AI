@@ -6293,15 +6293,17 @@ def _update_ready() -> str:
             return ""
         version = staged.get("version")
         running = _get_code_version()
-        if not version or version == running:
+        # The rule lives in apply_update so the automatic install asks the same one.
+        from scripts import apply_update
+        applicable = apply_update.staged_update_applicable(staged, running)
+        if not applicable:
+            at_download = staged.get("current_version_at_download")
+            if version and version != running and at_download and running and at_download != running:
+                log.info(f"[NOTICE] {version} was staged when this install was on "
+                         f"{at_download}, and it is now on {running} -- superseded, "
+                         f"so not offering it.")
             return ""
-        at_download = staged.get("current_version_at_download")
-        if at_download and running and at_download != running:
-            log.info(f"[NOTICE] {version} was staged when this install was on "
-                     f"{at_download}, and it is now on {running} -- superseded, "
-                     f"so not offering it.")
-            return ""
-        return str(version)
+        return applicable
     except Exception:
         return ""
 

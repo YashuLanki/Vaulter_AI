@@ -74,6 +74,49 @@ def _load_pending() -> dict | None:
     return json.loads(ready_path.read_text())
 
 
+def _sync_tree(project_root: Path, src_dir: Path) -> tuple[int, int]:
+    """
+    Make project_root match src_dir exactly, except for anything under a
+    PRESERVED_DIR_NAMES path: delete files src_dir lacks, copy every file
+    src_dir has, drop now-empty folders. Returns (copied, deleted). Shared by
+    the apply and by the restore of a pre-update backup, so both behave alike.
+    """
+    new_files = {
+        p.relative_to(src_dir) for p in src_dir.rglob("*") if p.is_file()
+    }
+
+    # Step 1: delete anything in the project that the new version no
+    # longer has (and isn't a preserved path) -- otherwise a file
+    # removed upstream would linger here forever as stale dead code.
+    deleted = 0
+    for existing in list(project_root.rglob("*")):
+        if not existing.is_file():
+            continue
+        rel = existing.relative_to(project_root)
+        if _is_preserved(rel):
+            continue
+        if rel not in new_files:
+            existing.unlink()
+            deleted += 1
+
+    # Step 2: copy every file from the new version into place.
+    updated = 0
+    for rel in new_files:
+        src = src_dir / rel
+        dest = project_root / rel
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(src, dest)
+        updated += 1
+
+    # Remove any now-empty directories left behind by step 1 (never
+    # inside a preserved path, and never the project root itself).
+    for d in sorted(project_root.rglob("*"), key=lambda p: len(p.parts), reverse=True):
+        if d.is_dir() and not _is_preserved(d.relative_to(project_root)) and not any(d.iterdir()):
+            d.rmdir()
+
+    return updated, deleted
+
+
 def apply_update(project_root: Path, zip_path: Path) -> tuple[int, int]:
     """
     Extracts zip_path and syncs project_root to match it exactly, except
@@ -86,41 +129,7 @@ def apply_update(project_root: Path, zip_path: Path) -> tuple[int, int]:
         tmp_dir = Path(tmp)
         with zipfile.ZipFile(zip_path) as zf:
             zf.extractall(tmp_dir)
-
-        new_files = {
-            p.relative_to(tmp_dir) for p in tmp_dir.rglob("*") if p.is_file()
-        }
-
-        # Step 1: delete anything in the project that the new version no
-        # longer has (and isn't a preserved path) -- otherwise a file
-        # removed upstream would linger here forever as stale dead code.
-        deleted = 0
-        for existing in list(project_root.rglob("*")):
-            if not existing.is_file():
-                continue
-            rel = existing.relative_to(project_root)
-            if _is_preserved(rel):
-                continue
-            if rel not in new_files:
-                existing.unlink()
-                deleted += 1
-
-        # Step 2: copy every file from the new version into place.
-        updated = 0
-        for rel in new_files:
-            src = tmp_dir / rel
-            dest = project_root / rel
-            dest.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(src, dest)
-            updated += 1
-
-        # Remove any now-empty directories left behind by step 1 (never
-        # inside a preserved path, and never the project root itself).
-        for d in sorted(project_root.rglob("*"), key=lambda p: len(p.parts), reverse=True):
-            if d.is_dir() and not _is_preserved(d.relative_to(project_root)) and not any(d.iterdir()):
-                d.rmdir()
-
-        return updated, deleted
+        return _sync_tree(project_root, tmp_dir)
 
 
 # The only two places a launcher/agent-file package may write, relative to the
@@ -466,6 +475,258 @@ def apply_pending_update(project_root: Path = None) -> dict:
     }
 
 
+# ---------------------------------------------------------------------------
+# Automatic install (2026-11-19)
+#
+# Everything below derives its paths from project_root (the `system` folder)
+# using config's own layout, NOT from config's constants, so it can be pointed
+# at a scratch tree. apply_pending_update() above still reads config itself.
+# ---------------------------------------------------------------------------
+
+LOCK_STALE_SECONDS = 600
+
+
+def is_development_copy(project_root: Path) -> bool:
+    """A git checkout (`.git` file or folder beside system/) or a tree with no
+    VERSION file is somebody's working copy; an automatic install would
+    overwrite their uncommitted work."""
+    return (project_root.parent / ".git").exists() or not (project_root / "VERSION").exists()
+
+
+def running_version(project_root: Path) -> str:
+    try:
+        text = (project_root / "VERSION").read_text(encoding="utf-8")
+    except OSError:
+        return ""
+    lines = text.splitlines()
+    return lines[0].strip() if lines else ""
+
+
+def staged_update_applicable(pending, running: str) -> str:
+    """The version worth installing, or "". Not a dict, no version, the version
+    already running, or a stage made while a different version was running (the
+    machine has since moved on, so installing it could be a downgrade)."""
+    if not isinstance(pending, dict):
+        return ""
+    version = pending.get("version")
+    if not version or version == running:
+        return ""
+    at_download = pending.get("current_version_at_download")
+    if at_download and running and at_download != running:
+        return ""
+    return str(version)
+
+
+def release_changes_dependencies(project_root: Path, zip_path: Path) -> bool:
+    """True if the package's requirements.txt differs from the installed one.
+    Cannot tell (either unreadable) counts as changed: never assume safe."""
+    try:
+        with zipfile.ZipFile(zip_path) as zf:
+            new = zf.read("requirements.txt")
+        old = (project_root / "requirements.txt").read_bytes()
+    except Exception:
+        return True
+    return new != old
+
+
+def _norm_cmd(text: str) -> str:
+    return text.replace("/", "\\").lower()
+
+
+def _count_servers(procs: list, main_py: Path, self_pid: int) -> int:
+    """Processes other than self_pid running `main.py mcp` for this install."""
+    target = _norm_cmd(str(main_py))
+    count = 0
+    for pid, cmd in procs:
+        if pid == self_pid or not cmd:
+            continue
+        norm = _norm_cmd(cmd)
+        if target in norm and norm.rstrip().endswith(" mcp"):
+            count += 1
+    return count
+
+
+def other_servers_running(project_root: Path) -> bool:
+    """True if another MCP server from this install is running. Windows only;
+    False on any failure (the caller then proceeds -- a missed server costs one
+    update applied under it, which the backup covers). Output goes to a file,
+    never a pipe, for the reason refresh_dependencies gives."""
+    if sys.platform != "win32":
+        return False
+    import os
+    out_path = Path(tempfile.gettempdir()) / f"vaulter_procs_{os.getpid()}.json"
+    try:
+        script = ("Get-CimInstance Win32_Process -Filter \"Name like 'python%'\" | "
+                  "Select-Object ProcessId, CommandLine | ConvertTo-Json -Compress")
+        with open(out_path, "w", encoding="utf-8") as fh:
+            result = subprocess.run(
+                ["powershell", "-NoProfile", "-NonInteractive", "-Command", script],
+                stdout=fh, stderr=subprocess.DEVNULL, stdin=subprocess.DEVNULL, timeout=20,
+            )
+        if result.returncode != 0:
+            return False
+        raw = out_path.read_text(encoding="utf-8-sig", errors="replace").strip()
+        data = json.loads(raw) if raw else []
+        if isinstance(data, dict):
+            data = [data]
+        procs = [(int(d["ProcessId"]), d.get("CommandLine") or "") for d in data]
+        return _count_servers(procs, project_root / "main.py", os.getpid()) > 0
+    except Exception:
+        return False
+    finally:
+        try:
+            out_path.unlink(missing_ok=True)
+        except OSError:
+            pass
+
+
+def _backup_dir(project_root: Path, version: str) -> Path:
+    return project_root / "data" / "backups" / f"pre_update_{version}"
+
+
+def _backup_tree(project_root: Path, dest: Path) -> None:
+    if dest.exists():
+        shutil.rmtree(dest)
+    dest.mkdir(parents=True, exist_ok=True)
+    for p in project_root.rglob("*"):
+        if not p.is_file():
+            continue
+        rel = p.relative_to(project_root)
+        if _is_preserved(rel):
+            continue
+        target = dest / rel
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(p, target)
+
+
+def _take_lock(lock: Path) -> bool:
+    import os
+    lock.parent.mkdir(parents=True, exist_ok=True)
+    for _ in range(2):
+        try:
+            fd = os.open(str(lock), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+        except FileExistsError:
+            try:
+                age = _time.time() - lock.stat().st_mtime
+            except OSError:
+                continue
+            if age > LOCK_STALE_SECONDS:
+                try:
+                    lock.unlink()
+                except OSError:
+                    return False
+                continue
+            return False
+        with os.fdopen(fd, "w") as fh:
+            fh.write(str(os.getpid()))
+        return True
+    return False
+
+
+def auto_apply(project_root: Path | None = None, *, at_startup: bool = False) -> dict:
+    """
+    Install the staged update without asking, but only when that is safe.
+    Never raises. Returns {"applied", "version", "reason", "restored"}.
+
+    At startup (the server is about to start serving) an update that changes
+    dependencies, or one landing while another server from this install runs,
+    is left for the idle restart: pip must not run under a live server.
+    Every file is backed up first and put back if the apply fails.
+    """
+    if project_root is None:
+        project_root = PROJECT_ROOT
+    result = {"applied": False, "version": "", "reason": "", "restored": False}
+
+    try:
+        if is_development_copy(project_root):
+            result["reason"] = "this is a development copy, so it is never updated automatically"
+            return result
+
+        data = project_root / "data"
+        pending = None
+        try:
+            ready = data / "pending_update" / "ready.json"
+            if ready.exists():
+                pending = json.loads(ready.read_text(encoding="utf-8"))
+        except Exception:
+            pending = None
+        version = staged_update_applicable(pending, running_version(project_root))
+        if not version:
+            result["reason"] = "no update is waiting for this version"
+            return result
+        result["version"] = version
+
+        if at_startup:
+            zip_path = data / "pending_update" / str(pending.get("zip_filename", ""))
+            if release_changes_dependencies(project_root, zip_path):
+                result["reason"] = (f"version {version} changes the dependency list, so the "
+                                    f"idle restart will install it")
+                return result
+            if other_servers_running(project_root):
+                result["reason"] = (f"another Vaulter AI server is running, so the idle "
+                                    f"restart will install version {version}")
+                return result
+
+        lock = data / "apply.lock"
+        if not _take_lock(lock):
+            result["reason"] = "another update is already in progress"
+            return result
+        backup = _backup_dir(project_root, version)
+        try:
+            try:
+                _backup_tree(project_root, backup)
+                applied = apply_pending_update(project_root)
+            except Exception as e:
+                log.error(f"[ERROR] automatic update to {version} failed "
+                          f"({type(e).__name__}: {e}); putting the previous version back")
+                try:
+                    _sync_tree(project_root, backup)
+                    result["restored"] = True
+                except Exception as e2:
+                    log.error(f"[ERROR] could not put the previous version back: {e2}")
+                result["reason"] = f"the update failed and was undone ({e})"
+                return result
+            result["applied"] = bool(applied.get("applied"))
+            result["reason"] = applied.get("reason", "")
+            shutil.rmtree(backup, ignore_errors=True)
+            return result
+        finally:
+            try:
+                lock.unlink(missing_ok=True)
+            except OSError:
+                pass
+    except Exception as e:
+        result["reason"] = f"automatic update could not run ({e})"
+        return result
+
+
+def recover_unfinished_apply(project_root: Path | None = None) -> bool:
+    """If an apply began and never finished (marker present) and a backup of the
+    version it was replacing exists, put that backup back. True if it did. The
+    marker stays so _report_unfinished_apply still tells the team; the backup is
+    removed so a second start does not restore over newer files."""
+    if project_root is None:
+        project_root = PROJECT_ROOT
+    marker = project_root / "data" / "apply_in_progress.json"
+    try:
+        if not marker.exists():
+            return False
+        version = json.loads(marker.read_text(encoding="utf-8")).get("version")
+        if not version:
+            return False
+        backup = _backup_dir(project_root, str(version))
+        if not backup.is_dir():
+            return False
+        _sync_tree(project_root, backup)
+        shutil.rmtree(backup, ignore_errors=True)
+        log.error(f"[ERROR] an update to {version} did not finish; "
+                  f"the previous version was put back")
+        return True
+    except Exception as e:
+        log.error(f"[ERROR] could not recover from an unfinished update: {e}")
+        return False
+
+
 def main() -> None:
     """Manual/troubleshooting CLI fallback -- the everyday path is asking
     Claude to apply it, via the apply_pending_update MCP tool, once
@@ -507,5 +768,24 @@ def main() -> None:
     print("Done. Fully quit and reopen Claude Desktop for the new code to take effect.")
 
 
+def _auto_cli(startup: bool) -> None:
+    """`--auto [--startup]`: recover, then install if safe. One line, exit 0."""
+    try:
+        logs = PROJECT_ROOT / "data" / "logs"
+        logs.mkdir(parents=True, exist_ok=True)
+        logging.basicConfig(filename=str(logs / "auto_update.log"), level=logging.INFO,
+                            format="%(asctime)s %(message)s")
+        recovered = recover_unfinished_apply()
+        r = auto_apply(at_startup=startup)
+        extra = " (previous version put back after an unfinished apply)" if recovered else ""
+        print(f"auto-update: applied={r['applied']} version={r['version'] or '-'} "
+              f"restored={r['restored']} {r['reason']}{extra}".strip())
+    except Exception as e:
+        print(f"auto-update: error {e}")
+
+
 if __name__ == "__main__":
-    main()
+    if "--auto" in sys.argv[1:]:
+        _auto_cli("--startup" in sys.argv[1:])
+    else:
+        main()
