@@ -31,6 +31,20 @@ logging.getLogger("vaulter.update").addHandler(logging.NullHandler())  # keep ex
 
 import apply_update as au  # noqa: E402
 
+# The post-install smoke test imports mcp_server in a child process. Every check
+# here gets a stub that passes, unless it sets its own; the real one is checked
+# on its own against throwaway trees in section 1b.
+_REAL_SMOKE = getattr(au, "_smoke_test", None)
+_SMOKE_CALLS = []
+
+
+def _passing_smoke(project_root, timeout=120):
+    _SMOKE_CALLS.append((project_root, timeout))
+    return True
+
+
+au._smoke_test = _passing_smoke
+
 RESULTS = []
 
 
@@ -66,9 +80,11 @@ def make_tree(tmp: Path, new_requirements: bytes = b"pkg==1\n") -> Path:
     (root / "a.py").write_text("old a\n")
     (root / "sub" / "b.py").write_text("old b\n")
     (root / "gone.py").write_text("removed upstream\n")
+    (root / "main.py").write_text("old main\n")
     zpath = root / "data" / "pending_update" / "u.zip"
     with zipfile.ZipFile(zpath, "w") as zf:
         zf.writestr("VERSION", "2.0\n")
+        zf.writestr("main.py", "new main\n")
         zf.writestr("requirements.txt", new_requirements)
         zf.writestr("a.py", "new a\n")
         zf.writestr("sub/b.py", "old b\n")
@@ -82,13 +98,14 @@ class Stub:
     """Replaces apply_update.apply_pending_update for the length of a with-block."""
 
     def __init__(self, fn):
-        self.fn, self.calls = fn, 0
+        self.fn, self.calls, self.kwargs = fn, 0, []
 
     def __enter__(self):
         self.orig = au.apply_pending_update
 
-        def wrapper(project_root=None):
+        def wrapper(project_root=None, **kw):
             self.calls += 1
+            self.kwargs.append(kw)
             return self.fn(project_root)
         au.apply_pending_update = wrapper
         return self
@@ -220,11 +237,17 @@ with tempfile.TemporaryDirectory() as t:
         r = au.auto_apply(root)
     check("fresh lock held: refused", r["applied"] is False and s.calls == 0, r["reason"])
     check("fresh lock held: lock left alone", lock.exists() and lock.read_text() == "held")
-    old = time.time() - 601
+    old = time.time() - 899
     os.utime(lock, (old, old))
     with Stub(ok_apply) as s:
         r = au.auto_apply(root)
-    check("lock 601 s old is stale: applied", r["applied"] is True, str(r))
+    check("lock 899 s old is still fresh: refused", r["applied"] is False and s.calls == 0, str(r))
+    lock.write_text("held")
+    old = time.time() - 901
+    os.utime(lock, (old, old))
+    with Stub(ok_apply) as s:
+        r = au.auto_apply(root)
+    check("lock 901 s old is stale: applied", r["applied"] is True, str(r))
     check("stale lock: released afterwards", not lock.exists())
 
 # --- failure restores everything ---------------------------------------------
@@ -259,7 +282,7 @@ with tempfile.TemporaryDirectory() as t:
     up, dele = au.apply_update(root, root / "data" / "pending_update" / "u.zip")
     check("apply_update still syncs: new/changed in, removed out",
           (root / "c.py").exists() and not (root / "gone.py").exists()
-          and (root / "a.py").read_text() == "new a\n" and (up, dele) == (5, 1), f"{up},{dele}")
+          and (root / "a.py").read_text() == "new a\n" and (up, dele) == (6, 1), f"{up},{dele}")
     au._sync_tree(root, backup)
     check("_sync_tree restores a backup exactly", snapshot(root) == before)
     check("_sync_tree leaves data/ alone", (root / "data" / "pending_update" / "u.zip").exists())
@@ -402,6 +425,359 @@ check("project_root-derived paths equal config's",
       PROJECT_ROOT / "data" / "pending_update" == config.PENDING_UPDATE_DIR
       and PROJECT_ROOT / "data" / "apply_in_progress.json" == config.APPLY_IN_PROGRESS_FILE
       and PROJECT_ROOT / "data" == config.DATA_DIR)
+
+# =============================================================================
+print("\n1b. Installer safety (final review: C1, C2, I1-I3, I5c, I6, M5, T1)")
+import contextlib  # noqa: E402
+import inspect  # noqa: E402
+import io  # noqa: E402
+import types  # noqa: E402
+
+
+class Capture(logging.Handler):
+    """Collects records from the installer's logger for the length of a with-block."""
+
+    def __init__(self):
+        super().__init__(logging.DEBUG)
+        self.records = []
+
+    def emit(self, record):
+        self.records.append(record)
+
+    def __enter__(self):
+        logging.getLogger("vaulter.update").addHandler(self)
+        return self
+
+    def __exit__(self, *exc):
+        logging.getLogger("vaulter.update").removeHandler(self)
+
+    def errors(self):
+        return [r.getMessage() for r in self.records if r.levelno >= logging.ERROR]
+
+
+def set_smoke(fn):
+    au._smoke_test = fn
+
+
+# --- M5: the lock outlives the slowest automatic install ---------------------------
+check("M5: LOCK_STALE_SECONDS is 900", getattr(au, "LOCK_STALE_SECONDS", 0) == 900,
+      str(getattr(au, "LOCK_STALE_SECONDS", None)))
+check("M5: ...above the automatic pip limit", getattr(au, "LOCK_STALE_SECONDS", 0)
+      > getattr(au, "AUTO_PIP_TIMEOUT", 10 ** 6))
+
+# --- C1(b): pip limits -----------------------------------------------------------------
+_rd = inspect.signature(au.refresh_dependencies).parameters
+check("C1: refresh_dependencies takes a timeout, 600 by default",
+      "timeout" in _rd and _rd["timeout"].default == 600)
+_apu = inspect.signature(au.apply_pending_update).parameters
+check("C1: apply_pending_update's pip limit defaults to 600 (the manual path)",
+      "pip_timeout" in _apu and _apu["pip_timeout"].default == 600)
+check("C1: AUTO_PIP_TIMEOUT is 300", getattr(au, "AUTO_PIP_TIMEOUT", None) == 300)
+with tempfile.TemporaryDirectory() as t:
+    (Path(t) / "requirements.txt").write_text("pkg==1\n")
+    seen = {}
+    real_run = au.subprocess.run
+
+    def fake_pip(cmd, **kw):
+        seen.update(kw)
+        return types.SimpleNamespace(returncode=0)
+    au.subprocess.run = fake_pip
+    try:
+        au.refresh_dependencies(Path(t), timeout=300) if "timeout" in _rd else None
+    finally:
+        au.subprocess.run = real_run
+    check("C1: refresh_dependencies hands its timeout to pip", seen.get("timeout") == 300, str(seen))
+with tempfile.TemporaryDirectory() as t:
+    root = make_tree(Path(t))
+    with Stub(ok_apply) as s:
+        r = au.auto_apply(root)
+    check("C1: the idle (automatic) path installs with a 300 s pip limit",
+          r["applied"] is True and s.kwargs[:1] == [{"pip_timeout": 300}], str(s.kwargs))
+with tempfile.TemporaryDirectory() as t:
+    root = make_tree(Path(t))
+    with Stub(ok_apply) as s:
+        r = au.auto_apply(root, at_startup=True)
+    check("C1: the startup path's pip limit fits inside main.py's 120 s",
+          r["applied"] is True and s.kwargs and 0 < s.kwargs[0].get("pip_timeout", 999) <= 60,
+          str(s.kwargs))
+
+# --- C2: a failed dependency install is a failure ------------------------------------
+with tempfile.TemporaryDirectory() as t:
+    root = make_tree(Path(t))
+    before = snapshot(root)
+
+    def deps_fail(project_root):
+        (project_root / "a.py").write_text("new a\n")
+        (project_root / "requirements.txt").write_bytes(b"pkg==2\n")
+        (project_root / "c.py").write_text("brand new\n")
+        return {"applied": True, "version": "2.0", "dependencies_ok": False,
+                "dependencies_message": "pip failed"}
+
+    with Stub(deps_fail), Capture() as cap:
+        r = au.auto_apply(root)
+    check("C2: dependencies failed -> not applied, restored",
+          r["applied"] is False and r["restored"] is True, str(r))
+    check("C2: every original file sha256-identical (old requirements.txt back)",
+          snapshot(root) == before, f"differs: {sorted(set(before.items()) ^ set(snapshot(root).items()))[:4]}")
+    check("C2: exactly one [ERROR], naming the version", len(cap.errors()) == 1
+          and "2.0" in cap.errors()[0], str(cap.errors()))
+    check("C2: backup and lock gone afterwards",
+          not (root / "data" / "backups" / "pre_update_2.0").exists()
+          and not (root / "data" / "apply.lock").exists())
+
+# --- I2: smoke test after the install, before the backup is discarded -----------------
+with tempfile.TemporaryDirectory() as t:
+    root = make_tree(Path(t))
+    before = snapshot(root)
+    seen_note = []
+
+    def failing_smoke(project_root, timeout=120):
+        note = project_root / "data" / "apply_in_progress.json"
+        seen_note.append(json.loads(note.read_text()).get("version") if note.exists() else None)
+        return False
+
+    set_smoke(failing_smoke)
+    try:
+        with Stub(ok_apply), Capture() as cap:
+            r = au.auto_apply(root)
+    finally:
+        set_smoke(_passing_smoke)
+    check("I2: forced smoke failure -> not applied, restored",
+          r["applied"] is False and r["restored"] is True, str(r))
+    check("I2: ...every original file sha256-identical", snapshot(root) == before)
+    check("I2: ...one [ERROR] naming only the version", len(cap.errors()) == 1
+          and "2.0" in cap.errors()[0] and ".py" not in cap.errors()[0], str(cap.errors()))
+    check("I2: the smoke test runs with the in-progress note in place", seen_note == ["2.0"], str(seen_note))
+    check("I2: ...and the note is cleared after the restore",
+          not (root / "data" / "apply_in_progress.json").exists())
+with tempfile.TemporaryDirectory() as t:
+    root = make_tree(Path(t))
+    _SMOKE_CALLS.clear()
+    with Stub(ok_apply):
+        r = au.auto_apply(root)
+    check("I2: smoke passes -> applied, smoke run once with 120 s",
+          r["applied"] is True and r["restored"] is False
+          and [c[1] for c in _SMOKE_CALLS] == [120], str(_SMOKE_CALLS))
+    check("I2: ...in-progress note cleared, backup gone",
+          not (root / "data" / "apply_in_progress.json").exists()
+          and not (root / "data" / "backups" / "pre_update_2.0").exists())
+with tempfile.TemporaryDirectory() as t:
+    root = make_tree(Path(t))
+    before = snapshot(root)
+
+    def killed_smoke(project_root, timeout=120):
+        raise SystemExit("killed from outside")
+
+    set_smoke(killed_smoke)
+    try:
+        with Stub(ok_apply):
+            try:
+                au.auto_apply(root)
+            except SystemExit:
+                pass
+    finally:
+        set_smoke(_passing_smoke)
+    check("I2: a process killed during the smoke test is put back at the next start",
+          au.recover_unfinished_apply(root) is True and snapshot(root) == before)
+
+# the real smoke test, on throwaway trees (never this install)
+if _REAL_SMOKE is not None:
+    with tempfile.TemporaryDirectory() as t:
+        good = Path(t) / "good"
+        good.mkdir()
+        (good / "mcp_server.py").write_text("X = 1\n")
+        bad = Path(t) / "bad"
+        bad.mkdir()
+        (bad / "mcp_server.py").write_text("raise ImportError('broken release')\n")
+        slow = Path(t) / "slow"
+        slow.mkdir()
+        (slow / "mcp_server.py").write_text("import time\ntime.sleep(60)\n")
+        check("I2: real smoke test passes on an importable tree", _REAL_SMOKE(good, 60) is True)
+        check("I2: real smoke test fails on a tree whose import raises", _REAL_SMOKE(bad, 60) is False)
+        t0 = time.monotonic()
+        check("I2: real smoke test fails on a timeout, and stops waiting",
+              _REAL_SMOKE(slow, 2) is False and time.monotonic() - t0 < 20)
+else:
+    check("I2: apply_update._smoke_test exists", False)
+_smoke_src = inspect.getsource(_REAL_SMOKE) if _REAL_SMOKE else ""
+check("I2: smoke test: stdin closed, output to a file, timeout, cwd the system folder",
+      "stdin=subprocess.DEVNULL" in _smoke_src and "PIPE" not in _smoke_src
+      and "timeout=timeout" in _smoke_src and "cwd=str(project_root)" in _smoke_src)
+
+# --- I6: the staged zip must look like a release ---------------------------------------
+for label, files, want in (
+        ("no main.py at the top level", {"VERSION": "2.0\n", "sub/main.py": "x"}, False),
+        ("VERSION does not match the staged version", {"VERSION": "9.9\n", "main.py": "x"}, False),
+        ("no VERSION at all", {"main.py": "x"}, False)):
+    with tempfile.TemporaryDirectory() as t:
+        root = make_tree(Path(t))
+        zpath = root / "data" / "pending_update" / "u.zip"
+        zpath.unlink()
+        with zipfile.ZipFile(zpath, "w") as zf:
+            for name, text in files.items():
+                zf.writestr(name, text)
+        before = snapshot(root)
+        with Stub(ok_apply) as s, Capture() as cap:
+            r = au.auto_apply(root)
+        check(f"I6: {label} -> refused, nothing called or changed",
+              r["applied"] is False and s.calls == 0 and snapshot(root) == before, str(r))
+        check(f"I6: {label} -> one [ERROR]", len(cap.errors()) == 1, str(cap.errors()))
+with tempfile.TemporaryDirectory() as t:
+    root = make_tree(Path(t))
+    with Stub(ok_apply) as s, Capture() as cap:
+        r = au.auto_apply(root)
+    check("I6: a good zip (main.py, matching VERSION) -> applied, no [ERROR]",
+          r["applied"] is True and s.calls == 1 and cap.errors() == [], str(r))
+
+# --- I1: a startup install is recorded, so no restart is owed for it --------------------
+with tempfile.TemporaryDirectory() as t:
+    root = make_tree(Path(t))
+    rec = root / "data" / "startup_installed.json"
+    with Stub(ok_apply):
+        r = au.auto_apply(root, at_startup=True)
+    check("I1: a successful startup install records its version",
+          r["applied"] is True and rec.exists() and json.loads(rec.read_text()) == {"version": "2.0"},
+          rec.read_text() if rec.exists() else "missing")
+with tempfile.TemporaryDirectory() as t:
+    root = make_tree(Path(t))
+    with Stub(ok_apply):
+        au.auto_apply(root, at_startup=False)
+    check("I1: an idle-path install records nothing", not (root / "data" / "startup_installed.json").exists())
+with tempfile.TemporaryDirectory() as t:
+    root = make_tree(Path(t), new_requirements=b"pkg==2\n")
+    with Stub(ok_apply):
+        au.auto_apply(root, at_startup=True)
+    check("I1: a refused startup install records nothing",
+          not (root / "data" / "startup_installed.json").exists())
+_gi = PROJECT_ROOT.parent / ".gitignore"
+if _gi.exists():          # a repo checkout; an installed copy has no .gitignore
+    check("I1: startup_installed.json is gitignored",
+          "system/data/startup_installed.json" in _gi.read_text(encoding="utf-8"))
+
+# --- I5(c): a version the task gave up on may change dependencies at startup -------------
+with tempfile.TemporaryDirectory() as t:
+    root = make_tree(Path(t), new_requirements=b"pkg==2\n")
+    (root / "data" / "auto_restart.json").write_text(json.dumps({"2.0": {"restarts": 2, "gave_up": True,
+                                                                         "gave_up_at": 1.0}}))
+    with Stub(ok_apply) as s:
+        r = au.auto_apply(root, at_startup=True)
+    check("I5c: startup + changed dependencies + this version gave up -> applied",
+          r["applied"] is True and s.calls == 1, str(r))
+with tempfile.TemporaryDirectory() as t:
+    root = make_tree(Path(t), new_requirements=b"pkg==2\n")
+    (root / "data" / "auto_restart.json").write_text(json.dumps({"1.9": {"restarts": 2, "gave_up": True}}))
+    with Stub(ok_apply) as s:
+        r = au.auto_apply(root, at_startup=True)
+    check("I5c: ...another version's give-up does not count",
+          r["applied"] is False and s.calls == 0, str(r))
+
+# --- I3: recovery takes the lock -------------------------------------------------------------
+def half_applied(t):
+    root = make_tree(Path(t))
+    before = snapshot(root)
+    au._backup_tree(root, root / "data" / "backups" / "pre_update_2.0", au._marker_path(root, "2.0"), "1.0")
+    (root / "data" / "apply_in_progress.json").write_text(json.dumps({"version": "2.0"}))
+    (root / "a.py").write_text("half written\n")
+    return root, before
+
+
+with tempfile.TemporaryDirectory() as t:
+    root, before = half_applied(t)
+    lock = root / "data" / "apply.lock"
+    lock.write_text("held")
+    mid = snapshot(root)
+    check("I3: fresh lock held -> recovery returns False", au.recover_unfinished_apply(root) is False)
+    check("I3: ...and touches nothing (tree, backup, lock)",
+          snapshot(root) == mid and (root / "data" / "backups" / "pre_update_2.0").is_dir()
+          and lock.read_text() == "held")
+    old = time.time() - 901
+    os.utime(lock, (old, old))
+    check("I3: stale lock -> recovery proceeds", au.recover_unfinished_apply(root) is True
+          and snapshot(root) == before)
+    check("I3: ...and releases the lock it took", not lock.exists())
+
+clock = {"t": 0.0}
+sleeps = []
+
+
+def fake_sleep(sec):
+    sleeps.append(sec)
+    clock["t"] += sec
+
+
+def fake_clock():
+    return clock["t"]
+
+
+if hasattr(au, "_wait_for_lock"):
+    with tempfile.TemporaryDirectory() as t:
+        lock = Path(t) / "apply.lock"
+        sleeps.clear()
+        check("I3: no lock -> no wait", au._wait_for_lock(lock, sleep=fake_sleep, clock=fake_clock) is True
+              and sleeps == [])
+        lock.write_text("held")
+        sleeps.clear()
+        clock["t"] = 0.0
+        ok = au._wait_for_lock(lock, sleep=fake_sleep, clock=fake_clock)
+        check("I3: a lock that stays -> gives up after 60 s of wall time",
+              ok is False and 59 <= clock["t"] <= 61, f"{clock['t']}")
+
+        def clears_after_three(sec):
+            fake_sleep(sec)
+            if len(sleeps) == 3:
+                lock.unlink()
+        sleeps.clear()
+        clock["t"] = 0.0
+        ok = au._wait_for_lock(lock, sleep=clears_after_three, clock=fake_clock)
+        check("I3: a lock that clears -> stops waiting at once", ok is True and len(sleeps) == 3)
+else:
+    check("I3: apply_update._wait_for_lock exists", False)
+with tempfile.TemporaryDirectory() as t:
+    root = make_tree(Path(t))
+    (root / "data" / "apply.lock").write_text("held")
+    sleeps.clear()
+    clock["t"] = 0.0
+    out = io.StringIO()
+    try:
+        with Stub(ok_apply) as s, contextlib.redirect_stdout(out):
+            au._auto_cli(True, root, sleep=fake_sleep, clock=fake_clock)
+        waited_ok = True
+    except TypeError as e:
+        waited_ok = False
+    check("I3: --auto --startup waits for a fresh lock (about 60 s), then still prints one line",
+          waited_ok and 59 <= clock["t"] <= 61 and len(out.getvalue().strip().splitlines()) == 1,
+          f"{clock['t']} {out.getvalue()!r}")
+
+# --- T1: data survives a failure restore -------------------------------------------------------
+with tempfile.TemporaryDirectory() as t:
+    root = make_tree(Path(t))
+    (root / "confidentials").mkdir()
+    (root / "confidentials" / ".env").write_text("SECRET=1\n")
+    (root / ".venv" / "Lib").mkdir(parents=True)
+    (root / ".venv" / "Lib" / "site.py").write_text("venv file\n")
+    (root / "data" / "keep").mkdir()
+    (root / "data" / "keep" / "notes.json").write_text('{"k": 1}')
+
+    def kept(r):
+        out = {}
+        for sub in ("confidentials", ".venv", "data"):
+            for p in (r / sub).rglob("*"):
+                rel = p.relative_to(r)
+                if p.is_file() and not ({"backups", "logs"} & set(rel.parts)) and p.name != "apply.lock":
+                    out[str(rel)] = sha(p)
+        return out
+    before = kept(root)
+
+    def breaks_t1(project_root):
+        (project_root / "a.py").write_text("half\n")
+        raise RuntimeError("boom")
+
+    with Stub(breaks_t1):
+        r = au.auto_apply(root)
+    check("T1: confidentials/, .venv/ and data/ byte-identical after a failure restore",
+          r["restored"] is True and kept(root) == before and len(before) >= 5,
+          f"{len(before)} files; differs: {sorted(set(before.items()) ^ set(kept(root).items()))[:3]}")
+
 
 # =============================================================================
 print("\n2. Install at startup")

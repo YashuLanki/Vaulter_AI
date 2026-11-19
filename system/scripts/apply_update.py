@@ -1,29 +1,35 @@
 """
 apply_update.py
 ----------------
-Vaulter AI — apply a staged update (Priority 4 in
+Vaulter AI -- install a staged update (Priority 4 in
 docs/MULTI_USER_TRANSITION.md).
 
-The primary, non-technical way to use this is to just ask Claude in a
-normal conversation once check_system_health mentions an update is
-ready ("go ahead and install it") -- the apply_pending_update MCP tool
-(see mcp_server.py) calls straight into apply_pending_update() below,
-no terminal needed. This file's own command-line entry point
-(`python apply_update.py`) is kept as a manual/troubleshooting fallback,
-not the expected everyday path.
+Since 2026-11-19 updates install by themselves on a normal Windows install
+(design: docs/superpowers/specs/2026-11-19-auto-update-restart-design.md):
 
-This is deliberately a human-confirmed step, not something that runs on
-its own -- nothing in this project downloads AND applies an update
-without that confirmation; the scheduler only ever stages one (see
-mcp_server.py's _check_and_stage_update). Applying means:
+  * `--auto --startup` runs from main.py before the server imports anything,
+    and installs a staged update that needs no dependency change while no
+    other server from this install is running;
+  * `--auto` runs from the scheduled task (scripts/auto_restart.py) after it
+    has closed an idle Claude Desktop, and installs anything staged.
+
+Both go through auto_apply() below, which refuses on a development copy,
+refuses a package that does not look like a release (no main.py, or a VERSION
+that does not match), backs every file up first, and puts the backup back if
+the install raises, its dependencies fail to install, or the new code cannot
+even be imported (a smoke test in a child process). Nothing is asked of the
+person. The apply_pending_update MCP tool and this file's interactive
+`python apply_update.py` remain for a machine where the automatic route is
+not active (a Mac, a development copy, or one whose restart task could not be
+set up): there a human still says yes first.
+
+Installing means:
   1. Extracting the staged code package to a temp folder.
   2. Deleting any file in this project that the new version no longer
      has (so removed files don't linger as stale dead code).
-  3. Copying every file from the new version into place.
+  3. Copying every file from the new version into place (VERSION last).
   4. Re-installing from requirements.txt with the same Python already
-     running this project, in case the update added/changed a
-     dependency -- otherwise the new code could reference a package
-     that was never installed.
+     running this project, only when the release changed that file.
   5. Cleaning up the staging area.
 
 confidentials/ and data/ are NEVER touched -- the update package itself
@@ -32,10 +38,9 @@ and doesn't delete or overwrite your secrets or local data. The virtual
 environment's FILES aren't touched either, though step 4 does install
 packages into it, same as any other `pip install`.
 
-You'll need to restart Claude Desktop (and the MCP server it launches)
-afterward for the new code to actually take effect -- nothing here does
-that for you, since Claude Desktop can't be restarted from inside its
-own MCP server process.
+The new code takes effect when Claude Desktop restarts: at startup it is
+installed before the server loads; by the scheduled task, Desktop is
+reopened after the install.
 """
 
 import base64
@@ -234,7 +239,7 @@ class _Step:
             log.info(f"[APPLY] {self.name}: done in {took:.1f}s")
         return False
 
-def refresh_dependencies(project_root: Path) -> tuple[bool, str]:
+def refresh_dependencies(project_root: Path, timeout: int = 600) -> tuple[bool, str]:
     """
     Re-installs from requirements.txt using the SAME Python interpreter
     already running this project, so a fix that adds or changes a
@@ -248,6 +253,10 @@ def refresh_dependencies(project_root: Path) -> tuple[bool, str]:
     caller now skips this entirely when requirements.txt has not changed,
     which is almost every update, and this function is only reached when
     there is genuinely something to install.
+
+    `timeout` is 600 s for the manual path; the automatic install passes less
+    (AUTO_PIP_TIMEOUT), so the scheduled task's own time limit is never reached
+    while Claude Desktop is closed.
 
     Returns (ok, message) -- message is empty on success, or pip's own
     error output (truncated) on failure. Never raises.
@@ -278,7 +287,7 @@ def refresh_dependencies(project_root: Path) -> tuple[bool, str]:
             result = subprocess.run(
                 [sys.executable, "-m", "pip", "install", "-q", "-r", str(requirements)],
                 stdout=fh, stderr=subprocess.STDOUT,
-                stdin=subprocess.DEVNULL, text=True, timeout=600,
+                stdin=subprocess.DEVNULL, text=True, timeout=timeout,
             )
         output = out_path.read_text(encoding="utf-8", errors="replace")
     except Exception as e:
@@ -291,33 +300,19 @@ def refresh_dependencies(project_root: Path) -> tuple[bool, str]:
     if result.returncode != 0:
         return False, output.strip()[-2000:]
     return True, ""
-    try:
-        result = subprocess.run(
-            [sys.executable, "-m", "pip", "install", "-q", "-r", str(requirements)],
-            capture_output=True, text=True, timeout=600,
-            # stdin closed, not inherited. Under MCP this process's stdin is
-            # the pipe Claude Desktop talks to us on, and capture_output only
-            # redirects the two OUTPUT streams. A pip that reads stdin blocks
-            # on a pipe that never answers. Identical hole to the one that
-            # cost 10s on every conversation via git, fixed the same day.
-            stdin=subprocess.DEVNULL,
-        )
-    except Exception as e:
-        return False, str(e)
-    if result.returncode != 0:
-        return False, (result.stderr or result.stdout).strip()[-2000:]
-    return True, ""
 
 
-def apply_pending_update(project_root: Path = None) -> dict:
+def apply_pending_update(project_root: Path = None, *, pip_timeout: int = 600) -> dict:
     """
     Applies whatever update is currently staged, with NO interactive
-    prompt -- callers (this file's own main(), or the
-    apply_pending_update MCP tool in mcp_server.py) are responsible for
-    getting a human's explicit go-ahead BEFORE calling this; this
-    function just does the work once called. Never raises for the
+    prompt. The manual callers (this file's own main(), or the
+    apply_pending_update MCP tool in mcp_server.py) get a human's explicit
+    go-ahead BEFORE calling this; auto_apply() calls it only after its own
+    guards and wraps it in a backup. This function just does the work once
+    called. Never raises for the
     ordinary "nothing staged" / "staged file missing" cases -- always
-    returns a result dict describing what happened.
+    returns a result dict describing what happened. `pip_timeout` bounds the
+    dependency install (see refresh_dependencies).
     """
     if project_root is None:
         project_root = PROJECT_ROOT
@@ -437,7 +432,7 @@ def apply_pending_update(project_root: Path = None) -> dict:
         deps_skipped = True
     else:
         with _Step("refreshing dependencies (requirements.txt changed)"):
-            deps_ok, deps_message = refresh_dependencies(project_root)
+            deps_ok, deps_message = refresh_dependencies(project_root, timeout=pip_timeout)
         deps_skipped = False
 
     zip_path.unlink(missing_ok=True)
@@ -485,7 +480,21 @@ def apply_pending_update(project_root: Path = None) -> dict:
 # at a scratch tree. apply_pending_update() above still reads config itself.
 # ---------------------------------------------------------------------------
 
-LOCK_STALE_SECONDS = 600
+# Above the automatic pip limit plus backup, sync and smoke test, so a lock held
+# by a live install is never mistaken for one left by a dead process.
+LOCK_STALE_SECONDS = 900
+
+# How long each step of an automatic install may take. The scheduled task has a
+# 60-minute limit, and the idle path's worst case (pip 300 s + smoke test 120 s +
+# the channel check and the 30 s exit wait) stays well inside it. At startup the
+# whole installer runs inside main.py's own 120 s limit, so its steps are bounded
+# tighter: a step killed from outside cannot undo itself.
+AUTO_PIP_TIMEOUT = 300
+SMOKE_TEST_TIMEOUT = 120
+STARTUP_PIP_TIMEOUT = 60
+STARTUP_SMOKE_TEST_TIMEOUT = 45
+STARTUP_LOCK_WAIT_SECONDS = 60
+_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
 
 def is_development_copy(project_root: Path) -> bool:
@@ -655,6 +664,134 @@ def _backup_is_usable(dest: Path, marker: Path, current_version: str, target_ver
         return False
 
 
+def staged_package_problem(zip_path: Path, version: str) -> str:
+    """Why this staged package does not look like a Vaulter AI release, or "".
+    A cheap guard, not a signature: the marker naming the version is not signed,
+    so an automatic install at least insists the zip holds main.py at its top
+    level and a VERSION whose first line is the version it is installed as."""
+    try:
+        with zipfile.ZipFile(zip_path) as zf:
+            names = set(zf.namelist())
+            if "main.py" not in names:
+                return "it has no main.py at its top level"
+            if "VERSION" not in names:
+                return "it has no VERSION file"
+            lines = zf.read("VERSION").decode("utf-8", errors="replace").splitlines()
+    except Exception:
+        return "it cannot be opened"
+    if not lines or lines[0].strip() != str(version):
+        return "its VERSION file does not match the version it is staged as"
+    return ""
+
+
+def _smoke_test(project_root: Path, timeout: int = SMOKE_TEST_TIMEOUT) -> bool:
+    """Can the freshly installed code be imported at all? `import mcp_server` in a
+    child process (stdin closed, output to a temp file, never pipes). False on a
+    non-zero exit, a timeout, or anything else going wrong. Checks replace this
+    function to force a pass or a failure without importing anything."""
+    import os
+    out = Path(tempfile.gettempdir()) / f"vaulter_smoke_{os.getpid()}_{_time.time_ns()}.txt"
+    code = f"import sys; sys.path.insert(0, {str(project_root)!r}); import mcp_server"
+    try:
+        with open(out, "w", encoding="utf-8", errors="replace") as fh:
+            r = subprocess.run([sys.executable, "-c", code], cwd=str(project_root),
+                               stdin=subprocess.DEVNULL, stdout=fh, stderr=subprocess.STDOUT,
+                               timeout=timeout, creationflags=_NO_WINDOW)
+        return r.returncode == 0
+    except Exception:
+        return False
+    finally:
+        try:
+            out.unlink(missing_ok=True)
+        except OSError:
+            pass
+
+
+def _in_progress_path(project_root: Path) -> Path:
+    return project_root / "data" / "apply_in_progress.json"
+
+
+def _write_in_progress(project_root: Path, version: str) -> None:
+    """The note recover_unfinished_apply looks for. Written around the steps of
+    an automatic install that run AFTER apply_pending_update has cleared its own
+    note (the smoke test, a restore), so a process killed there is still
+    recovered at the next start."""
+    try:
+        _in_progress_path(project_root).write_text(json.dumps({
+            "version": version,
+            "started": __import__("datetime").datetime.now().isoformat(timespec="seconds"),
+        }), encoding="utf-8")
+    except Exception:
+        pass
+
+
+def _clear_in_progress(project_root: Path) -> None:
+    try:
+        _in_progress_path(project_root).unlink(missing_ok=True)
+    except OSError:
+        pass
+
+
+def _restore(project_root: Path, backup: Path, marker: Path, version: str) -> bool:
+    """Put the pre-update backup back. True on success (backup and note then
+    removed). On failure the backup and the in-progress note stay, so the next
+    start's recovery tries again."""
+    _write_in_progress(project_root, version)
+    try:
+        _sync_tree(project_root, backup)
+    except Exception as e:
+        log.error(f"could not put the previous version back after the update to {version} "
+                  f"failed ({type(e).__name__}); it will be tried again at the next start")
+        return False
+    _discard_backup(backup, marker)
+    _clear_in_progress(project_root)
+    return True
+
+
+def _startup_record_path(project_root: Path) -> Path:
+    return project_root / "data" / "startup_installed.json"
+
+
+def _record_startup_install(project_root: Path, version: str) -> None:
+    """Tell the restart task this version was installed at startup, i.e. BEFORE
+    the server loaded it: its VERSION file is newer than Desktop's start, but no
+    restart is owed for it."""
+    try:
+        _startup_record_path(project_root).write_text(json.dumps({"version": version}),
+                                                      encoding="utf-8")
+    except Exception:
+        pass
+
+
+def _restart_task_gave_up(project_root: Path, version: str) -> bool:
+    """True if the restart task's state says it stopped restarting for version."""
+    try:
+        state = json.loads((project_root / "data" / "auto_restart.json").read_text(encoding="utf-8"))
+        entry = state.get(version) if isinstance(state, dict) else None
+        return isinstance(entry, dict) and bool(entry.get("gave_up"))
+    except Exception:
+        return False
+
+
+def _lock_is_fresh(lock: Path) -> bool:
+    try:
+        return (_time.time() - lock.stat().st_mtime) <= LOCK_STALE_SECONDS
+    except OSError:
+        return False
+
+
+def _wait_for_lock(lock: Path, seconds: float = STARTUP_LOCK_WAIT_SECONDS, *,
+                   sleep=_time.sleep, clock=_time.monotonic) -> bool:
+    """Wait (wall time) for a fresh lock to clear. True when none is held, False
+    if one still is after `seconds`. A stale lock counts as not held."""
+    deadline = clock() + seconds
+    while _lock_is_fresh(lock):
+        if clock() >= deadline:
+            return False
+        sleep(1)
+    return True
+
+
 def _take_lock(lock: Path) -> bool:
     import os
     lock.parent.mkdir(parents=True, exist_ok=True)
@@ -684,10 +821,17 @@ def auto_apply(project_root: Path | None = None, *, at_startup: bool = False) ->
     Install the staged update without asking, but only when that is safe.
     Never raises. Returns {"applied", "version", "reason", "restored"}.
 
+    Refused: a development copy; nothing applicable staged; a package without
+    main.py at its top level or whose VERSION does not match ([ERROR]).
     At startup (the server is about to start serving) an update that changes
     dependencies, or one landing while another server from this install runs,
-    is left for the idle restart: pip must not run under a live server.
-    Every file is backed up first and put back if the apply fails.
+    is left for the idle restart: pip must not run under a live server. The one
+    exception: a version the restart task gave up on may change dependencies
+    here, since nothing else will install it.
+
+    Every file is backed up first and put back ([ERROR], restored=True) if the
+    install raises, its dependencies fail to install, or the new code cannot be
+    imported in a child process.
     """
     if project_root is None:
         project_root = PROJECT_ROOT
@@ -712,9 +856,21 @@ def auto_apply(project_root: Path | None = None, *, at_startup: bool = False) ->
             return result
         result["version"] = version
 
+        zip_path = data / "pending_update" / str(pending.get("zip_filename", ""))
+        if not zip_path.is_file():
+            result["reason"] = (f"the package for version {version} is not downloaded; it will "
+                                f"be fetched again on the next check")
+            return result
+        problem = staged_package_problem(zip_path, version)
+        if problem:
+            log.error(f"automatic update to {version} refused: the staged package does not "
+                      f"look like a Vaulter AI release")
+            result["reason"] = f"the staged package for version {version} was refused: {problem}"
+            return result
+
         if at_startup:
-            zip_path = data / "pending_update" / str(pending.get("zip_filename", ""))
-            if release_changes_dependencies(project_root, zip_path):
+            if (release_changes_dependencies(project_root, zip_path)
+                    and not _restart_task_gave_up(project_root, version)):
                 result["reason"] = (f"version {version} changes the dependency list, so the "
                                     f"idle restart will install it")
                 return result
@@ -723,6 +879,9 @@ def auto_apply(project_root: Path | None = None, *, at_startup: bool = False) ->
                                     f"restart will install version {version}")
                 return result
 
+        pip_timeout = STARTUP_PIP_TIMEOUT if at_startup else AUTO_PIP_TIMEOUT
+        smoke_timeout = STARTUP_SMOKE_TEST_TIMEOUT if at_startup else SMOKE_TEST_TIMEOUT
+
         lock = data / "apply.lock"
         if not _take_lock(lock):
             result["reason"] = "another update is already in progress"
@@ -730,34 +889,57 @@ def auto_apply(project_root: Path | None = None, *, at_startup: bool = False) ->
         backup = _backup_dir(project_root, version)
         marker = _marker_path(project_root, version)
         try:
-            _backup_tree(project_root, backup, marker, running_version(project_root))
-        except Exception as e:
-            _discard_backup(backup, marker)
-            log.error(f"[ERROR] could not back up before updating to {version} "
-                      f"({type(e).__name__}: {e}); nothing was changed")
-            result["reason"] = f"the backup could not be made, so nothing was changed ({e})"
             try:
-                lock.unlink(missing_ok=True)
-            except OSError:
-                pass
-            return result
-        try:
-            try:
-                applied = apply_pending_update(project_root)
+                _backup_tree(project_root, backup, marker, running_version(project_root))
             except Exception as e:
-                log.error(f"[ERROR] automatic update to {version} failed "
-                          f"({type(e).__name__}: {e}); putting the previous version back")
-                try:
-                    _sync_tree(project_root, backup)
-                    result["restored"] = True
-                    _discard_backup(backup, marker)
-                except Exception as e2:
-                    log.error(f"[ERROR] could not put the previous version back: {e2}")
+                _discard_backup(backup, marker)
+                log.error(f"could not back up before updating to {version} "
+                          f"({type(e).__name__}); nothing was changed")
+                result["reason"] = f"the backup could not be made, so nothing was changed ({e})"
+                return result
+
+            try:
+                applied = apply_pending_update(project_root, pip_timeout=pip_timeout)
+            except Exception as e:
+                log.error(f"automatic update to {version} failed "
+                          f"({type(e).__name__}); putting the previous version back")
+                result["restored"] = _restore(project_root, backup, marker, version)
                 result["reason"] = f"the update failed and was undone ({e})"
                 return result
-            result["applied"] = bool(applied.get("applied"))
-            result["reason"] = applied.get("reason", "")
+
+            if not applied.get("applied"):
+                # Nothing was written (no stage, missing file, bad signature).
+                _discard_backup(backup, marker)
+                result["reason"] = applied.get("reason", "")
+                return result
+
+            if applied.get("dependencies_ok") is False:
+                # The old requirements.txt comes back with the restore, so the
+                # next attempt sees a change and runs pip again.
+                log.error(f"automatic update to {version}: its dependencies could not be "
+                          f"installed; putting the previous version back")
+                result["restored"] = _restore(project_root, backup, marker, version)
+                result["reason"] = (f"the dependencies of version {version} could not be "
+                                    f"installed, so the previous version was put back")
+                return result
+
+            # Can the new code even be imported? Run with the in-progress note
+            # in place, so a process killed during it is recovered next start.
+            _write_in_progress(project_root, version)
+            if not _smoke_test(project_root, smoke_timeout):
+                log.error(f"automatic update to {version}: the new version could not be "
+                          f"started (test import failed); putting the previous version back")
+                result["restored"] = _restore(project_root, backup, marker, version)
+                result["reason"] = (f"version {version} could not be started, so the previous "
+                                    f"version was put back")
+                return result
+            _clear_in_progress(project_root)
+
             _discard_backup(backup, marker)
+            result["applied"] = True
+            result["reason"] = applied.get("reason", "")
+            if at_startup:
+                _record_startup_install(project_root, version)
             return result
         finally:
             try:
@@ -773,27 +955,40 @@ def recover_unfinished_apply(project_root: Path | None = None) -> bool:
     """If an apply began and never finished (marker present) and a backup of the
     version it was replacing exists, put that backup back. True if it did. The
     marker stays so _report_unfinished_apply still tells the team; the backup is
-    removed so a second start does not restore over newer files."""
+    removed so a second start does not restore over newer files.
+
+    Takes the install lock first: a fresh lock means an install is running right
+    now (its in-progress note is expected), so nothing is touched and this
+    returns False. A stale lock (its process died) is taken over."""
     if project_root is None:
         project_root = PROJECT_ROOT
-    marker = project_root / "data" / "apply_in_progress.json"
+    note = _in_progress_path(project_root)
     try:
-        if not marker.exists():
+        if not note.exists():
             return False
-        version = json.loads(marker.read_text(encoding="utf-8")).get("version")
+        version = json.loads(note.read_text(encoding="utf-8")).get("version")
         if not version:
             return False
-        backup = _backup_dir(project_root, str(version))
-        marker = _marker_path(project_root, str(version))
-        if not _backup_is_usable(backup, marker, running_version(project_root), str(version)):
+        lock = project_root / "data" / "apply.lock"
+        if not _take_lock(lock):
+            log.info(f"[APPLY] an update to {version} is in progress elsewhere; not recovering")
             return False
-        _sync_tree(project_root, backup)
-        _discard_backup(backup, marker)
-        log.error(f"[ERROR] an update to {version} did not finish; "
-                  f"the previous version was put back")
-        return True
+        try:
+            backup = _backup_dir(project_root, str(version))
+            marker = _marker_path(project_root, str(version))
+            if not _backup_is_usable(backup, marker, running_version(project_root), str(version)):
+                return False
+            _sync_tree(project_root, backup)
+            _discard_backup(backup, marker)
+            log.error(f"an update to {version} did not finish; the previous version was put back")
+            return True
+        finally:
+            try:
+                lock.unlink(missing_ok=True)
+            except OSError:
+                pass
     except Exception as e:
-        log.error(f"[ERROR] could not recover from an unfinished update: {e}")
+        log.error(f"could not recover from an unfinished update ({type(e).__name__})")
         return False
 
 
@@ -838,8 +1033,13 @@ def main() -> None:
     print("Done. Fully quit and reopen Claude Desktop for the new code to take effect.")
 
 
-def _auto_cli(startup: bool, project_root: Path | None = None) -> None:
+def _auto_cli(startup: bool, project_root: Path | None = None, *,
+              sleep=_time.sleep, clock=_time.monotonic) -> None:
     """`--auto [--startup]`: recover, then install if safe. One line, exit 0.
+
+    At startup, a fresh install lock means the idle task is installing right
+    now: wait up to STARTUP_LOCK_WAIT_SECONDS for it to finish, then go on
+    (recovery and auto_apply both re-check the lock themselves).
 
     Logs to data/logs/vaulter.log in the server's own format, because the team's
     error reports scan that file for [ERROR] lines. A plain append handler: the
@@ -857,6 +1057,8 @@ def _auto_cli(startup: bool, project_root: Path | None = None) -> None:
         handler.setFormatter(logging.Formatter("%(asctime)s  [%(levelname)s]  %(message)s"))
         root_logger.addHandler(handler)
         root_logger.setLevel(logging.INFO)
+        if startup:
+            _wait_for_lock(project_root / "data" / "apply.lock", sleep=sleep, clock=clock)
         recovered = recover_unfinished_apply(project_root)
         r = auto_apply(project_root, at_startup=startup)
         extra = " (previous version put back after an unfinished apply)" if recovered else ""
