@@ -1670,6 +1670,35 @@ finally:
     shutil.rmtree(_tmp4, ignore_errors=True)
 
 
+# =============================================================================
+print("\n5. What the docs say (final review I7)")
+check("I7: apply_update's docstring no longer calls installing human-confirmed",
+      "deliberately a human-confirmed" not in (au.__doc__ or "") and "auto_apply" in (au.__doc__ or ""))
+_claude_md = PROJECT_ROOT.parent / "CLAUDE.md"
+_skill_md = PROJECT_ROOT.parent / ".claude" / "skills" / "publish-release" / "SKILL.md"
+if _claude_md.exists() and _skill_md.exists():      # repo checkout only; never shipped
+    _sk = _skill_md.read_text(encoding="utf-8")
+    _step5 = _sk[_sk.find("### 5."):_sk.find("### 6.")]
+    check("I7: the canary runs on a real install built with build_handoff.py, not the dev copy",
+          "build_handoff.py" in _step5 and "git checkout" in _step5)
+    check("I7: ...and watches the startup install and one idle restart (--ignore-idle, owner's OK)",
+          "auto_install.txt" in _step5 and "auto_restart.py --ignore-idle" in _step5
+          and "owner's OK" in _step5)
+    check("I7: the skill no longer says nothing can restart Claude Desktop",
+          "Nothing can do that for the person" not in _sk and "offered inside their own conversation" not in _sk)
+    _cm = _claude_md.read_text(encoding="utf-8")
+    _at = _cm.find("**A pending restart is detected")
+    check("I7: CLAUDE.md supersedes 'a pending restart is said out loud' on automatic installs",
+          _at > 0 and "Superseded on automatic installs" in _cm[max(0, _at - 900):_at])
+    _au_sec = _cm[_cm.find("### Auto-update"):]
+    check("I7: CLAUDE.md supersedes the Auto-update section's 5am / ask-first opening",
+          "Superseded in part on 2026-11-19" in _au_sec[:1200])
+    _block = _cm[_cm.find("**Fully automatic updates"):_cm.find("**Every published package is signed")]
+    check("I7: the automatic-updates block names both startup skips, the smoke test, the zip guard, "
+          "the give-up reset and the verified task",
+          all(k in _block for k in ("requirements.txt", "another server", "import mcp_server",
+                                    "main.py", "gave_up_at", "_RESTART_TASK_OK")))
+
 failed = [r for r in RESULTS if not r[1]]
 print(f"\n{len(RESULTS) - len(failed)} passed, {len(failed)} failed")
 sys.exit(1 if failed else 0)

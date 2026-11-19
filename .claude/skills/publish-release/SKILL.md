@@ -27,7 +27,7 @@ step is there before changing it.
   been idle 15 minutes. The canary step is therefore the only gate: do not promote until it has
   been seen working.
 - **Nothing here is urgent.** If any step looks wrong, stop and ask. An unpublished fix
-  costs a day; a bad release costs everyone's trust in the update prompt.
+  costs a day; a bad release costs everyone's trust in automatic updates.
 
 ---
 
@@ -81,20 +81,60 @@ Confirm, for both the program package and the launcher package:
 *Why:* the package is built by walking the filesystem, not by asking git what is tracked. A
 new folder in the wrong place would travel.
 
-### 5. Apply it on a real machine, through the real path
+### 5. Watch it install itself on a real install (the canary)
 
-Point the live install at `canary`, let it download and apply the update the way a teammate's
-machine would, then put the channel back. Confirm:
+**Not on the development copy.** The maintainer's own copy is a git checkout, and a git checkout
+never updates itself automatically (it would overwrite uncommitted work). A test there no longer
+tests what teammates get. Use a real install that is one version behind:
 
-- it downloaded and staged the version you just published
-- the apply finished **inside a single tool call** — no timeout
-- the version file now reads the new version and the staging folder is empty
-- that machine's own settings survived
-- an ordinary request still answers normally afterwards
+- **The canary install** is a folder outside the repo, for example `%USERPROFILE%\Vaulter Canary\`,
+  made from a handoff package of the PREVIOUS release: `python system/scripts/build_handoff.py`
+  run on that release, then `system/data/handoff/Vaulter AI/` copied to the scratch folder and set
+  up with its `quick_start` installer. Its `system/confidentials/.env` has
+  `VAULTER_UPDATE_CHANNEL=canary`. Keep it between releases: each release brings it up to date,
+  which is exactly the test, so it is always one version behind the next one.
+- **Point Claude Desktop at it for the test** (Settings, Developer, Edit Config: the vaulter_ai
+  entry's path to `main.py`), and back to the usual copy afterwards.
 
-*Why this and not "it looks fine":* an apply once ran long enough to time out, and Claude
-reported **FAILED** on an update that had actually **SUCCEEDED** — sending someone to fix a
-machine that was already working. The only way to know is to watch a real one do it.
+Then watch both automatic paths:
+
+1. **Startup install.** Ask one question in a new conversation (that checks the channel and stages
+   the release), then fully quit Claude Desktop and reopen it. Confirm:
+   - `system/data/logs/auto_install.txt` in the canary install ends with `applied=True` and the
+     version you just published
+   - its `system/VERSION` reads the new version, `system/data/pending_update/` is empty, and
+     `system/data/startup_installed.json` names the new version
+   - `Get-ScheduledTask -TaskName "Vaulter AI - Update restart"` exists and its action names the
+     canary install's `auto_restart.py`
+   - a new conversation says nothing about updates, and an ordinary request answers normally
+   - after 15 idle minutes `system/data/logs/auto_restart.txt` has NO new "restarted" line (a
+     version installed at startup owes no restart)
+2. **One idle restart, with the owner's OK** (it closes Claude Desktop). Make a restart owed by
+   deleting the canary install's `system/data/startup_installed.json`, then run, from the canary
+   install's `system` folder and with the same Python that Claude Desktop's config names for it:
+
+   ```bash
+   <that python.exe> scripts\auto_restart.py --ignore-idle
+   ```
+
+   Confirm Claude Desktop closes and reopens by itself, `auto_restart.txt` gains one line ending
+   `reopened: yes`, no new `[ERROR]` appears in `system/data/logs/vaulter.log`, and any Claude Code
+   window opened outside Desktop is still running.
+
+   **A release that changes `requirements.txt` is never installed at startup**, only by this
+   path. For such a release do the idle restart FIRST, instead of the startup install: once the
+   release is staged, run the command above without restarting Claude by hand, and confirm it
+   ends `installed; reopened: yes`.
+
+**Afterwards, on the maintainer's machine only:** point Claude Desktop back at the usual copy and
+remove the canary's task (`schtasks /Delete /TN "Vaulter AI - Update restart" /F`), otherwise it
+keeps restarting Claude Desktop for the canary install.
+
+*Why this and not "it looks fine":* nobody is asked any more, so the canary is the only place a
+bad release can be caught before it installs itself everywhere. An apply once ran long enough to
+time out and was reported as FAILED while it had SUCCEEDED; only watching a real install do it
+tells you which. The installer puts the previous version back by itself if a release cannot even
+be imported, but a release that imports and then misbehaves is only caught here.
 
 ### 6. Promote
 
@@ -102,7 +142,10 @@ machine that was already working. The only way to know is to watch a real one do
 python system/scripts/release.py --promote
 ```
 
-Now it reaches everyone on the default channel, offered inside their own conversation.
+Now it reaches everyone on the default channel, and nobody is asked: each machine checks the
+channel at least hourly while it is on (a tool call or the restart task), installs the release the
+next time Claude Desktop starts, or after the computer has been idle 15 minutes it closes Claude
+Desktop, installs and reopens it. A machine that is off or logged out picks it up when next used.
 
 ### 7. Rebuild the handoff zip
 
@@ -123,20 +166,27 @@ needs the zip.** Forgetting this is how a new person installs a version that is 
 
 - **Any check fails.** Never publish past a red check.
 - **A signature does not verify.** Something is wrong with the package; do not promote.
-- **The apply does not finish inside one call.** This has happened before and the cause was
-  real.
+- **The canary install does not install the release by itself**, puts the previous version
+  back, or Claude Desktop does not reopen. Each of these has a line in the canary install's
+  `system/data/logs/` (`auto_install.txt`, `auto_restart.txt`, `vaulter.log`); read it first.
 - **You are not on the machine with the signing key.** Nothing you do will work; say so.
 
 ## What this does not cover
 
-- **Restarting Claude Desktop.** Nothing can do that for the person — an update cannot
-  restart the application running it. The system now says so by itself, on every answer,
-  until the restart happens.
+- **Machines where updates are not automatic.** A Mac, a development copy, or a Windows machine
+  whose restart task could not be set up (one `[ERROR]` in the team's error reports says so)
+  keeps the old behaviour: Claude asks before installing and asks for a restart.
+- **A machine whose restart task gave up.** After two restarts that did not load a version, the
+  task stops for that version, sends one `[ERROR]` to the team, and Claude asks the person once
+  to quit and reopen Claude. A restart by hand lets the task try again.
+- **Long work in progress.** "Idle" means no keyboard or mouse for 15 minutes, so a long job
+  Claude is running on its own is ended by the restart.
 - **A machine that cannot see the team folder.** It reads its updates from that folder, so
   it will never be offered anything. That one needs the zip from step 7, by hand.
 
 ## Reporting back
 
-Say which version went out, that the checks passed, and what the apply measured. Then say
-plainly who it reaches and who it does not — anyone who has not opened a conversation since
-will not see it yet, and that is the normal case rather than a failure.
+Say which version went out, that the checks passed, and what the canary showed (startup
+install and idle restart). Then say plainly who it reaches and who it does not: machines that
+are off or logged out install it when next used, which is the normal case rather than a failure,
+and machines where updates are not automatic are still asked.

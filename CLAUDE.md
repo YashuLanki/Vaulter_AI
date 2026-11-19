@@ -57,7 +57,7 @@ python system/scripts/check_find.py                 # does find-in-document find
 python system/scripts/check_report_page.py          # does the screening report page work in a browser
 python system/scripts/check_term_sheet_page.py      # does the mini term sheet dashboard work in a browser
 python system/scripts/check_deal_tracker.py         # 68 checks on the deal tracker, made-up data only (Excel + Edge parts skip if absent)
-python system/scripts/check_auto_update.py          # 193 checks on automatic updates and the idle restart
+python system/scripts/check_auto_update.py          # 292 checks on automatic updates and the idle restart
 ```
 
 There is no lint/test framework configured (no pytest, no linter config) — the three
@@ -756,6 +756,14 @@ scans, unreadable without OCR, so on a machine without Tesseract the PSA is the 
 the envelope-id stamp is a real text line, so a scanned amendment came back as two ids and a name.
 A page whose text is only e-signature stamps plus under 40 characters is now OCR'd.
 
+**Superseded on automatic installs (2026-11-19), read with "Fully automatic updates" below.** Where
+`_auto_update_active()` is true (Windows, not a development copy, and this process verified that the
+restart task runs this install), neither the restart-owed note nor the waiting-update note described
+in this section and the next is shown: the restart task loads the update itself, and chat says
+nothing unless that task gave up. Everything below still holds for a Mac, a development copy, or a
+machine whose task could not be set up, and the "restart is the one step nothing can do" framing is
+true only there.
+
 **A pending restart is detected and said out loud (`_restart_pending`, 2026-09-01).** Applying an
 update rewrites the `VERSION` file, and `_get_code_version()` reads that file — so between an
 apply and the restart, the server **reported the new version while running the old code**, and
@@ -1032,6 +1040,14 @@ real transport.
 
 ### Auto-update (`system/scripts/release.py`, `system/scripts/apply_update.py`)
 
+**Superseded in part on 2026-11-19: read "Fully automatic updates" at the end of this section
+first.** Where this section says a 5am scheduler stages updates, there is no such scheduler: staging
+runs from `check_for_update` and ordinary tool calls (hourly gate) and from the restart task
+(hourly). Where it says the user is asked before an update is applied and must restart Claude by
+hand, that is now true only where automatic updating is not active (a Mac, a development copy, or a
+machine whose restart task could not be set up). On a real Windows install the update installs
+itself and Claude Desktop is restarted when the computer is idle.
+
 **What the `system/` split means here (2026-08-03).** Both scripts resolve `PROJECT_ROOT` as
 `Path(__file__).parent.parent`, which is now `system/` — so a package contains `system/`'s
 contents and is applied back into `system/`. Symmetric, so shipping a new MCP tool or any code
@@ -1203,34 +1219,56 @@ words: teammates should not have to run a health check, say yes, or quit and reo
 parts; the design, with the reasoning, is `docs/superpowers/specs/2026-11-19-auto-update-restart-design.md`.
 
 1. **Install at startup.** `main.py mcp` runs `apply_update.py --auto --startup` in a separate
-   process before importing config, so the new code is what loads. `auto_apply` is guarded: it
-   refuses a development copy (the repo checkout must never be overwritten by a release) and a
-   downgrade, takes a lock, backs up the program files it will replace, and restores them if the
-   sync fails. Results go to `data/logs/vaulter.log`.
+   process before importing config, so the new code is what loads. **Two skips, both left for the
+   idle restart:** a release that changes `requirements.txt` (pip must not run under a live
+   server or hold up startup), unless the restart task has given up on that version, and a release
+   landing while another server from this install is running. A successful startup install writes
+   `data/startup_installed.json`, so the task does not then restart Claude for a version the server
+   already loaded. Results go to `data/logs/vaulter.log` and `data/logs/auto_install.txt`.
 2. **A scheduled task restarts Claude Desktop.** `scripts/auto_restart.py`, task "Vaulter AI -
-   Update restart" every 15 minutes, registered by the server (`_ensure_restart_task`, interactive
-   logon, because idle time and the Store relaunch only work in the person's own session). Hourly
-   it checks the channel; when an update is owed and the computer has been idle 15 minutes it stops
-   Claude Desktop's process tree, installs, and reopens it. Claude Code is never touched.
-3. **Chat stays silent.** `_update_message` / `_auto_update_active` / `_auto_restart_gave_up`: no
-   update talk in conversation, except one line asking the person to quit and reopen Claude if the
-   task gave up. Dev copies and non-Windows keep the old ask-first wording.
+   Update restart" every 15 minutes, 60-minute time limit, interactive logon (idle time and the
+   Store relaunch only work in the person's own session). Hourly it checks the channel; when an
+   update is owed and the computer has been idle 15 minutes it stops Claude Desktop's process tree,
+   installs (pip limited to 300 s), and reopens it. Desktop's main process is the one Desktop
+   process with no Electron `--type=`; none or several and nothing is stopped; it is listed again
+   just before stopping and stopped only if the same pid AND start time is still Desktop. The exit
+   wait is 30 s of wall time. Claude Code is never touched.
+3. **Chat stays silent, but only where that is verified.** `_auto_update_active()` = Windows, not a
+   development copy, and `_RESTART_TASK_OK`: `_ensure_restart_task` reads the existing task's action
+   and re-registers it (`-Force`) when it is missing or names another copy's `auto_restart.py`,
+   and only a verified match makes the install "active". A failed registration is one `log.error`
+   per process, so it reaches the team, and that machine keeps the old ask-first wording. On active
+   installs `check_for_update` says a waiting update "will install automatically; say nothing",
+   `check_system_health` raises no update issue, and the one line asking the person to quit and
+   reopen Claude (when the task gave up) appears at most once per server process.
 
-**Five decisions made at build time (builder's calls, owner can overrule):** (a) a failed install
-restores the backup, never leaves `system/` half old and half new, and an unfinished apply marker
-plus a backup is restored at the next start; (b) the install mostly happens while Desktop is
-closed (stop, install, reopen), and startup install skips a release that changes
-`requirements.txt` so startup never waits on pip; (c) an exclusive `data/apply.lock` stops two
-servers installing at once; (d) the task, not just the server, checks the channel, so an idle
-machine still updates within hours; (e) at most 2 restarts per version, then one `[ERROR]` for the
-team, state in `data/auto_restart.json`.
+**Every automatic install is guarded (`auto_apply`):** it refuses a development copy and a
+downgrade; refuses a staged zip without `main.py` at its top level or whose `VERSION` does not match
+the staged version (`[ERROR]`; a cheap guard, since the marker itself is not signed); takes
+`data/apply.lock` (stale after 900 s); backs up every program file; and puts the backup back, with
+one `[ERROR]` naming only the version, when the install raises, when its dependencies fail to
+install (the old `requirements.txt` comes back, so the next attempt runs pip again), or when the new
+code cannot be imported (`import mcp_server` in a child process, 120 s, 45 s at startup). An
+unfinished install leaves a note and a backup that the next start restores; that recovery takes
+the same lock, and the startup CLI waits up to 60 s for a fresh lock to clear first.
+
+**Decisions made at build time (builder's calls, owner can overrule):** (a) a failed install
+restores the backup, never leaves `system/` half old and half new; (b) the install mostly happens
+while Desktop is closed (stop, install, reopen); (c) the lock stops two installs at once; (d) the
+task, not just the server, checks the channel, so an idle machine still updates within hours; (e)
+at most 2 restarts per version, then one `[ERROR]` for the team, state in `data/auto_restart.json`
+with when it gave up (`gave_up_at`). **The give-up resets** when Claude Desktop's current start
+time is later than `gave_up_at`: the person restarted it by hand, so the task tries again.
 
 **The canary test is now the only gate before everyone.** Nobody is asked, so a bad release
-reaches every machine within hours of `--promote`. Publish to canary, watch it, only then promote
-(see the publish-release skill). Known limits: "idle" means no keyboard or mouse, so a long task
-Claude is running alone is ended by the restart; the release that carries all this still reaches
-each teammate the old way, once (they say yes and restart), and every update after it is automatic.
-`check_auto_update.py` holds the 193 checks.
+reaches every machine within hours of `--promote`. Publish to canary and watch it install itself on
+a real (non-git) install, both at startup and through one idle restart, before promoting (see the
+publish-release skill: the development copy never updates itself, so testing there tests nothing).
+Known limits: "idle" means no keyboard or mouse, so a long task Claude is running alone is ended by
+the restart; the release that carries all this still reaches each teammate the old way, once (they
+say yes and restart), and every update after it is automatic; signing the marker's own fields
+(version, force) in `release.py` is deferred, so someone with write access to the team folder could
+still re-offer an older signed release. `check_auto_update.py` holds the 292 checks.
 
 **Every published package is signed, and every instance verifies before trusting a download
 (2026-08-07).** Before this, anyone with write access to the shared OneDrive update folder —
