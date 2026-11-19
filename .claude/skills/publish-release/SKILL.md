@@ -104,8 +104,8 @@ Then watch both automatic paths:
      version you just published
    - its `system/VERSION` reads the new version, `system/data/pending_update/` is empty, and
      `system/data/startup_installed.json` names the new version
-   - `Get-ScheduledTask -TaskName "Vaulter AI - Update restart"` exists and its action names the
-     canary install's `auto_restart.py`
+   - `Get-ScheduledTask -TaskName "Vaulter AI - Update restart ($env:USERNAME)"` (PowerShell; one
+     task per Windows user) exists and its action names the canary install's `auto_restart.py`
    - a new conversation says nothing about updates, and an ordinary request answers normally
    - after 15 idle minutes `system/data/logs/auto_restart.txt` has NO new "restarted" line (a
      version installed at startup owes no restart)
@@ -127,7 +127,8 @@ Then watch both automatic paths:
    ends `installed; reopened: yes`.
 
 **Afterwards, on the maintainer's machine only:** point Claude Desktop back at the usual copy and
-remove the canary's task (`schtasks /Delete /TN "Vaulter AI - Update restart" /F`), otherwise it
+remove the canary's task (`schtasks /Delete /TN "Vaulter AI - Update restart ($env:USERNAME)" /F`
+in PowerShell), otherwise it
 keeps restarting Claude Desktop for the canary install.
 
 *Why this and not "it looks fine":* nobody is asked any more, so the canary is the only place a

@@ -1226,18 +1226,23 @@ parts; the design, with the reasoning, is `docs/superpowers/specs/2026-11-19-aut
    `data/startup_installed.json`, so the task does not then restart Claude for a version the server
    already loaded. Results go to `data/logs/vaulter.log` and `data/logs/auto_install.txt`.
 2. **A scheduled task restarts Claude Desktop.** `scripts/auto_restart.py`, task "Vaulter AI -
-   Update restart" every 15 minutes, 60-minute time limit, interactive logon (idle time and the
+   Update restart (<Windows user name>)" (one per user: task names are machine-wide) every 15
+   minutes, 60-minute time limit, interactive logon as the full account name (idle time and the
    Store relaunch only work in the person's own session). Hourly it checks the channel; when an
    update is owed and the computer has been idle 15 minutes it stops Claude Desktop's process tree,
    installs (pip limited to 300 s), and reopens it. Desktop's main process is the one Desktop
    process with no Electron `--type=`; none or several and nothing is stopped; it is listed again
    just before stopping and stopped only if the same pid AND start time is still Desktop. The exit
-   wait is 30 s of wall time. Claude Code is never touched.
+   wait is 30 s of wall time for THAT process tree only, and Desktop is confirmed to have come back
+   (60 s, one more try, then an `[ERROR]`). Claude Code is never touched.
 3. **Chat stays silent, but only where that is verified.** `_auto_update_active()` = Windows, not a
-   development copy, and `_RESTART_TASK_OK`: `_ensure_restart_task` reads the existing task's action
-   and re-registers it (`-Force`) when it is missing or names another copy's `auto_restart.py`,
-   and only a verified match makes the install "active". A failed registration is one `log.error`
-   per process, so it reaches the team, and that machine keeps the old ask-first wording. On active
+   development copy, and `_RESTART_TASK_OK`: `_ensure_restart_task` reads the existing task and
+   re-registers it (`-Force`) when it is missing or differs in runner, script, interval, time limit
+   or logon type (`_task_matches`), and only a verified match makes the install "active". A match
+   is remembered for the day (`data/restart_task.json`), and the check runs in a worker a tool answer
+   waits on for at most 4 s (one query measured 6.2-6.7 s). No `pythonw.exe` means no task (a
+   console would open every 15 minutes). A failed registration is one `log.error` a day, so it
+   reaches the team without repeating at every start, and that machine keeps the ask-first wording. On active
    installs `check_for_update` says a waiting update "will install automatically; say nothing",
    `check_system_health` raises no update issue, and the one line asking the person to quit and
    reopen Claude (when the task gave up) appears at most once per server process.
@@ -1248,9 +1253,47 @@ the staged version (`[ERROR]`; a cheap guard, since the marker itself is not sig
 `data/apply.lock` (stale after 900 s); backs up every program file; and puts the backup back, with
 one `[ERROR]` naming only the version, when the install raises, when its dependencies fail to
 install (the old `requirements.txt` comes back, so the next attempt runs pip again), or when the new
-code cannot be imported (`import mcp_server` in a child process, 120 s, 45 s at startup). An
-unfinished install leaves a note and a backup that the next start restores; that recovery takes
-the same lock, and the startup CLI waits up to 60 s for a fresh lock to clear first.
+code cannot be imported (`import config`, `import mcp.server.fastmcp` and `import mcp_server` in a
+child process, 120 s, 45 s at startup; in that child, creating a folder outside the install does
+nothing, so a release being tested never adds folders to the team folder). An unfinished install
+leaves a note and a backup that the next start restores; that recovery takes the same lock, and the
+startup CLI waits up to 60 s for a fresh lock to clear first.
+
+**Hardening pass (2026-11-19): what makes an error pop up, reproduced and prevented.**
+`check_auto_update.py` section 6 reproduces each with real files in temp folders (a real read-only
+attribute, a real open handle, a real 225-character path) and stubs for the rest; the full scenario
+table is in this pass's report (`.superpowers/hardening-report.md`, kept out of git). What now holds:
+* **File operations survive Windows** (`_unlink`, `_copy`, `_rmtree`, `_long` in `apply_update.py`):
+  a read-only file is made writable, a file held open by antivirus or a preview is retried for about
+  4 s, every path goes through the `\\?\` prefix (long paths are OFF by default, and off on the
+  maintainer's machine; a 183-character install put its backup at about 270 characters and the backup
+  failed outright), and an emptied folder that cannot be removed is left rather than failing the
+  install. Before this, a read-only file failed the install AND the restore, leaving the tree mixed.
+* **A staged package that cannot be installed is thrown away**, so the next check downloads it again:
+  missing, truncated, not shaped like a release, or failing its signature at install time. Before
+  this, the channel check saw "already downloaded" for ever and updates silently stopped on that
+  machine, while the restart task closed Claude twice for an install that was always going to refuse.
+* **Two failed installs of one version set it aside** (`data/update_failures.json`,
+  `version_set_aside`, asked by `staged_update_applicable` so installer, task and chat agree): one
+  `[ERROR]` says so, the stage is dropped, the channel check does not download it again, and a
+  different version (or the same one re-published with a new signature) is tried normally. Before
+  this, a release whose dependencies could not install offline was retried at every Claude start.
+* **The startup install has a budget** (`STARTUP_BUDGET_SECONDS` 100 inside main.py's 120): work that
+  could not finish in what is left is left for the idle restart, so the installer is never killed
+  half way. **The lock knows its holder**: a lock naming a dead process, or dated in the future (the
+  clock was put back), no longer makes every start wait 60 s. An unreadable unfinished-install note is
+  no longer an `[ERROR]` at every start; with exactly one complete backup it is still recovered.
+* **PowerShell is called by its full path and read as UTF-8** in the server count: with the console
+  code page, an install path with a letter like "é" never matched, so a running server went unseen
+  (reproduced on a real practice install under `vlt test 'é`: old code False, new code True).
+* **The restart task**: never restarts for a broken or set-aside stage; waits only for the main
+  process's own tree (an orphaned helper from an older Desktop had blocked the install for good);
+  installs nothing if the person reopened Claude during the wait; reopens a classic install through
+  its stable launcher (`AnthropicClaude\claude.exe`, which survives a Desktop self-update); confirms
+  the reopen; ignores idle time from before a sleep on the first run after waking (the tick count
+  runs on through sleep: 13 hours of it on the maintainer's machine that day); sends the same
+  unexpected error once a day, not every 15 minutes; and treats a negative restart count as
+  unreadable.
 
 **Decisions made at build time (builder's calls, owner can overrule):** (a) a failed install
 restores the backup, never leaves `system/` half old and half new; (b) the install mostly happens
@@ -1268,7 +1311,7 @@ Known limits: "idle" means no keyboard or mouse, so a long task Claude is runnin
 the restart; the release that carries all this still reaches each teammate the old way, once (they
 say yes and restart), and every update after it is automatic; signing the marker's own fields
 (version, force) in `release.py` is deferred, so someone with write access to the team folder could
-still re-offer an older signed release. `check_auto_update.py` holds the 292 checks.
+still re-offer an older signed release. `check_auto_update.py` holds the 362 checks.
 
 **Every published package is signed, and every instance verifies before trusting a download
 (2026-08-07).** Before this, anyone with write access to the shared OneDrive update folder —
