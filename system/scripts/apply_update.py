@@ -1236,9 +1236,11 @@ def auto_apply(project_root: Path | None = None, *, at_startup: bool = False,
             except Exception as e:
                 log.error(f"automatic update to {version} failed "
                           f"({type(e).__name__}); putting the previous version back")
+                # Counted BEFORE the restore, whose note marks the failure as
+                # counted: a process killed during the restore is still counted.
+                set_aside_after_failure(data, pending, version, "the install failed")
                 result["restored"] = _restore(project_root, backup, marker, version)
                 result["reason"] = f"the update failed and was undone ({e})"
-                set_aside_after_failure(data, pending, version, "the install failed")
                 return result
 
             if not applied.get("applied"):
@@ -1274,10 +1276,10 @@ def auto_apply(project_root: Path | None = None, *, at_startup: bool = False,
                 # next attempt sees a change and runs pip again.
                 log.error(f"automatic update to {version}: its dependencies could not be "
                           f"installed; putting the previous version back")
+                set_aside_after_failure(data, pending, version, "its dependencies could not be installed")
                 result["restored"] = _restore(project_root, backup, marker, version)
                 result["reason"] = (f"the dependencies of version {version} could not be "
                                     f"installed, so the previous version was put back")
-                set_aside_after_failure(data, pending, version, "its dependencies could not be installed")
                 return result
 
             # Can the new code even be imported? Run with the in-progress note
@@ -1286,10 +1288,10 @@ def auto_apply(project_root: Path | None = None, *, at_startup: bool = False,
             if not _smoke_test(project_root, smoke_timeout):
                 log.error(f"automatic update to {version}: the new version could not be "
                           f"started (test import failed); putting the previous version back")
+                set_aside_after_failure(data, pending, version, "the new version could not be started")
                 result["restored"] = _restore(project_root, backup, marker, version)
                 result["reason"] = (f"version {version} could not be started, so the previous "
                                     f"version was put back")
-                set_aside_after_failure(data, pending, version, "the new version could not be started")
                 return result
             _clear_in_progress(project_root)
 

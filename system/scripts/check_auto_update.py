@@ -985,7 +985,8 @@ class Env:
         if self.relaunched and self.appears and self.relaunch_ok:
             return list(self.procs)
         if self.killed and self.after_kill_seq:
-            return list(self.after_kill_seq.pop(0))
+            nxt = self.after_kill_seq.pop(0)
+            return None if nxt is None else list(nxt)
         return list(self.after_kill if self.killed else self.procs)
 
     def monotonic(self):
@@ -2454,8 +2455,9 @@ try:
                           "Interval": "PT15M", "Limit": "PT1H", "LogonType": "Interactive"})
         _out = json.dumps({"Execute": r"C:\Elsewhere\pythonw.exe", "Arguments": f'"{OURS7}"', "Count": 1,
                            "Interval": "PT15M", "Limit": "PT1H", "LogonType": "Interactive"})
-        check("7.3 M-10: the task's runner is a pythonw inside this install: accepted, no re-register",
-              ms._task_matches(_in) is True)
+        check("7.3 M-10 (re-review): another pythonw inside this install is NOT accepted by itself "
+              "(only the one beside Claude Desktop's interpreter, section 8.3)",
+              ms._task_matches(_in) is False)
         check("7.3 ...a runner that does not exist outside the install is still re-registered",
               ms._task_matches(_out) is False)
     finally:
@@ -2608,6 +2610,121 @@ with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as t:
         au.other_servers_running = _osr_real
     check("7.12 a 12 s server count leaves too little time for pip at startup: left for the idle restart",
           s.calls == 0 and "startup time" in out.getvalue(), out.getvalue().strip())
+
+
+# =============================================================================
+print("\n8. Re-review leftovers")
+
+# --- 8.1 (M-2) an install killed DURING its restore is still counted -----------------------
+with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as t:
+    root = make_tree(Path(t))
+    before = snapshot(root)
+    _sync_real = au._sync_tree
+
+    def killed_mid_restore(project_root, src):
+        raise KeyboardInterrupt("the process is ended here")          # a kill, not an exception
+
+    def breaks8(project_root):
+        (project_root / "a.py").write_text("half\n")
+        raise RuntimeError("boom")
+    au._sync_tree = killed_mid_restore
+    try:
+        with Stub(breaks8):
+            au.auto_apply(root)
+    except BaseException:
+        pass
+    finally:
+        au._sync_tree = _sync_real
+    _f = (failures_of(root) or {}).get("2.0") or {}
+    check("8.1 M-2: an install killed during its own restore is already counted",
+          _f.get("failures") == 1, str(failures_of(root)))
+    au.recover_unfinished_apply(root)
+    check("8.1 ...the next start puts it back and does not count it a second time",
+          snapshot(root) == before and ((failures_of(root) or {}).get("2.0") or {}).get("failures") == 1,
+          str(failures_of(root)))
+
+# --- 8.2 (M-4) an unreadable second listing is "cannot tell", not "the person reopened it" -----
+if ar is not None:
+    NEW_MAIN8 = row(992, 1, STORE_EXE, "2026-11-19T09:31:00.0000000-07:00")
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as t:
+        root = restart_tree(Path(t))
+        env = Env(after_kill_seq=[[NEW_MAIN8] + CLI_ROWS, None])
+        ar.main([], project_root=root, ops=env.ops())
+        check("8.2 M-4: second listing unreadable: nothing installed, but the reopen still runs",
+              "auto_apply" not in env.names() and "relaunch" in env.names(), str(env.names()))
+
+# --- 8.3 (M-10) the task's runner is the pythonw beside Claude Desktop's interpreter ------------
+_env8 = {k: os.environ.get(k) for k in ("APPDATA", "LOCALAPPDATA")}
+_rtr8 = ms._restart_task_runner
+_t8 = Path(tempfile.mkdtemp())
+try:
+    _main8 = str(Path(ms.__file__).resolve().parent / "main.py")
+    _desk = _t8 / "desk venv" / "Scripts"
+    _desk.mkdir(parents=True)
+    (_desk / "python.exe").write_bytes(b"")
+    (_desk / "pythonw.exe").write_bytes(b"")
+    (_t8 / "roaming" / "Claude").mkdir(parents=True)
+    (_t8 / "roaming" / "Claude" / "claude_desktop_config.json").write_text(json.dumps({"mcpServers": {
+        "other": {"command": r"C:\Elsewhere\python.exe", "args": [r"C:\Other\system\main.py", "mcp"]},
+        "vaulter_ai": {"command": str(_desk / "python.exe"), "args": [_main8, "mcp"]}}}))
+    _pkg = _t8 / "local" / "Packages" / "Claude_test" / "LocalCache" / "Roaming" / "Claude"
+    _pkg.mkdir(parents=True)
+    _pkg.joinpath("claude_desktop_config.json").write_text(json.dumps(
+        {"mcpServers": {"vaulter_ai": {"command": "python", "args": [_main8, "mcp"]}}}))   # relative: ignored
+    os.environ["APPDATA"] = str(_t8 / "roaming")
+    os.environ["LOCALAPPDATA"] = str(_t8 / "local")
+    _di = getattr(ms, "_desktop_interpreters", lambda: [])()
+    check("8.3 M-10: Claude Desktop's interpreter for THIS install is read from its settings",
+          [str(p).lower() for p in _di] == [str(_desk / "python.exe").lower()], str(_di))
+    _runner8 = ms._restart_task_runner()
+    check("8.3 ...and the task's runner is the pythonw beside it, not this server's own",
+          str(_runner8).lower() == str(_desk / "pythonw.exe").lower(), str(_runner8))
+    _own = Path(sys.executable).with_name("pythonw.exe")
+    _shape = {"Arguments": '"' + str(Path(ms.__file__).resolve().parent / "scripts" / "auto_restart.py") + '"',
+              "Count": 1, "Interval": "PT15M", "Limit": "PT1H", "LogonType": "Interactive"}
+    check("8.3 ...a task run by another working pythonw (this server's) is re-registered",
+          ms._task_matches(json.dumps(dict(_shape, Execute=str(_own)))) is False)
+    check("8.3 ...a task run by the pythonw beside Desktop's interpreter is kept",
+          ms._task_matches(json.dumps(dict(_shape, Execute=str(_desk / "pythonw.exe")))) is True)
+finally:
+    for k, v in _env8.items():
+        if v is None:
+            os.environ.pop(k, None)
+        else:
+            os.environ[k] = v
+    ms._restart_task_runner = _rtr8
+    shutil.rmtree(_t8, ignore_errors=True)
+
+# --- 8.4 a worker that cannot start does not silence chat for the life of the process -----------
+_s8 = {k: getattr(config, k) for k in ("DATA_DIR",)}
+_f8 = {k: getattr(ms, k, None) for k in ("_auto_update_eligible", "_RESTART_TASK_CHECKED", "_RESTART_TASK_OK",
+                                         "_RESTART_TASK_PENDING")}
+_t8b = Path(tempfile.mkdtemp())
+_start_real = threading.Thread.start
+try:
+    config.DATA_DIR = _t8b
+    ms._auto_update_eligible = lambda: True
+    ms._RESTART_TASK_CHECKED = False
+    ms._RESTART_TASK_OK = False
+    ms._RESTART_TASK_PENDING = False
+
+    def _no_start(self):
+        raise RuntimeError("can't start new thread")
+    threading.Thread.start = _no_start
+    try:
+        ms._ensure_restart_task()
+    finally:
+        threading.Thread.start = _start_real
+    check("8.4 the task check's worker fails to start: the 'still running' flag is cleared",
+          getattr(ms, "_RESTART_TASK_PENDING", True) is False and ms._update_wording_active() is False)
+finally:
+    threading.Thread.start = _start_real
+    for k, v in _s8.items():
+        setattr(config, k, v)
+    for k, v in _f8.items():
+        if v is not None:
+            setattr(ms, k, v)
+    shutil.rmtree(_t8b, ignore_errors=True)
 
 
 failed = [r for r in RESULTS if not r[1]]

@@ -6484,9 +6484,54 @@ def _restart_task_script() -> Path:
     return Path(__file__).resolve().parent / "scripts" / "auto_restart.py"
 
 
+def _desktop_interpreters() -> list:
+    """The Python(s) Claude Desktop runs THIS install's server with, read from its
+    settings files (every place setup writes them: Claude-Data, Roaming, a Store
+    package's private copy). Only absolute commands whose args name this
+    install's main.py. [] when none can be read. A few small file reads; never
+    raises."""
+    import json
+    if sys.platform != "win32":
+        return []
+    main_py = str(Path(__file__).resolve().parent / "main.py").replace("/", "\\").lower()
+    found = []
+    for base, pattern in ((os.environ.get("LOCALAPPDATA"), "Claude-Data/*/claude_desktop_config.json"),
+                          (os.environ.get("APPDATA"), "Claude/claude_desktop_config.json"),
+                          (os.environ.get("LOCALAPPDATA"),
+                           "Packages/*/LocalCache/Roaming/Claude/claude_desktop_config.json")):
+        if not base:
+            continue
+        try:
+            files = list(Path(base).glob(pattern))
+        except OSError:
+            continue
+        for f in files:
+            try:
+                servers = json.loads(f.read_text(encoding="utf-8")).get("mcpServers") or {}
+                for entry in servers.values():
+                    if not isinstance(entry, dict):
+                        continue
+                    args = [str(a).replace("/", "\\").lower() for a in (entry.get("args") or [])]
+                    cmd = Path(str(entry.get("command") or ""))
+                    if main_py in args and cmd.is_absolute() and cmd not in found:
+                        found.append(cmd)
+            except Exception:
+                continue
+    return found
+
+
 def _restart_task_runner():
-    """pythonw.exe beside this interpreter, or None. The task is never registered
-    with python.exe instead: that opens a console window every 15 minutes."""
+    """The pythonw.exe the task runs, or None. It sits beside the interpreter
+    Claude Desktop's server for this install runs (from Desktop's settings), so
+    the idle install's pip and smoke test use Desktop's environment, and a
+    Claude Code server on another Python computes the same runner instead of
+    re-registering its own (review M-10). Without such a setting, the pythonw
+    beside this server's own interpreter. Never python.exe: that opens a
+    console window every 15 minutes."""
+    for cmd in _desktop_interpreters():
+        runner = cmd.with_name("pythonw.exe")
+        if runner.is_file():
+            return runner
     runner = Path(sys.executable).with_name("pythonw.exe")
     return runner if runner.is_file() else None
 
@@ -6524,22 +6569,13 @@ def _task_matches(answer) -> bool:
 
 
 def _runner_acceptable(execute, runner) -> bool:
-    """The task's runner is fine if it is this server's pythonw.exe, or any
-    pythonw.exe that exists inside this install's own folder (its venv). Claude
-    Desktop and Claude Code may run this server under different interpreters;
-    re-registering to whichever started last made the task flip at every start
-    (review M-10, 2026-11-19)."""
+    """The task's runner is fine only if it is exactly _restart_task_runner():
+    the pythonw beside Claude Desktop's interpreter for this install. Any other
+    pythonw, even a working one inside this install, could run pip and the
+    smoke test in an environment Desktop does not use (re-review)."""
     def norm(text):
         return str(text or "").replace("/", "\\").lower().strip().strip('"')
-    if norm(execute) == norm(runner):
-        return True
-    try:
-        exe = Path(str(execute or "").strip().strip('"'))
-        install = Path(__file__).resolve().parent.parent
-        return (exe.name.lower() == "pythonw.exe" and exe.is_file()
-                and norm(exe.resolve()).startswith(norm(install) + "\\"))
-    except (OSError, ValueError):
-        return False
+    return bool(runner) and norm(execute) == norm(runner)
 
 
 def _restart_task(action: str, task: str | None = None):
@@ -6759,6 +6795,7 @@ def _ensure_restart_task() -> None:
         # Already trusted from an earlier day: the re-check needs no waiting for.
         worker.join(0 if _RESTART_TASK_OK else _RESTART_TASK_WAIT_SECONDS)
     except Exception as e:
+        _RESTART_TASK_PENDING = False       # no worker will ever answer: do not stay silent for good
         log.error(f"[AUTO UPDATE] The update-restart task could not be checked on this computer "
                   f"({type(e).__name__}), so updates here are offered in chat instead.")
 

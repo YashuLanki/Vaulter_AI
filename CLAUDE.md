@@ -1238,9 +1238,11 @@ parts; the design, with the reasoning, is `docs/superpowers/specs/2026-11-19-aut
 3. **Chat stays silent, but only where that is verified.** `_auto_update_active()` = Windows, not a
    development copy, and `_RESTART_TASK_OK`: `_ensure_restart_task` reads the existing task and
    re-registers it (`-Force`) when it is missing or differs in runner, script, interval, time limit
-   or logon type (`_task_matches`; a runner that is any existing pythonw.exe inside this install's
-   folder is accepted, so Claude Desktop and Claude Code on different Pythons do not fight over
-   it), and only a verified match makes the install "active". A match is recorded
+   or logon type (`_task_matches`). The runner is the pythonw.exe beside the interpreter Claude
+   Desktop's settings name for this install (`_desktop_interpreters`), else beside this server's
+   own, so the idle install's pip and smoke test use Desktop's environment and a Claude Code server
+   on another Python computes the same runner instead of fighting over the task. Only a verified
+   match makes the install "active". A match is recorded
    (`data/restart_task.json`) and trusted at once on later starts on ANY day, re-checked in a
    background worker once a day (a failed re-check withdraws it). An install never verified waits
    for the worker at most 4 s (one query measured 6.2-6.7 s), and **until it answers, chat says
@@ -1317,7 +1319,7 @@ Known limits: "idle" means no keyboard or mouse, so a long task Claude is runnin
 the restart; the release that carries all this still reaches each teammate the old way, once (they
 say yes and restart), and every update after it is automatic; signing the marker's own fields
 (version, force) in `release.py` is deferred, so someone with write access to the team folder could
-still re-offer an older signed release. `check_auto_update.py` holds the 389 checks.
+still re-offer an older signed release. `check_auto_update.py` holds the 397 checks.
 
 **Every published package is signed, and every instance verifies before trusting a download
 (2026-08-07).** Before this, anyone with write access to the shared OneDrive update folder —

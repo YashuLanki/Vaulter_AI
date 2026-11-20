@@ -812,14 +812,19 @@ def _run(root: Path, ops: dict, dry: bool, ignore_idle: bool, say) -> int:
             ops["sleep"](1)
         new_mains = {_key(p) for p in desktop_mains(rows) if _key(p) not in tree} if gone else set()
         reopened_meanwhile = False
+        unconfirmed = False
         if new_mains:
             # Seen once is not enough: a short-lived claude.exe with no --type=
             # (a Squirrel hook, the stub launcher) would otherwise leave Claude
             # closed (review M-4). It must still be there a few seconds later.
             ops["sleep"](REOPENED_RECHECK_SECONDS)
             again_rows = ops["list_processes"]()
-            reopened_meanwhile = again_rows is None or bool(
-                new_mains & {_key(p) for p in desktop_mains(again_rows)})
+            if again_rows is None:
+                # Cannot tell: install nothing, but go through the reopen, which
+                # only brings a Desktop that is running forward (re-review).
+                unconfirmed = True
+            else:
+                reopened_meanwhile = bool(new_mains & {_key(p) for p in desktop_mains(again_rows)})
         if not gone:
             outcome = "not installed, Claude Desktop did not close"
             # Reopen unless its main process is still there: helpers hanging on
@@ -829,6 +834,8 @@ def _run(root: Path, ops: dict, dry: bool, ignore_idle: bool, say) -> int:
                 isinstance(p, dict) and _key(p) == main_key for p in rows)
             _error(root, f"Claude Desktop did not close within {EXIT_WAIT_SECONDS} seconds for "
                          f"update {version}; nothing was installed")
+        elif unconfirmed:
+            outcome = "not installed, could not tell whether Claude Desktop was opened again"
         elif reopened_meanwhile:
             # The person came back and opened it while it was closed: installing
             # now would change files under its new server. The next idle run will.
