@@ -349,6 +349,24 @@ def _ocr_cache_save(cache_file: Path | None, pages: dict, filename: str) -> None
         log.warning(f"Could not remember scanned pages for {filename}: {e}")
 
 
+# E-signature services stamp a line of text on every page, so a SCANNED page signed through one
+# has a text layer holding only that stamp, and was read as text and never scanned (found
+# 2026-11-17: a signed PSA amendment came back as two envelope ids and a name). A page whose
+# text is nothing but such stamps plus a few stray words is treated as having no text layer.
+_ESIGN_STAMP = re.compile(r"^\s*(docusign|dotloop|authentisign|adobe sign)?\s*(envelope|transaction|document)?"
+                          r"\s*id\s*[:#]?\s*[0-9a-f-]{8,}\s*$", re.I | re.M)
+_MIN_REAL_TEXT = 40   # characters left once stamps are removed; a signature block name is ~20
+
+
+def _needs_ocr(text) -> bool:
+    """True when a page has no real text layer, only nothing or an e-signature stamp."""
+    if not text or not text.strip():
+        return True
+    if not _ESIGN_STAMP.search(text):
+        return False
+    return len(_ESIGN_STAMP.sub("", text).strip()) < _MIN_REAL_TEXT
+
+
 def _extract_pdf(path: Path, metadata: dict) -> tuple[str, dict]:
     """
     Extract each page with pdfplumber. Any individual page that yields no
@@ -375,7 +393,7 @@ def _extract_pdf(path: Path, metadata: dict) -> tuple[str, dict]:
         for page_num, page in enumerate(pdf.pages, start=1):
             text = page.extract_text()
 
-            if text and text.strip():
+            if not _needs_ocr(text):
                 full_text.append(f"[Page {page_num}]\n{text.strip()}")
             elif page_num in _remembered:
                 # Scanned on an earlier read of this exact file. Free.
