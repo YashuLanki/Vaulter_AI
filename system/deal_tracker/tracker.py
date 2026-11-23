@@ -671,7 +671,7 @@ def row_matches(row: dict) -> bool:
 
 def _name_forms(name: str) -> list[str]:
     """How a name is written in an email: lower case, company words off the end, and the part
-    before a dash ("Wilson 155 – Long Branch" is also "wilson 155")."""
+    before a dash ("Oak 120 – Pine Hollow" is also "oak 120")."""
     out = []
     for part in (name, re.split(r"\s[–—-]\s|\(", name or "")[0]):
         words = re.sub(r"[,.]", " ", str(part or "").lower()).split()
