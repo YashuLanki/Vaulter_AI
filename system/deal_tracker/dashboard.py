@@ -201,10 +201,41 @@ def add_sites(rows: list[dict], name_key: str) -> None:
             rows[i]["site"] = {"url": f"https://earth.google.com/web/search/{lat},{lon}", "rough": rough}
 
 
+def _site_record(rec: dict, d: dict) -> dict | None:
+    """
+    The record of the site a deal in progress is on: its history_id, else the one past deal its
+    name means (the whole name, then the part before " – ", then without a bracketed note). Two
+    matches, or none, give nothing: never guessed.
+    """
+    if d.get("history_id"):
+        return next((h for h in rec["deals"] if h["id"] == d["history_id"]), None)
+    name = str(d.get("property") or "")
+    tries = [name, re.split(r"\s[–—-]\s", name)[0], re.sub(r"\s*\([^)]*\)", "", name)]
+    for t in dict.fromkeys(x.strip() for x in tries if x.strip()):
+        hits = T.matches(rec, t)
+        if len(hits) == 1:
+            return hits[0]
+        if len(hits) > 1:
+            return None
+    return None
+
+
+def _land(rec: dict, d: dict, today: _dt.date) -> dict:
+    """The land facts and original purchase from the site's own record, for its page."""
+    h = _site_record(rec, d)
+    if not h:
+        return {}
+    r = deal_row(h, today)
+    keys = ["type", "size", "cross_streets", "apn", "zoning", "density", "lots", "lot_sizes"]
+    if d.get("type") == "Disposition":   # a purchase is this deal itself, not an earlier one
+        keys += ["acquired", "acquired_approx", "purchase_price"]
+    return {k: r[k] for k in keys if r.get(k) not in (None, "", False)}
+
+
 def build_payload(rec: dict, today: _dt.date | None = None, book: Path | None = None) -> dict:
     today = today or _dt.date.today()
     deals = [deal_row(d, today) for d in rec["deals"]]
-    pipeline = [pipeline_row(d, today) for d in rec.get("pipeline") or []]
+    pipeline = [{**pipeline_row(d, today), "land": _land(rec, d, today)} for d in rec.get("pipeline") or []]
     add_sites(deals, "name")
     add_sites(pipeline, "property")
     return {"built": today.isoformat(), "book_url": web_address(book) if book else "",
@@ -233,7 +264,15 @@ def write(rec: dict, folder: Path | None = None, today: _dt.date | None = None) 
         T.save(rec)
     payload = build_payload(rec, today, book)
     html = TEMPLATE.read_text(encoding="utf-8")
-    data = json.dumps(payload, separators=(",", ":"), ensure_ascii=False, default=str).replace("</", "<\\/")
+    # The page shows deals in progress only (owner, 2026-11-23): past deals and returns stay in the
+    # record and the Excel copy, but are not sent to the page.
+    page_data = {k: v for k, v in payload.items() if k not in ("deals", "returns")}
+    # "What changed" keeps only the deals in progress: a change logged under the deal's own name or
+    # under the name of the site's record it is linked to.
+    live = {str(d.get("property") or "") for d in rec.get("pipeline") or []}
+    live |= {h["name"] for d in rec.get("pipeline") or [] for h in [_site_record(rec, d)] if h}
+    page_data["updates"] = [u for u in payload.get("updates") or [] if u.get("deal") in live]
+    data = json.dumps(page_data, separators=(",", ":"), ensure_ascii=False, default=str).replace("</", "<\\/")
     html = html.replace("/*__DATA__*/", "const DATA=" + data + ";")
     page = folder / PAGE_NAME
     _swap(page, lambda tmp: tmp.write_text(html, encoding="utf-8"))

@@ -7,7 +7,7 @@
 <style>
 /* The mini term sheet's palette (slate, gold, serif headings, mono figures),
    laid out for finding things: one search, a sidebar of every group, what is coming
-   up, and a side panel for a deal. No external fonts or scripts: the page opens
+   up, and a full page for each site. No external fonts or scripts: the page opens
    from the team folder with no network. */
 :root{
   --bg:#f4f5f3; --surface:#ffffff; --surface-2:#f0f2f1; --surface-3:#e6eae9; --ink:#1d2627; --muted:#5f6c6d; --faint:#8b9798;
@@ -119,15 +119,40 @@ select{padding:8px 11px;border:1px solid var(--line);border-radius:8px;backgroun
 .seg button{border:0;background:none;padding:8px 14px;font-weight:600;color:var(--muted);cursor:pointer}
 .seg button[aria-pressed=true]{background:var(--gold);color:var(--gold-ink)}
 
-.veil{position:fixed;inset:0;background:rgba(15,22,22,.35);z-index:40;opacity:0;pointer-events:none;transition:opacity .15s}
-.veil.on{opacity:1;pointer-events:auto}
-aside.drawer{position:fixed;top:0;right:0;bottom:0;width:min(520px,100vw);background:var(--bg);z-index:50;box-shadow:-8px 0 30px rgba(0,0,0,.15);transform:translateX(100%);transition:transform .2s;display:flex;flex-direction:column}
-aside.drawer.on{transform:none}
-.drawer .dh{background:var(--slate);color:#fff;padding:16px 18px;border-bottom:3px solid var(--gold);display:flex;gap:10px;align-items:flex-start}
-.drawer .dh h2{font-family:var(--display);font-size:21px;line-height:1.2}
-.drawer .dh .x{margin-left:auto;border:1px solid rgba(255,255,255,.3);background:none;color:#fff;border-radius:8px;padding:4px 10px;cursor:pointer}
-.drawer .db{overflow:auto;padding:16px 18px;display:grid;gap:14px;align-content:start}
-.drawer h3{font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-weight:600;margin-bottom:6px}
+/* One full page per site, over the whole dashboard, with Back in the top corner (owner, 2026-11-19).
+   It replaced the side panels; the Home chart's year detail uses it too. */
+.sitepage{position:fixed;inset:0;z-index:60;background:var(--bg);overflow:auto}
+.sitepage[hidden]{display:none}
+.sp-top{position:sticky;top:0;z-index:2;background:var(--slate);color:#fff;border-bottom:3px solid var(--gold)}
+.sp-top .in{max-width:1180px;margin:0 auto;padding:12px 20px;display:flex;gap:14px;align-items:center}
+.back{display:inline-flex;align-items:center;gap:8px;border:1px solid rgba(255,255,255,.3);background:none;color:#fff;border-radius:9px;padding:7px 14px;cursor:pointer;font-weight:600}
+.back:hover,.back:focus-visible{background:rgba(255,255,255,.12);outline:none}
+.sp-top .crumb{font-size:12px;letter-spacing:.08em;text-transform:uppercase;opacity:.75}
+.sp-body{max-width:1180px;margin:0 auto;padding:24px 20px 64px;display:grid;gap:18px}
+.sp-head h2{font-family:var(--display);font-size:30px;line-height:1.15}
+.sp-head .meta{color:var(--muted);margin-top:6px;display:flex;flex-wrap:wrap;gap:8px 14px;align-items:center}
+.sp-head .site{margin-top:0;font-size:13px}
+.sp-body .kpis{margin-bottom:0}
+.sp-body .kpi .val{font-size:22px}
+.sp-cols{display:grid;grid-template-columns:minmax(0,1.45fr) minmax(0,1fr);gap:18px;align-items:start}
+.sp-side{display:grid;gap:18px}
+@media (max-width:900px){.sp-cols{grid-template-columns:1fr}}
+.sitepage h3{font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-weight:600;margin-bottom:6px}
+.sitepage .body>details{border-top:1px solid var(--line);padding-top:8px}
+/* The timeline: a dot per event on one line, oldest first. Planned dates are hollow. */
+.tl{list-style:none;margin:0;padding:6px 0 0}
+.tl li{position:relative;display:grid;grid-template-columns:104px minmax(0,1fr) auto;gap:2px 14px;padding:0 0 18px 24px}
+.tl li::before{content:"";position:absolute;left:4px;top:5px;width:10px;height:10px;border-radius:50%;background:var(--faint);box-shadow:0 0 0 3px var(--surface)}
+.tl li::after{content:"";position:absolute;left:8px;top:18px;bottom:2px;width:2px;background:var(--line)}
+.tl li:last-child{padding-bottom:4px} .tl li:last-child::after{display:none}
+.tl li.buy::before{background:var(--s1)} .tl li.sale::before,.tl li.end::before{background:var(--s3)}
+.tl li.now::before{background:var(--gold)} .tl li.plan::before{background:var(--surface);border:2px solid var(--faint)}
+.tl .d{color:var(--muted);font-size:12px;padding-top:1px;white-space:nowrap}
+.tl .t{font-weight:600}
+.tl .x{grid-column:2 / -1;color:var(--muted);font-size:13px}
+.tl .a{font-family:var(--mono);font-weight:600;text-align:right;white-space:nowrap}
+.tl .chip{display:inline-block;margin-left:6px;font-size:11px;font-weight:600;border-radius:999px;padding:0 7px;background:var(--surface-3);color:var(--muted);vertical-align:1px}
+@media (max-width:600px){.tl li{grid-template-columns:1fr auto}.tl .d{grid-column:1 / -1}}
 .kv{display:grid;grid-template-columns:150px 1fr;gap:0}
 .kv dt,.kv dd{margin:0;padding:7px 0;border-top:1px solid var(--line)}
 .kv dt{color:var(--muted);font-size:12px;font-weight:600;padding-right:10px}
@@ -139,7 +164,6 @@ aside.drawer.on{transform:none}
 .note{font-size:12px;color:var(--muted)}
 .site{display:inline-block;margin-top:4px;font-size:12px;font-weight:600;color:var(--info);text-decoration:none}
 .site:hover{text-decoration:underline}
-.drawer .site{font-size:13px;border:1px solid var(--line);border-radius:8px;padding:6px 12px;background:var(--surface)}
 .app{max-width:1400px;margin:0 auto;padding:22px 20px 56px;display:grid;grid-template-columns:232px minmax(0,1fr);gap:24px;align-items:start}
 .side{position:sticky;top:16px;display:grid;gap:16px}
 .navcard{background:var(--surface);border:1px solid var(--line);border-radius:14px;box-shadow:var(--shadow);padding:10px;border-top:3px solid var(--slate)}
@@ -228,10 +252,9 @@ table.pt{table-layout:fixed;min-width:760px}
 </div></header>
 
 <div class="app">
-  <!-- Two separate cards, so Past deals never reads as part of Deals in progress (owner, 2026-11-17). -->
+  <!-- Deals in progress only: Past deals and the progress chart were removed (owner, 2026-11-23). -->
   <aside class="side" aria-label="Deal groups">
     <nav class="navcard" aria-label="Deals in progress"><p class="sh">Deals in progress</p><div class="navlist" id="snav-p"></div></nav>
-    <nav class="navcard" aria-label="Past deals"><p class="sh">Past deals</p><div class="navlist" id="snav-h"></div></nav>
   </aside>
   <main class="main">
     <p class="note" id="xlsxnote" hidden style="margin-bottom:12px"></p>
@@ -242,9 +265,6 @@ table.pt{table-layout:fixed;min-width:760px}
         <div class="box needs" id="needsbox" hidden><header><h2>Needs a look<span class="c" id="needn"></span></h2><span class="small muted">ask Claude to settle one; the tracker learns for next time</span></header><div class="body"><div id="needs"></div><details id="learnedwrap" hidden><summary id="learnedsum">What the tracker has learned</summary><div id="learned"></div></details></div></div>
       </div>
       <div id="phome">
-        <div class="box prog" id="progbox"><header><h2>Vaulter's progress</h2><span class="small muted">capital invested and returned, all time; point at a year for detail, click it for its deals</span></header>
-          <div class="body"><div class="kpis" id="progk"></div><div class="legend" id="proglg"></div><div class="chartwrap" id="progc"></div>
-          <details class="ptable"><summary class="small muted">Show as a table</summary><div class="scroll" id="progt"></div></details></div></div>
         <div class="box changes"><header><h2>What changed</h2><span class="small muted" id="chn"></span></header><div class="body" id="changes"></div></div>
         <div class="pair">
           <div class="box"><header><h2>Coming up</h2><span class="small muted" id="csub"></span></header><div class="body" id="coming"></div></div>
@@ -253,23 +273,12 @@ table.pt{table-layout:fixed;min-width:760px}
       </div>
       <div id="psecs" hidden></div>
     </section>
-    <section class="view" data-view="history" hidden>
-      <div class="bar">
-        <!-- Drag to show only deals the firm had in the last N years; the far right is all time. -->
-        <div class="slide" id="period"><label for="yrs">Deals we had</label><input type="range" id="yrs" min="1" max="1" step="1" value="1" aria-label="How many years back"><b id="yrsv">All time</b></div>
-        <div style="display:flex;gap:10px;align-items:center"><span class="small muted" id="periodnote"></span><span class="hfilt" id="hfilt" hidden><select id="hstate" aria-label="State"><option value="">All states</option></select><span class="small muted" id="hcount"></span></span></div>
-      </div>
-      <!-- Past deals' Home is the summary; each status in the sidebar is a page with its list. -->
-      <div id="hhome">
-        <div class="kpis" id="hk"></div>
-        <div class="box"><header><h2>Returns on sold deals</h2><span class="small muted">deals fully exited in each period</span></header><div class="body scroll"><table><thead><tr><th>Period</th><th class="r">Deals</th><th class="r">Contributions</th><th class="r">Distributions</th><th class="r" title="Distributions divided by contributions">Cash multiple</th><th class="r" title="Each deal's IRR weighted by its share of the profit, as in the old spreadsheet">IRR</th></tr></thead><tbody id="ret"></tbody></table></div></div>
-      </div>
-      <div class="box" id="hlist" hidden><header><h2 id="htitle"></h2></header><div class="scroll"><table><thead><tr id="hhead"></tr></thead><tbody id="hrows"></tbody></table></div></div>
-    </section>
   </main>
 </div>
-<div class="veil" id="veil"></div>
-<aside class="drawer" id="drawer" aria-hidden="true"><div class="dh"><div id="dtitle"></div><button class="x" id="dclose" type="button">Close</button></div><div class="db" id="dbody"></div></aside>
+<div class="sitepage" id="sitepage" role="dialog" aria-modal="true" aria-labelledby="sptitle" hidden>
+  <div class="sp-top"><div class="in"><button class="back" id="spback" type="button" aria-label="Back to the dashboard">← Back</button><span class="crumb" id="spcrumb"></span></div></div>
+  <div class="sp-body" id="spbody"></div>
+</div>
 
 <script>
 /*__DATA__*/
@@ -289,7 +298,7 @@ table.pt{table-layout:fixed;min-width:760px}
     if (approx || !m) return `<span title="Year only">${y}</span>`;
     return new Date(y, m-1, d).toLocaleDateString("en-US", {year:"numeric", month:"short", day:"numeric"}); };
   const today = new Date(DATA.built + "T00:00:00");
-  const H = DATA.deals, P = DATA.pipeline || [];
+  const P = DATA.pipeline || [];
   $("#when").textContent = `Refreshed ${DATA.built_at}`;
   if (DATA.inbox_warning) { $("#inwarn").textContent = DATA.inbox_warning; $("#inwarn").hidden = false; }
   {
@@ -305,39 +314,78 @@ table.pt{table-layout:fixed;min-width:760px}
     $("#needsbox").hidden = !att.length && !les.length;
   }
 
-  // ── Side panel ──
-  function openDrawer(title, html){
-    $("#dtitle").innerHTML = title; $("#dbody").innerHTML = html;
-    $("#drawer").classList.add("on"); $("#veil").classList.add("on"); $("#drawer").setAttribute("aria-hidden", "false");
-    $("#dbody").scrollTop = 0; $("#dclose").focus();
+  // ── Site page ──
+  // One full page over the dashboard (owner, 2026-11-19). Opening it adds a step to the browser's
+  // history, so the Back button on the page, the browser's back button and Escape all return to the
+  // dashboard exactly where it was; the dashboard underneath never moves.
+  // Each page has a key: p-<id>, a deal in progress. The page keeps its own list of the pages
+  // opened, so Back walks back through them in order whatever the browser does. It adds one step to
+  // the browser's history, so the browser's back button closes the page too; a page opened from a
+  // link (#p-…) adds none.
+  let stack = [], pushed = false, routing = false;
+  function openPage(crumb, html, key){
+    $("#spcrumb").textContent = crumb; $("#spbody").innerHTML = html;
+    const sp = $("#sitepage"); sp.hidden = false; sp.scrollTop = 0; document.body.style.overflow = "hidden";
+    if (!routing) {
+      stack.push(key);
+      if (!pushed) { history.pushState({page: true}, "", "#" + key); pushed = true; }
+      else history.replaceState({page: true}, "", "#" + key);
+    }
+    $("#spback").focus();
   }
-  function closeDrawer(){ $("#drawer").classList.remove("on"); $("#veil").classList.remove("on"); $("#drawer").setAttribute("aria-hidden", "true"); }
-  $("#dclose").onclick = closeDrawer; $("#veil").onclick = closeDrawer;
-  document.addEventListener("keydown", e => { if (e.key === "Escape") { closeDrawer(); $("#results").hidden = true; } });
+  function hidePage(){ $("#sitepage").hidden = true; document.body.style.overflow = ""; stack = []; }
+  const route = key => { const [k, id] = [key.slice(0, 2), key.slice(2)];
+    routing = true;
+    try { if (k === "p-") showP(id); } finally { routing = false; } };
+  function goBack(){
+    if ($("#sitepage").hidden) return;
+    stack.pop();
+    const prev = stack[stack.length - 1];
+    if (prev) { route(prev); history.replaceState({page: true}, "", "#" + prev); return; }
+    hidePage();
+    if (pushed) { pushed = false; history.back(); }
+    else history.replaceState(null, "", location.pathname + location.search);
+  }
+  addEventListener("popstate", () => { if (pushed) { pushed = false; hidePage(); } });
+  $("#spback").onclick = goBack;
+  document.addEventListener("keydown", e => { if (e.key === "Escape") { goBack(); $("#results").hidden = true; } });
   const kv = (l, v) => v == null || v === "" ? "" : `<dt>${l}</dt><dd>${v}</dd>`;
-  const fig = (l, v) => `<div class="fig"><div class="lab">${l}</div><div class="v">${v}</div></div>`;
+  const card = (title, inner, sub) => inner ? `<div class="box"><header><h2>${title}</h2>${sub ? `<span class="small muted">${sub}</span>` : ""}</header><div class="body">${inner}</div></div>` : "";
+  const kvl = rows => rows.join("") ? `<dl class="kv">${rows.join("")}</dl>` : "";
+  const tiles = l => `<div class="kpis">${l.map(([lab, val, sub]) => `<div class="kpi"><span class="lab">${lab}</span><span class="val">${val}</span>${sub ? `<span class="sub">${sub}</span>` : ""}</div>`).join("")}</div>`;
   const srcList = s => Object.keys(s || {}).length ? `<details><summary class="small muted" style="cursor:pointer">Where each figure came from</summary><ul class="plain small">${Object.entries(s).map(([k, v]) => `<li><b>${txt(k.replace(/_/g, " "))}:</b> ${txt(v)}</li>`).join("")}</ul></details>` : "";
+  // The story of a site, oldest first. Each event: {date, title, amount?, detail?, kind: buy|sale|end|now|upd, chip?}.
+  // A date after today is planned: drawn hollow and labelled so.
+  const KORD = {buy: 0, sale: 1, end: 2, upd: 3, now: 4};
+  // The site page spells out the team's short forms (no jargon, owner 2026-11-19).
+  const plain = s => String(s == null ? "" : s).replace(/\bPSA\b/g, "purchase contract").replace(/\bLOI\b/g, "offer")
+    .replace(/\bDD\b/g, "due diligence").replace(/\bAPN\b/g, "parcel number").replace(/\bEMD\b/g, "earnest money")
+    .replace(/\bALTA\b/g, "survey").replace(/\/\s?SF\b/g, " per square foot").replace(/\/\s?(net|gross) ac\b/g, " per $1 acre").replace(/\/\s?ac\b/g, " per acre")
+    .replace(/(\d) (net |gross )?ac\b/g, "$1 $2acres");
+  function timeline(ev){
+    const l = ev.filter(e => e.date).sort((a, b) => String(a.date).localeCompare(String(b.date)) || KORD[a.kind] - KORD[b.kind]);
+    if (!l.length) return '<p class="empty">No dated events in the record yet.</p>';
+    return `<ol class="tl">${l.map(e => { const plan = e.kind !== "now" && String(e.date) > DATA.built;
+      return `<li class="${plan ? "plan" : e.kind}"><span class="d">${fmtD(e.date, e.approx || String(e.date).length === 4)}</span>`
+        + `<span class="t">${e.title}${plan ? '<span class="chip">planned</span>' : e.chip ? `<span class="chip">${e.chip}</span>` : ""}</span>`
+        + `<span class="a">${e.amount == null ? "" : money(e.amount)}</span>${e.detail ? `<span class="x">${e.detail}</span>` : ""}</li>`; }).join("")}</ol>`;
+  }
+  // The tracker's own log for a site: what changed in the record and why. A sale or purchase it
+  // logged is already its own event, so it is not listed twice.
+  const logFor = names => (DATA.updates || []).filter(u => names.includes(u.deal) && !/^(Sold|Bought)\b/.test(u.what))
+    .map(u => ({date: u.date, kind: "upd", title: "Record updated", detail: figs(u.what) + (u.why ? `. Why: ${figs(u.why)}` : "")}));
 
   // ── Tabs ──
-  let pgroup = "", hstatus = "";
-  function view(name){
-    $$("section.view").forEach(s => s.hidden = s.dataset.view !== name);
-    mark(name);
-    try { localStorage.setItem("dt-view", name); } catch (e) {}
-  }
-  function mark(name){
-    $$(".navlist button").forEach(b => b.setAttribute("aria-current",
-      b.dataset.view === name && (name === "pipeline" ? b.dataset.k === pgroup : b.dataset.k === hstatus)));
-  }
+  let pgroup = "";
+  function mark(){ $$(".navlist button").forEach(b => b.setAttribute("aria-current", b.dataset.k === pgroup)); }
   // Sidebar entries carry no counts (owner, 2026-11-17); a gold dot only where something waits on a person.
   const navBtn = (v, k, label, o = {}) => `<button type="button" data-view="${v}" data-k="${k}"${o.home ? ' class="all"' : ""}><span>${label}</span>${o.dot ? '<span class="dot" title="Waiting on a person"></span>' : ""}</button>`;
   // Deals in progress: Home is what changed, what is coming up and open items; every other entry is its own page.
   const hasNeeds = (DATA.attention || []).length || (DATA.lessons || []).length;
   const pnav = more => { $("#snav-p").innerHTML = navBtn("pipeline", "", "Home", {home: true})
     + (hasNeeds ? navBtn("pipeline", "needs", "Needs a look", {dot: (DATA.attention || []).length > 0}) : "") + more; };
-  let progDraw = () => {};   // the Home chart; drawn when Home is shown, since it sizes itself to the page
-  const ppage = () => { $("#phome").hidden = pgroup !== ""; $("#pneeds").hidden = pgroup !== "needs"; $("#psecs").hidden = !pgroup || pgroup === "needs"; if (pgroup === "") progDraw(); };
-  let draw = () => { pnav(""); ppage(); mark($('section[data-view="pipeline"]').hidden ? "history" : "pipeline"); };
+  const ppage = () => { $("#phome").hidden = pgroup !== ""; $("#pneeds").hidden = pgroup !== "needs"; $("#psecs").hidden = !pgroup || pgroup === "needs"; };
+  let draw = () => { pnav(""); ppage(); mark(); };
 
   // ══ PIPELINE ══
   // What each stage, date and term is called on the page. The record keeps the team's own names.
@@ -399,7 +447,7 @@ table.pt{table-layout:fixed;min-width:760px}
         + (terms.length && pgroup === "terms" ? `<details class="sec box" id="s-terms" open><summary><h2>Deal terms</h2><span class="small muted">latest document on each deal</span><span class="chev">›</span></summary>
           <div class="terms"><table><thead><tr><th class="k"></th>${terms.map(d => `<th>${txt(d.property)}</th>`).join("")}</tr></thead><tbody>${TERMS.map(t => `<tr><td class="k">${TW[t] || t}</td>${terms.map(d => `<td>${txt(d.terms[t]) || '<span class="faint">Not stated</span>'}</td>`).join("")}</tr>`).join("")}</tbody></table></div></details>` : "");
       $$("tr[data-pid]").forEach(tr => tr.onclick = () => showP(tr.dataset.pid));
-      mark($('section[data-view="pipeline"]').hidden ? "history" : "pipeline");
+      mark();
     };
 
     const upcoming = dl.slice().sort((a, b) => a.days_out - b.days_out);
@@ -408,123 +456,7 @@ table.pt{table-layout:fixed;min-width:760px}
   } else {
     $("#coming").innerHTML = '<p class="empty">The pipeline has not been loaded yet.</p>';
   }
-  // ══ PROGRESS (Home) ══
-  // Deals held at each year end, worked out from the record alone: bought by that year and not fully
-  // exited by it. A deal with no purchase date, or fully exited with no sale date, cannot be placed in
-  // a year, so it is left out of the bars and the note says how many. The current year also stacks the
-  // acquisitions in progress on top. Hover a year for its detail; click it for its deals.
-  {
-    const yr = iso => iso ? Number(String(iso).slice(0, 4)) : null;
-    const nowY = today.getFullYear();
-    const past = H.filter(d => d.status !== "Being acquired");
-    const placed = past.filter(d => d.acquired && !(d.status === "Fully exited" && !d.last_sale));
-    const inProg = P.filter(d => d.type === "Acquisition" && ACTIVE.includes(d.stage));
-    const first = placed.length ? Math.min(...placed.map(d => yr(d.acquired))) : null;
-    const tile = (lab, val, sub) => `<div class="kpi"><span class="lab">${lab}</span><span class="val">${val}</span>${sub ? `<span class="sub">${sub}</span>` : ""}</div>`;
-    const partly = H.filter(d => d.status === "Partially sold").length;
-    $("#progk").innerHTML = tile("Held now", H.filter(d => ["Owned", "Partially sold"].includes(d.status)).length, partly ? `${partly} partly sold` : "")
-      + tile("Fully exited", H.filter(d => d.status === "Fully exited").length, "")
-      + tile("Being acquired now", inProg.length, inProg.length === 1 ? "deal in progress" : "deals in progress")
-      + tile("Investing since", first || '<span class="ng">not given</span>', first ? `${nowY - first} years` : "");
-    const tot = (l, k) => l.reduce((a, d) => a + (d[k] || 0), 0);
-    if (!first) {
-      $("#progc").innerHTML = '<p class="empty">No purchase dates in the record yet, so there is nothing to chart.</p>';
-    } else {
-      const rows = [];
-      for (let y = first; y <= nowY; y++) {
-        const held = placed.filter(d => yr(d.acquired) <= y && !(d.status === "Fully exited" && yr(d.last_sale) <= y));
-        const bought = placed.filter(d => yr(d.acquired) === y);
-        const boughtHeld = held.filter(d => yr(d.acquired) === y).length;
-        rows.push({y, held: held.length, earlier: held.length - boughtHeld, bought: boughtHeld, boughtAll: bought,
-                   cumBought: placed.filter(d => yr(d.acquired) <= y).length,
-                   cumOut: placed.filter(d => d.status === "Fully exited" && yr(d.last_sale) <= y).length,
-                   cumIn: tot(placed.filter(d => yr(d.acquired) <= y), "contributions"),
-                   cumBack: tot(placed.filter(d => d.status === "Fully exited" && yr(d.last_sale) <= y), "distributions"),
-                   out: placed.filter(d => d.status === "Fully exited" && yr(d.last_sale) === y), prog: y === nowY ? inProg : []});
-      }
-      // Running totals in dollars (owner, 2026-11-17: the chart should show the firm moving forward, and
-      // small deal counts on an axis undersell land deals). Capital invested is each deal's contributions,
-      // counted from the year it was bought; capital returned is a fully exited deal's distributions,
-      // counted from the year of its last sale. Both only rise, which is the truth of them. No axis numbers:
-      // each line is labelled where it ends, and the tooltip and table give every year's figures.
-      const SER = [["cumIn", "Capital invested, all time", "var(--s1)"], ["cumBack", "Capital returned from full exits, all time", "var(--s3)"]];
-      const val = (r, k) => r[k];
-      $("#proglg").innerHTML = SER.map(([, l, c]) => `<span><i style="background:${c}"></i>${l}</span>`).join("");
-      // All-time totals across every past deal, dated or not: what the line ends are labelled with.
-      const ALL = {cumIn: tot(past, "contributions"), cumBack: tot(past.filter(d => d.status === "Fully exited"), "distributions")};
-      const names = (l, k) => !l.length ? "" : txt(l.slice(0, 4).map(d => d[k]).join(", ")) + (l.length > 4 ? `, and ${l.length - 4} more` : "");
-      const tipHtml = r => `<b>${r.y}</b><div class="r"><span>Capital invested to date</span><b class="num" style="font-size:13px">${moneyT(r.cumIn)}</b></div>`
-        + `<div class="r"><span>Capital returned to date</span><span class="num">${moneyT(r.cumBack)}</span></div>`
-        + `<div class="r"><span>Deals held at year end</span><span class="num">${r.held}</span></div>`
-        + (r.boughtAll.length ? `<div class="r" style="border-top:1px solid var(--line);padding-top:4px;margin-top:6px"><span>Bought this year</span><span class="num">${r.boughtAll.length}</span></div><div class="names">${names(r.boughtAll, "name")}</div>` : "")
-        + (r.out.length ? `<div class="r"><span>Fully exited this year</span><span class="num">${r.out.length}</span></div><div class="names">${names(r.out, "name")}</div>` : "")
-        + (r.prog.length ? `<div class="r"><span>Being acquired now</span><span class="num">${r.prog.length}</span></div><div class="names">${names(r.prog, "property")}</div>` : "")
-        + (r.y === nowY && (ALL.cumIn !== r.cumIn || ALL.cumBack !== r.cumBack)
-          ? `<div class="names" style="margin-top:6px">All time, including deals with no date: ${moneyT(ALL.cumIn)} invested, ${moneyT(ALL.cumBack)} returned</div>` : "")
-        + `<div class="names" style="margin-top:6px">Click for this year's deals</div>`;
-      const openYear = r => {
-        const li = (l, k, fn) => l.map(d => `<li><a href="#" data-${fn}="${d.id}">${txt(d[k])}</a></li>`).join("");
-        const part = (h, l, k, fn) => l.length ? `<div><h3>${h}</h3><ul class="plain" style="margin:0">${li(l, k, fn)}</ul></div>` : "";
-        openDrawer(`<div class="small" style="opacity:.8">Vaulter's progress</div><h2>${r.y}</h2>`,
-          `<div class="figs">${fig("Held at year end", r.held)}${fig("Bought", r.boughtAll.length)}${fig("Fully exited", r.out.length)}</div>`
-          + part("Bought", r.boughtAll, "name", "h") + part("Fully exited", r.out, "name", "h") + part("Being acquired now", r.prog, "property", "p")
-          + (!r.boughtAll.length && !r.out.length && !r.prog.length ? '<p class="note">No deal was bought or fully exited this year.</p>' : ""));
-        $$("#dbody a[data-h]").forEach(a => a.onclick = e => { e.preventDefault(); showH(a.dataset.h); });
-        $$("#dbody a[data-p]").forEach(a => a.onclick = e => { e.preventDefault(); showP(a.dataset.p); });
-      };
-      $("#progt").innerHTML = `<table><thead><tr><th>Year</th><th class="r">Capital invested, all time</th><th class="r">Capital returned, all time</th><th class="r">Deals held at year end</th><th class="r">Bought this year</th><th class="r">Fully exited this year</th>${inProg.length ? '<th class="r">Being acquired now</th>' : ""}</tr></thead><tbody>`
-        + rows.slice().reverse().map(r => `<tr><td>${r.y}</td><td class="r num">${moneyT(r.cumIn)}</td><td class="r num">${moneyT(r.cumBack)}</td><td class="r num">${r.held}</td><td class="r num">${r.boughtAll.length}</td><td class="r num">${r.out.length}</td>${inProg.length ? `<td class="r num">${r.prog.length || ""}</td>` : ""}</tr>`).join("") + "</tbody></table>";
-      progDraw = () => {
-        const wrap = $("#progc"), W = Math.max(320, wrap.clientWidth || 900), Ht = 230;
-        const m = {l: 14, r: 14, t: 26, b: 26}, pw = W - m.l - m.r, ph = Ht - m.t - m.b;
-        const lastR = rows[rows.length - 1];
-        const top = Math.max(1, ...rows.map(r => Math.max(r.cumIn, r.cumBack)));
-        const ymax = top * 1.12, step = ymax / 4, Y = v => m.t + ph - v / ymax * ph;   // four quiet gridlines, no numbers
-        const band = pw / rows.length, X = i => m.l + band * i + band / 2;
-        const every = Math.max(1, Math.ceil(34 / band));
-        let s = "";
-        for (let k = 0; k <= 4; k++) s += `<line class="grid" x1="${m.l}" x2="${W - m.r}" y1="${Y(step * k)}" y2="${Y(step * k)}"/>`;
-        rows.forEach((r, i) => { if ((rows.length - 1 - i) % every === 0) s += `<text class="ax" x="${X(i)}" y="${Ht - 8}" text-anchor="middle">${r.y}</text>`; });
-        s += `<line class="xh" id="pxh" x1="0" x2="0" y1="${m.t}" y2="${m.t + ph}" visibility="hidden"/>`;
-        // Soft areas under each line (bought behind, exited in front, since exits never pass purchases),
-        // 2.5px lines with round joins on top.
-        s += `<defs>${SER.map(([k, , c]) => `<linearGradient id="pg-${k}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" style="stop-color:${c};stop-opacity:.28"/><stop offset="1" style="stop-color:${c};stop-opacity:.03"/></linearGradient>`).join("")}</defs>`;
-        const line = k => rows.map((r, i) => `${i ? "L" : "M"}${X(i).toFixed(1)},${Y(val(r, k)).toFixed(1)}`).join("");
-        // The larger total today is drawn first, so the smaller area never hides behind it.
-        SER.slice().sort((a, b) => lastR[b[0]] - lastR[a[0]]).forEach(([k, , c]) => {
-          s += `<path d="${line(k)}L${X(rows.length - 1).toFixed(1)},${Y(0)}L${X(0).toFixed(1)},${Y(0)}Z" fill="url(#pg-${k})"/>`
-             + `<path d="${line(k)}" fill="none" stroke="${c}" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"/>`;
-        });
-        const last = rows.length - 1, lr = rows[last];
-        // End markers (8px+, with a surface ring) and one direct label each, where the lines reach today.
-        SER.forEach(([k, , c]) => { s += `<circle cx="${X(last)}" cy="${Y(lr[k])}" r="4.5" fill="${c}" stroke="var(--surface)" stroke-width="2"/>`; });
-        s += `<g id="pfocus"></g>`;
-        // The higher line's label sits above its end, the lower one's below, so the two never collide.
-        const [hi, lo] = SER.slice().sort((a, b) => lr[b[0]] - lr[a[0]]);
-        // The labels give the firm's true all-time totals (owner, 2026-11-17), which include deals the
-        // record cannot place in a year; the lines themselves can only plot the dated ones.
-        const word = {cumIn: "invested", cumBack: "returned"};
-        s += `<text class="tot big" x="${X(last) - 10}" y="${Y(lr[hi[0]]) - 10}" text-anchor="end">${moneyT(ALL[hi[0]])} ${word[hi[0]]}</text>`;
-        if (ALL[lo[0]]) s += `<text class="tot big" x="${X(last) - 10}" y="${Y(lr[lo[0]]) + 22}" text-anchor="end">${moneyT(ALL[lo[0]])} ${word[lo[0]]}</text>`;
-        rows.forEach((r, i) => { s += `<rect class="hit" data-i="${i}" x="${m.l + band * i}" y="${m.t}" width="${band}" height="${ph}"/>`; });
-        wrap.innerHTML = `<svg viewBox="0 0 ${W} ${Ht}" width="${W}" height="${Ht}" role="img" aria-label="Deals Vaulter held at each year end, ${rows[0].y} to ${nowY}">${s}</svg><div class="tip" id="ptip" hidden></div>`;
-        const tip = $("#ptip"), xh = $("#pxh"), focus = $("#pfocus");
-        $$("#progc .hit").forEach(h => {
-          const i = Number(h.dataset.i), r = rows[i];
-          h.addEventListener("mouseenter", () => { tip.innerHTML = tipHtml(r); tip.hidden = false;
-            xh.setAttribute("x1", X(i)); xh.setAttribute("x2", X(i)); xh.setAttribute("visibility", "visible");
-            focus.innerHTML = SER.map(([k, , c]) => `<circle cx="${X(i)}" cy="${Y(val(r, k))}" r="5" fill="${c}" stroke="var(--surface)" stroke-width="2"/>`).join(""); });
-          h.addEventListener("mousemove", e => { const b = wrap.getBoundingClientRect(), tw = tip.offsetWidth;
-            let lx = e.clientX - b.left + 14; if (lx + tw > b.width) lx = e.clientX - b.left - tw - 14; tip.style.left = Math.max(0, lx) + "px"; tip.style.top = Math.max(0, e.clientY - b.top - 20) + "px"; });
-          h.addEventListener("mouseleave", () => { tip.hidden = true; xh.setAttribute("visibility", "hidden"); focus.innerHTML = ""; });
-          h.addEventListener("click", () => openYear(r));
-        });
-      };
-      let rt; addEventListener("resize", () => { clearTimeout(rt); rt = setTimeout(() => { if (!$("#phome").hidden) progDraw(); }, 120); });
-    }
-  }
-
-  $("#snav-p").addEventListener("click", e => { const b = e.target.closest("button"); if (!b) return; pgroup = b.dataset.k; view("pipeline"); draw(); scrollTo(0, 0); });
+  $("#snav-p").addEventListener("click", e => { const b = e.target.closest("button"); if (!b) return; pgroup = b.dataset.k; draw(); scrollTo(0, 0); });
   draw();
   const UP = DATA.updates || [];
   let allChanges = false;
@@ -542,129 +474,63 @@ table.pt{table-layout:fixed;min-width:760px}
   $("#open").innerHTML = oi.length ? oi.map(i => { const c = i.indexOf(": "); return `<div class="item" style="cursor:default">${c > 0 ? `<b>${txt(i.slice(0, c))}</b><span class="small muted">${txt(i.slice(c + 2))}</span>` : `<span class="small">${txt(i)}</span>`}</div>`; }).join("")
  : '<p class="empty">Nothing open.</p>';
 
+  // A deal in progress: from the original purchase (a sale) or the first offer to the closing date.
   function showP(id){
     const d = P.find(x => x.id === id); if (!d) return;
-    const dt = k => d[k] ? fmtD(d[k]) : "";
+    // The land and the original purchase, from the site's own record (dashboard.py links it).
+    const L = d.land || {};
     const m = v => typeof v === "number" ? money(v) : (v ? txt(v) : "");
-    openDrawer(`<div class="small" style="opacity:.8">${txt(d.type)}</div><h2>${txt(d.property)}</h2><div style="margin-top:6px">${stage(d.stage)}</div>`,
-      `${site(d)}`+
-      `<div class="figs">${fig("Price", pprice(d))}${fig("Earnest money", m(d.deposit) || NG)}${fig(KW[d.key_label] || "Next date", d.key_date ? fmtD(d.key_date) : NG)}${d.acres != null ? fig("Acres", txt(d.acres)) : ""}</div>
-      ${d.status || d.next_step ? `<div class="box"><div class="body">${d.status ? `<div><h3>Status</h3>${txt(d.status)}</div>` : ""}${d.next_step ? `<div><h3>Next step</h3>${txt(d.next_step)}</div>` : ""}</div></div>` : ""}
-      <div><h3>The deal</h3><dl class="kv">${kv("Seller", txt(d.seller))}${kv("Buyer", txt(d.buyer))}${kv("Price basis", txt(d.price_basis))}${kv("Parcel / lot", txt(d.parcel))}${kv("APN", txt(d.apn))}${kv("Location", txt([d.city, d.county && d.county + " County", d.state].filter(Boolean).join(", ")))}${kv("Broker", txt(d.broker))}${kv("Escrow / title", txt(d.escrow))}</dl></div>
-      <div><h3>Dates</h3><dl class="kv">${kv("LOI date", dt("loi_date"))}${kv("Counter date", dt("counter_date"))}${kv("PSA date", dt("psa_date"))}${kv("DD expiration", dt("dd_expires"))}${kv("Closing date", dt("close_date"))}</dl></div>
-      ${d.orig_cost != null || d.gross_profit != null ? `<div><h3>Original acquisition</h3><dl class="kv">${kv("Acquisition date", dt("orig_acq_date"))}${kv("Cost basis", m(d.orig_cost))}${kv("Gross profit", m(d.gross_profit))}${kv("Gross multiple", d.gross_multiple != null ? txt(d.gross_multiple) + "x" : "")}</dl></div>` : ""}
-      ${Object.keys(d.terms || {}).length ? `<div><h3>Deal terms, latest document</h3><dl class="kv">${Object.entries(d.terms).map(([a, b]) => kv(txt(TW[a] || a), txt(b))).join("")}</dl></div>` : ""}
-      ${(d.documents || []).length ? `<div><h3>Documents reviewed</h3><ul class="plain small" style="margin:0">${d.documents.map(x => `<li>${fmtD(x.filed)}: ${txt(x.name)}</li>`).join("")}</ul></div>` : ""}
-      ${srcList(d.sources)}`);
+    const buying = d.type === "Acquisition", other = txt(buying ? d.seller : d.buyer);
+    const price = typeof d.price === "number" ? d.price : null;
+    const ev = [
+      {date: d.orig_acq_date || L.acquired, approx: !d.orig_acq_date && L.acquired_approx, kind: "buy", title: "Vaulter originally bought it", amount: d.orig_cost != null ? d.orig_cost : L.purchase_price},
+      {date: d.loi_date, kind: "upd", title: buying ? "Offer made" : "Offer received", detail: other ? (buying ? `To ${other}` : `From ${other}`) : ""},
+      {date: d.counter_date, kind: "upd", title: "Counteroffer"},
+      {date: d.psa_date, kind: "upd", title: "Purchase contract"},
+      {date: d.dd_expires, kind: "upd", title: "Due diligence ends", detail: "The buyer's period to study the property and walk away"},
+      {date: d.close_date, kind: buying ? "buy" : "sale", title: "Closing", amount: price},
+      ...(d.documents || []).map(x => ({date: x.filed, kind: "upd", title: "Paper received", detail: txt(x.name)})),
+      ...logFor([d.property]),
+      {date: DATA.built, kind: "now", title: `Today: ${txt(plain(SW[d.stage] || d.stage || "no stage yet"))}`,
+       detail: [d.status ? `Where it stands: ${txt(plain(d.status))}` : "", d.next_step && d.next_step !== d.stage ? `Next: ${txt(plain(d.next_step))}` : ""].filter(Boolean).join(". ")},
+    ];
+    const head = `<div class="sp-head"><div class="small muted">${buying ? "Buying" : "Selling"}</div><h2 id="sptitle">${txt(d.property)}</h2>
+      <div class="meta">${d.stage ? `<span class="pill ${pc(d.stage)}">${txt(plain(SW[d.stage] || d.stage))}</span>` : NG}<span>${txt([d.location, d.acres != null ? acres(d.acres) : ""].filter(Boolean).join(" · "))}</span>${site(d)}</div></div>`;
+    const figsRow = tiles([["Price", typeof d.price === "number" ? money(d.price) : d.price ? txt(plain(d.price)) : NG, txt(plain(d.price_basis))], ["Earnest money", m(d.deposit) || NG],
+      [{"Close": "Closing", "DD ends": "Due diligence ends", "PSA": "Purchase contract", "Counter": "Counteroffer", "LOI": "Offer"}[d.key_label] || "Next date", d.key_date ? fmtD(d.key_date) : NG, d.days_out != null ? (d.days_out < 0 ? `${-d.days_out} days ago` : d.days_out === 0 ? "today" : `in ${d.days_out} days`) : ""],
+      ["Acres", d.acres != null ? txt(d.acres) : NG]]);
+    const deal = kvl([kv(buying ? "Seller" : "Buyer", other), kv(buying ? "Buyer" : "Seller", txt(buying ? d.buyer : d.seller)), kv("How the price is set", txt(plain(d.price_basis))),
+      kv("Parcel or lot", txt(d.parcel)), kv("Parcel numbers", txt(d.apn)), kv("Where", txt([d.city, d.county && d.county + " County", d.state].filter(Boolean).join(", "))),
+      kv("Broker", txt(d.broker)), kv("Title company", txt(d.escrow)), kv("Last updated", d.updated ? fmtD(d.updated) : ""),
+      kv("Papers are in", (d.folders || []).length ? d.folders.map(f => `<div class="small">${txt(f)}</div>`).join("") : "")]);
+    // The whole site, which can be more than this deal covers (a sale of some of its lots).
+    // The old spreadsheet's short codes, spelled out where their meaning is certain; any other is shown as written.
+    const LAND = {"Res": "Residential", "SF": "Single family homes", "MF": "Multifamily", "MU": "Mixed use", "MPC": "Master planned community",
+                  "C": "Commercial", "I": "Industrial", "Apt": "Apartments", "HD Res": "High density residential"};
+    const landType = t => String(t || "").split("/").map(x => LAND[x.trim()] || x.trim()).join(", ");
+    const land = kvl([kv("Kind of land", txt(landType(L.type))), kv("Size", txt(L.size)), kv("Cross streets", txt(L.cross_streets)),
+      kv("Parcel numbers", d.apn ? "" : txt(L.apn)), kv("Zoning", txt(L.zoning)), kv("Homes per acre", txt(L.density)),
+      kv("Lots", L.lots == null || /lot/i.test(L.size || "") ? "" : txt(L.lots)), kv("Lot sizes", txt(L.lot_sizes))]);
+    const orig = kvl([kv("Bought", d.orig_acq_date ? fmtD(d.orig_acq_date) : L.acquired ? fmtD(L.acquired, L.acquired_approx) : ""),
+      kv("Cost when bought", d.orig_cost != null ? m(d.orig_cost) : L.purchase_price != null ? m(L.purchase_price) : ""),
+      kv("Profit before costs", d.gross_profit != null ? m(d.gross_profit) : ""),
+      kv("Money back for each $1", d.gross_multiple != null ? `$${Number(d.gross_multiple).toFixed(2)}` : ""),
+      kv("Yearly return before costs", d.gross_irr != null ? `${(d.gross_irr * 100).toFixed(1)}%` : "")]);
+    const terms = Object.keys(d.terms || {}).length ? kvl(Object.entries(d.terms).map(([a, b]) => kv(txt(plain(TW[a] || a)), txt(plain(b))))) : "";
+    openPage("Deals in progress", head + figsRow + `<div class="sp-cols"><div>${card("What happened", timeline(ev), "oldest first")}</div>
+      <div class="sp-side">${card("The deal", deal)}${card("The whole site", land, "from the site's record")}${card("Original purchase", orig)}${card("Deal terms", terms, "latest paper")}${srcList(d.sources)}</div></div>`, "p-" + d.id);
   }
 
-  // ══ HISTORY ══
-  let years = 0, sortKey = "acquired", sortDir = -1;
-  const since = () => { if (!years) return null; const d = new Date(today); d.setFullYear(d.getFullYear() - years); return d; };
-  const inP = iso => { const s = since(); if (!s) return true; if (!iso) return false; const v = String(iso).length === 4 ? iso + "-07-01" : iso; return new Date(v + "T00:00:00") >= s; };
-  const sum = (l, k) => l.reduce((a, d) => a + (d[k] || 0), 0);
-  const have = (l, k) => l.filter(d => d[k] != null);
-  const STATUSES = [["Owned", "Held", "d-active"], ["Partially sold", "Partially exited", "d-contract"], ["Being acquired", "Pending acquisition", ""], ["Fully exited", "Fully exited", "d-closed"]];
-  const HW = {"Owned":"Held", "Partially sold":"Partially exited", "Being acquired":"Pending acquisition"};
-  const LONG = 5, isLong = d => d.hold != null && d.hold > LONG;
-  const HFILTER = {long: isLong, recession: d => d.recession === true};
-  // A period with no full exit says so once, rather than "$0" beside "not given".
-  $("#ret").innerHTML = (DATA.returns || []).map(x => `<tr><td class="nw">${x.years ? `Last ${x.years} years` : "All time"}</td><td class="r num">${x.deals}</td>${!x.deals
-    ? '<td colspan="4" class="r"><span class="ng">no deal fully exited in this period</span></td>'
-    : `<td class="r num">${money(x.contributions)}</td><td class="r num">${money(x.distributions)}</td><td class="r num">${x.multiple == null ? NG : x.multiple.toFixed(2) + "x"}</td><td class="r num">${x.irr == null ? NG : (x.irr * 100).toFixed(1) + "%"}</td>`}</tr>`).join("");
-  const hpc = s => ({"Owned":"p-active", "Partially sold":"p-contract", "Being acquired":"p-other", "Fully exited":"p-closed"}[s] || "p-other");
-  [...new Set(H.map(d => d.state).filter(Boolean))].sort().forEach(s => $("#hstate").insertAdjacentHTML("beforeend", `<option>${esc(s)}</option>`));
-
-  function hk(){
-    const bought = H.filter(d => d.acquired && inP(d.acquired));
-    const exited = H.filter(d => d.status === "Fully exited" && d.last_sale && inP(d.last_sale));
-    const sales = []; H.forEach(d => d.sales.forEach(x => { if (x.date && inP(x.date)) sales.push(x); }));
-    const held = H.filter(d => ["Owned", "Partially sold", "Being acquired"].includes(d.status));
-    const prof = have(exited, "profit"), hold = have(exited, "hold");
-    const k = (cls, lab, val, rows, sub) => `<div class="kpi ${cls}"><span class="lab">${lab}</span><span class="val">${val}</span>${rows.length ? `<div class="rows">${rows.map(([a, b]) => `<div><span class="muted">${a}</span><span class="num">${b}</span></div>`).join("")}</div>` : ""}${sub ? `<span class="sub" style="margin-top:4px">${sub}</span>` : ""}</div>`;
-    $("#hk").innerHTML = [
-      k("accent", "Acquisitions", bought.length, [["Contributions", moneyT(sum(bought, "contributions"))], ["Aggregate purchase price", moneyT(sum(bought, "purchase_price"))]], `${have(bought, "purchase_price").length} with a purchase price`),
-      k("", "Full exits", exited.length, [["Distributions", moneyT(sum(exited, "distributions"))], ["Net profit", moneyT(sum(prof, "profit"))], ["Average hold period", hold.length ? (sum(hold, "hold") / hold.length).toFixed(1) + " yrs" : "not given"]], ""),
-      k("", "Closed sales", sales.length, [["Gross sale proceeds", moneyT(sales.reduce((a, x) => a + (x.price || 0), 0))]], "part sales included"),
-      k("", "Current holdings", held.length, [["Acres", Math.round(sum(held, "acres")).toLocaleString("en-US")], ["Partially exited", held.filter(d => d.status === "Partially sold").length], ["Contributions", moneyT(sum(held, "contributions"))]], ""),
-    ].join("");
-    const s = since();
-    $("#periodnote").textContent = s ? `Since ${s.toLocaleDateString("en-US", {year:"numeric", month:"short", day:"numeric"})}` : "";
-  }
-
-  const cols = [["Deal", "name"], ["Status", "status"], ["Acquired", "acquired"], ["Purchase price", "purchase_price", 1], ["Contributions", "contributions", 1], ["Distributions", "distributions", 1], ["Net profit", "profit", 1], ["Last sale", "last_sale"], ["Hold period", "hold", 1]];
-  const inPeriod = d => !years || inP(d.acquired) || inP(d.last_sale) || d.sales.some(x => x.date && inP(x.date));
-  function hdraw(){
-    const base = H.filter(inPeriod), st = $("#hstate").value;
-    // Past deals has no Home (owner, 2026-11-17): each entry is a page listing those deals, and
-    // "Returns" holds the summary cards and the returns table.
-    const pages = [...STATUSES.filter(([v]) => H.some(d => d.status === v)).map(([v, l]) => [v, l]),
-                   ["recession", "Owned in 2008 recession"], ["returns", "Returns"]];   // "Held over 5 years" removed (owner, 2026-11-17)
-    if (!pages.some(p => p[0] === hstatus)) hstatus = pages[0][0];
-    $("#snav-h").innerHTML = pages.map(([v, l]) => navBtn("history", v, l)).join("");
-    const isReturns = hstatus === "returns";
-    $("#hhome").hidden = !isReturns; $("#hlist").hidden = isReturns; $("#hfilt").hidden = isReturns;
-    $("#htitle").textContent = (pages.find(p => p[0] === hstatus) || ["", ""])[1];
-    const tip = {status: "Held, partially exited, fully exited or pending acquisition", acquired: "Date of the initial investment", contributions: "Capital contributed by investors",
-      distributions: "Capital returned to investors", profit: "Distributions less contributions", last_sale: "Date of the last sale", hold: "Years from the initial investment to the last sale, or to today"};
-    $("#hhead").innerHTML = cols.map(([l, k, r]) => `<th class="sort${r ? " r" : ""}" data-k="${k}" title="${tip[k] ? tip[k] + ". " : ""}Click to sort">${l}${k === sortKey ? ` <span class="arr">${sortDir < 0 ? "↓" : "↑"}</span>` : ""}</th>`).join("");
-    $$("#hhead th").forEach(th => th.onclick = () => { const k = th.dataset.k; sortDir = k === sortKey ? -sortDir : -1; sortKey = k; hdraw(); });
-    const l = base.filter(d => (!hstatus || (HFILTER[hstatus] ? HFILTER[hstatus](d) : d.status === hstatus)) && (!st || d.state === st)).sort((a, b) => { const x = a[sortKey], y = b[sortKey];
-      if (x == null || x === "") return 1; if (y == null || y === "") return -1; return (x > y ? 1 : x < y ? -1 : 0) * sortDir; });
-    $("#hcount").textContent = `${l.length} deals`;
-    $("#hrows").innerHTML = l.map(d => `<tr class="click" data-id="${d.id}">
-      <td><div class="main">${txt(d.name)}</div><div class="sub">${txt([d.state, d.size].filter(Boolean).join(" · "))}</div>${site(d)}</td>
-      <td><span class="pill ${hpc(d.status)}">${HW[d.status] || d.status}</span></td>
-      <td class="nw">${fmtD(d.acquired, d.acquired_approx)}</td>
-      <td class="r num">${money(d.purchase_price)}</td><td class="r num">${money(d.contributions)}</td>
-      <td class="r num">${money(d.distributions)}</td>
-      <td class="r num ${d.profit == null ? "" : d.profit >= 0 ? "pos" : "neg"}">${money(d.profit)}</td>
-      <td class="nw">${d.sold_in_parts && !d.last_sale ? "several dates" : fmtD(d.last_sale, d.last_sale_approx)}</td>
-      <td class="r num nw">${d.hold == null ? NG : d.hold + (d.hold_to_today ? '<span class="faint" title="still held, counted to today"> so far</span>' : " yrs")}</td></tr>`).join("")
-      || '<tr><td colspan="9" class="muted">No deal matches.</td></tr>';
-    $$("tr[data-id]").forEach(tr => tr.onclick = () => showH(tr.dataset.id));
-    mark($('section[data-view="history"]').hidden ? "pipeline" : "history");
-  }
-  $("#snav-h").addEventListener("click", e => { const b = e.target.closest("button"); if (!b) return; hstatus = b.dataset.k; view("history"); hdraw(); scrollTo(0, 0); });
-  function showH(id){
-    const d = H.find(x => x.id === id); if (!d) return;
-    openDrawer(`<div class="small" style="opacity:.8">${txt([d.state, d.type, d.size].filter(Boolean).join(" · ")) || "Deal"}</div><h2>${txt(d.name)}</h2><div style="margin-top:6px"><span class="pill ${hpc(d.status)}">${HW[d.status] || d.status}</span></div>`,
-      `${site(d)}`+
-      `${d.aliases.length ? `<p class="note">Also called ${txt(d.aliases.join("; "))}</p>` : ""}
-      <div class="figs">${fig("Contributions", money(d.contributions))}${fig("Distributions", money(d.distributions))}${fig("Net profit", `<span class="${d.profit == null ? "" : d.profit >= 0 ? "pos" : "neg"}">${money(d.profit)}</span>`)}${fig("Hold period", d.hold == null ? NG : `${d.hold} yrs${d.hold_to_today ? " so far" : ""}`)}</div>
-      ${[d.location, d.cross_streets, d.apn, d.zoning, d.lots, d.lot_sizes].some(Boolean) ? `<div><h3>The land</h3><dl class="kv">${kv("Where", txt(d.location))}${kv("Cross streets", txt(d.cross_streets))}${kv("Parcel numbers", txt(d.apn))}${kv("Zoning", txt(d.zoning))}${kv("Homes per acre", txt(d.density))}${kv("Lots", d.lots == null ? "" : txt(d.lots))}${kv("Lot sizes", txt(d.lot_sizes))}</dl></div>` : ""}
-      <div><h3>Acquisition</h3><dl class="kv">${kv("Initial investment", fmtD(d.acquired, d.acquired_approx))}${kv("Purchase price", money(d.purchase_price))}${kv("Acquisition debt", money(d.debt))}${kv("Smartsheet stage", txt(d.stage))}</dl></div>
-      <div><h3>Performance</h3><dl class="kv">${kv("Equity multiple", d.multiple != null ? `${d.multiple}x` : NG)}${kv("IRR", d.irr == null ? NG : (d.irr * 100).toFixed(1) + '% <span class="faint">(old spreadsheet)</span>')}${kv("Last sale", d.sold_in_parts && !d.last_sale ? "several dates" : fmtD(d.last_sale, d.last_sale_approx))}${kv("Owned in 2008 recession", d.recession == null ? NG : d.recession ? "Yes" : "No")}${d.excluded ? kv("Note from the old spreadsheet", txt(d.excluded)) : ""}</dl></div>
-      <div><h3>Sales</h3>${d.sales.length ? `<table><thead><tr><th>Date</th><th class="r">Price</th><th>Buyer</th></tr></thead><tbody>${d.sales.map(s => `<tr><td class="nw">${fmtD(s.date, String(s.date).length === 4)}${s.final ? ' <span class="pill p-closed">final</span>' : ""}</td><td class="r num">${money(s.price)}</td><td class="small">${txt(s.other_party) || NG}<div class="sub">${txt(s.source)}</div></td></tr>`).join("")}</tbody></table>` : `<p class="note">${d.last_sale ? "The old spreadsheet gives only the last sale date." : "No sale recorded."}</p>`}</div>
-      ${d.notes.length ? `<div><h3>Notes</h3><ul class="plain small" style="margin:0">${d.notes.map(n => `<li>${txt(n)}</li>`).join("")}</ul></div>` : ""}
-      ${srcList(d.sources)}`);
-  }
-  $("#hstate").addEventListener("input", hdraw);
-  // The years slider: 1 year up to as far back as the oldest deal; the last step is all time.
-  const oldest = H.map(d => d.acquired).filter(Boolean).sort()[0];
-  const span = oldest ? Math.max(1, Math.ceil((today - new Date(oldest + "T00:00:00")) / (365.25 * 864e5))) : 1;
-  const yrs = $("#yrs"); yrs.max = span + 1; yrs.value = span + 1;
-  $("#period").hidden = span < 2;
-  const setYears = v => {
-    years = v > span ? 0 : v;
-    $("#yrsv").textContent = !years ? "All time" : years === 1 ? "Last 12 months" : `Last ${years} years`;
-    try { localStorage.setItem("dt-years", years); } catch (e) {}
-    hk(); hdraw();
-  };
-  yrs.addEventListener("input", () => setYears(Number(yrs.value)));
-  hk(); hdraw();
-
-  // ── One search across both tabs ──
-  const index = [...P.map(d => ({t:"Pipeline", id:d.id, name:d.property, sub:[d.type, d.counterparty, d.stage].filter(Boolean).join(" · "), hay:[d.property, d.parcel, d.buyer, d.seller, d.city].join(" ")})),
-                 ...H.map(d => ({t:"History", id:d.id, name:d.name, sub:[d.state, d.status].filter(Boolean).join(" · "), hay:[d.name, ...d.aliases].join(" ")}))];
+  // ── Search ──
+  const index = P.map(d => ({id:d.id, name:d.property, sub:[d.type, d.counterparty, d.stage].filter(Boolean).join(" · "), hay:[d.property, d.parcel, d.buyer, d.seller, d.city, d.county].join(" ")}));
   const res = $("#results");
   $("#q").addEventListener("input", e => {
     const q = e.target.value.trim().toLowerCase();
     if (q.length < 2) { res.hidden = true; return; }
     const hits = index.filter(x => x.hay.toLowerCase().includes(q)).slice(0, 14);
-    res.innerHTML = hits.length ? hits.map(x => `<button type="button" data-t="${x.t}" data-id="${x.id}"><span><b>${txt(x.name)}</b><div class="sub small muted">${txt(x.sub)}</div></span><span class="pill ${x.t === "Pipeline" ? "p-active" : "p-other"}">${x.t === "Pipeline" ? "In progress" : "Past deal"}</span></button>`).join("") : '<p class="empty" style="padding:10px 12px">No deal matches.</p>';
+    res.innerHTML = hits.length ? hits.map(x => `<button type="button" data-id="${x.id}"><span><b>${txt(x.name)}</b><div class="sub small muted">${txt(x.sub)}</div></span></button>`).join("") : '<p class="empty" style="padding:10px 12px">No deal matches.</p>';
     res.hidden = false;
-    $$("#results button").forEach(b => b.onclick = () => { res.hidden = true; view(b.dataset.t === "Pipeline" ? "pipeline" : "history"); (b.dataset.t === "Pipeline" ? showP : showH)(b.dataset.id); });
+    $$("#results button").forEach(b => b.onclick = () => { res.hidden = true; showP(b.dataset.id); });
   });
   document.addEventListener("click", e => { if (!e.target.closest(".search")) res.hidden = true; });
 
@@ -679,11 +545,13 @@ table.pt{table-layout:fixed;min-width:760px}
     window.location.href = "ms-excel:ofe|u|" + file;
   };
   $("#theme").onclick = () => { const r = document.documentElement; const next = r.getAttribute("data-theme") === "dark" ? "light" : "dark"; r.setAttribute("data-theme", next); try { localStorage.setItem("dt-theme", next); } catch (e) {} };
-  try { const t = localStorage.getItem("dt-theme"); if (t) document.documentElement.setAttribute("data-theme", t);
-        const v = location.hash === "#history" ? "history" : location.hash === "#pipeline" ? "pipeline" : localStorage.getItem("dt-view"); if (v) view(v);
-        const y = Number(localStorage.getItem("dt-years") || 0); if (y && y <= span) { yrs.value = y; setYears(y); } } catch (e) {}
+  try { const t = localStorage.getItem("dt-theme"); if (t) document.documentElement.setAttribute("data-theme", t); } catch (e) {}
 
-  window.__dt = {deals: H.length, pipeline: P.length};
+  // A page link (#p-<id>) opens that page over the dashboard; Back returns to it.
+  const k0 = location.hash.slice(1);
+  if (/^p-/.test(k0)) { route(k0); if (!$("#sitepage").hidden) stack = [k0]; }
+
+  window.__dt = {pipeline: P.length, open: route};   // open: lets the browser test open any page
 })();
 </script>
 </body>

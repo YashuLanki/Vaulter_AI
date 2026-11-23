@@ -562,7 +562,7 @@ def run(tmp: Path) -> None:
           and not o80["held_sales"] and not any(a.startswith("Oak Ridge 80: sale on") for a in rec["attention"]), said)
     check("a final sale reads fully exited", T.status(o80) == "Fully exited")
     check("an estimated statement is told apart from a final one",
-          T.is_estimate("261010 Est SS.pdf") and T.is_estimate("240613 Est SS MVE SELLER EXECUTED.pdf")
+          T.is_estimate("261010 Est SS.pdf") and T.is_estimate("261012 Est SS SELLER EXECUTED.pdf")
           and not T.is_estimate("INST-Final Settlement Statement .PDF")
           and not T.is_estimate("261015 Settlement Statement Final.pdf") and not T.is_estimate("Estes Park SS.pdf"))
 
@@ -770,22 +770,13 @@ TEST = """
   const o = {errors: window.__errs || []};
   try {
     const $ = s => document.querySelector(s), $$ = s => [...document.querySelectorAll(s)];
-    // Home (owner, 2026-11-17): the progress chart, what changed, coming up and open items, and nothing
-    // else; every sidebar entry is a page of its own, and the sidebar carries no counts.
+    // Home (owner, 2026-11-23): what changed, coming up and open items, and nothing else; one sidebar
+    // list (Past deals and the progress chart were removed), every entry a page of its own, no counts.
     o.tabs = $$(".side .sh").length;
     o.homeFirst = $$("#snav-p button")[0].textContent.trim() === "Home";
-    o.navNumbers = /\\d/.test($$(".side .navlist button").map(b => b.textContent).join(" ").replace(/2008|5 years/g, ""));
+    o.navNumbers = /\\d/.test($$(".side .navlist button").map(b => b.textContent).join(" "));
     o.homeShown = !$("#phome").hidden && $("#psecs").hidden;
-    o.chart = $$("#progc svg").length;
-    // The chart's totals and the tiles are worked out from DATA on every load, so a rebuilt page moves
-    // with the record: recompute them here and compare, so nothing on Home can be a fixed figure.
-    const past = DATA.deals.filter(d => d.status !== "Being acquired");
-    const usd = v => Math.abs(v) >= 1e6 ? `$${(v / 1e6).toFixed(1)}M` : `$${Math.round(v).toLocaleString("en-US")}`;
-    const inv = past.reduce((a, d) => a + (d.contributions || 0), 0);
-    const back = past.filter(d => d.status === "Fully exited").reduce((a, d) => a + (d.distributions || 0), 0);
-    const labels = $$("#progc text.big").map(t => t.textContent);
-    o.chartTotals = labels.includes(usd(inv) + " invested") && (!back || labels.includes(usd(back) + " returned"));
-    o.heldTile = $$("#progk .kpi .val")[0].textContent === String(DATA.deals.filter(d => ["Owned", "Partially sold"].includes(d.status)).length);
+    o.noHistory = !$("#snav-h") && !$("#progc") && !$('section[data-view="history"]') && !("deals" in DATA) && !("returns" in DATA);
     o.prows = $$("tr[data-pid]").length;
     o.kpis = $$("#pk .kpi").length;
     o.csub = $("#csub").textContent;
@@ -801,22 +792,18 @@ TEST = """
     o.homeHidden = $("#phome").hidden;
     pbtn("Home").click();
     o.backHome = !$("#phome").hidden && $("#psecs").hidden;
-    // Past deals has no Home: each entry is its own page, and a years slider narrows the list.
-    const hbtn = l => $$("#snav-h button").find(b => b.textContent.trim() === l);
-    o.histFirst = $$("#snav-h button")[0].textContent.trim();
-    hbtn("Fully exited").click();
-    o.histShown = !$('section[data-view="history"]').hidden;
-    o.hrows = $$("tr[data-id]").length;
-    const yrs = $("#yrs"); yrs.value = 1; yrs.dispatchEvent(new Event("input"));
-    o.hrows1 = $$("tr[data-id]").length;
-    yrs.value = yrs.max; yrs.dispatchEvent(new Event("input"));
-    hbtn("Returns").click();
-    o.returns = !$("#hhome").hidden && $("#hlist").hidden && $$("#ret tr").length === 4;
+    // The search finds deals in progress only, and opens one on its own full page (owner 2026-11-19).
     const q = $("#q"); q.value = "oak ridge"; q.dispatchEvent(new Event("input"));
     o.hits = $$("#results button").length;
-    $("#results button").click();
-    o.drawer = $("#drawer").classList.contains("on");
+    $$("#results button").find(b => b.textContent.includes("Oak Ridge 40")).click();
+    o.page = !$("#sitepage").hidden && /^#p-/.test(location.hash);
+    o.noPanel = !$("#drawer");
     o.dashes = /\\s[\\u2014\\u2013-]\\s/.test(document.body.innerText);
+    // A sale's page carries the site's own facts from its record: when it was bought and for what.
+    const heads = $$("#spbody .box h2").map(h => h.textContent);
+    o.siteFacts = heads.includes("Original purchase") && /2018/.test($("#spbody").innerText) && $$("#spbody .tl li.buy").length >= 1;
+    $("#spback").click();
+    o.backClosed = $("#sitepage").hidden;
   } catch (e) { o.exception = String(e); }
   document.title = "TESTOUT" + JSON.stringify(o);
 })();
@@ -849,18 +836,15 @@ def edge_check(page_path: Path) -> None:
     o = json.loads(html.unescape(m.group(1)))
     check("the page draws with no script error", o.get("errors") == [] and "exception" not in o,
           o.get("exception") or o.get("errors"))
-    check("two sidebar lists, Home first and no counts; Home shows the progress chart, coming up and open items, no deal tables",
-          o.get("tabs") == 2 and o.get("homeFirst") and o.get("navNumbers") is False and o.get("homeShown")
-          and o.get("chart") == 1 and o.get("prows") == 0 and o.get("kpis") == 0 and o.get("csub") and o.get("open") == 1, o)
-    check("Home's progress totals and tiles are worked out from the record, so they move with every rebuild",
-          o.get("chartTotals") and o.get("heldTile"), o)
+    check("one sidebar list, Home first and no counts; Home shows what changed, coming up and open items, no deal tables",
+          o.get("tabs") == 1 and o.get("homeFirst") and o.get("navNumbers") is False and o.get("homeShown")
+          and o.get("prows") == 0 and o.get("kpis") == 0 and o.get("csub") and o.get("open") == 1, o)
+    check("no past deals, returns or progress chart on the page, nor in its data", o.get("noHistory"), o)
     check("a group in the sidebar opens a page with that group alone, and Home comes back",
           o.get("oneGroup") == 1 and o.get("groupRows", 0) >= 1 and o.get("homeHidden") and o.get("backHome"), o)
-    check("Past deals has no Home; a status opens its own list", o.get("histFirst") not in (None, "Home")
-          and o.get("histShown") and o.get("hrows") == 3, o)
-    check("the years slider narrows the list", 0 < o.get("hrows1", 0) < o.get("hrows", 0), o)
-    check("Returns shows the summary and the returns table on its own page", o.get("returns"), o)
-    check("the search finds both tabs' deals and opens one", o.get("hits", 0) >= 3 and o.get("drawer"), o)
+    check("the search finds deals in progress and opens one on its own page, no side panel, Back closes it",
+          o.get("hits") == 2 and o.get("page") and o.get("noPanel") and o.get("backClosed"), o)
+    check("a sale's page shows its original purchase, from the site's own record", o.get("siteFacts"), o)
     check("no dash between words anywhere on the page", o.get("dashes") is False)
     check("what changed is shown on the page", o.get("changes", 0) >= 3, o.get("changes"))
     check("Needs a look is shown on the page, with the questions the tracker could not settle",

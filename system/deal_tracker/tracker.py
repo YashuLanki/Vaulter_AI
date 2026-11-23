@@ -1160,7 +1160,7 @@ def _file_away(rel: str) -> None:
 # are wrong too"). The final signed statement is one; the second is the recorded affidavit of
 # property value or deed, or the signed purchase agreement and its latest amendment. Juniper
 # Square's sale "price" is NOT a second paper: it is the gross finished-lot price before the
-# cost-to-complete credit ($14.67M on a sale whose final statement says $6,000,000).
+# cost-to-complete credit, more than twice the price the final statement states on one real sale).
 _ESTIMATE = re.compile(r"\best(imated)?\b", re.I)
 _FINAL = re.compile(r"\bfinal\b", re.I)
 _CHECK_NAME = re.compile(r"affidavit of (property )?value|\bapv\b|\bdeed\b|\bpsa\b|purchase (and sale )?agreement|"

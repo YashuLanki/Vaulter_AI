@@ -1286,6 +1286,16 @@ def main() -> int:
         finally:
             _cfg2.DATA_DIR = _real
             import shutil as _sh2; _sh2.rmtree(_dd, ignore_errors=True)
+        # A scanned page signed through DocuSign carries one line of real text, the envelope stamp,
+        # so it looked readable and was never scanned (found 2026-11-17 on a signed amendment).
+        check("a page whose only text is an e-signature stamp is scanned",
+              _ex._needs_ocr("Docusign Envelope ID: 1A2B3C4D-0000-4000-8000-00000000ABCD")
+              and _ex._needs_ocr("Docusign Envelope ID: 1A2B3C4D-0000-4000-8000-00000000ABCD\nJane Q. Sample")
+              and _ex._needs_ocr("") and _ex._needs_ocr(None))
+        check("  ...but a page with real text, stamp or not, is not",
+              not _ex._needs_ocr("Docusign Envelope ID: 1A2B3C4D-0000-4000-8000-00000000ABCD\n"
+                                 "3. SALES PRICE. The Sales Price shall be $1,250,000.00 payable at closing.")
+              and not _ex._needs_ocr("FIRST AMENDMENT TO PURCHASE AND SALE AGREEMENT"))
     except Exception as e:
         check("reading-less checks ran", False, f"{type(e).__name__}: {e}")
 
