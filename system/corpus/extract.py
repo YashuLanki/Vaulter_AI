@@ -85,9 +85,8 @@ def read_document(rel_path: str, max_chars: int = 200_000) -> tuple[str, dict]:
 def read_path(path: Path, label: str, max_chars: int = 200_000) -> tuple[str, dict]:
     """
     The reading half of read_document, for a path the CALLER has already
-    checked. Only deal_tracker uses it directly, for a folder of saved email
-    attachments that is outside the library on purpose; everything else goes
-    through read_document and its scope guard.
+    checked. Everything outside this module goes through read_document and
+    its scope guard.
     """
     ext = path.suffix.lower()
     metadata = {

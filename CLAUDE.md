@@ -56,7 +56,6 @@ python system/scripts/check_retrieval.py            # does summary search find t
 python system/scripts/check_find.py                 # does find-in-document find the right passage
 python system/scripts/check_report_page.py          # does the screening report page work in a browser
 python system/scripts/check_term_sheet_page.py      # does the mini term sheet dashboard work in a browser
-python system/scripts/check_deal_tracker.py         # 68 checks on the deal tracker, made-up data only (Excel + Edge parts skip if absent)
 python system/scripts/check_auto_update.py          # 292 checks on automatic updates and the idle restart
 ```
 
@@ -591,8 +590,8 @@ the API showed otherwise. **Verify against the source, not against the copy.**
 
 The pull is the one exception to "there are no API keys", and a deliberate one: the token
 costs nothing (it comes with the firm's Smartsheet subscription) but it is a secret, so it lives
-in **one** machine's own `confidentials/.env` (two since 2026-11-03: the deal tracker's daily-run
-machine reads the project dashboards with it) and is never packaged; `SMARTSHEET_ACCESS_TOKEN`
+in **one** machine's own `confidentials/.env` (a second machine held one for the deal tracker's project
+dashboards; that code left this program on 2026-11-24) and is never packaged; `SMARTSHEET_ACCESS_TOKEN`
 stays blank on every teammate's machine and they read the result from the shared folder exactly
 as before. Read-only, always. The sheet is pinned by numeric id (`SMARTSHEET_PROJECT_MASTER_ID`)
 because the maintainer's own account sees two same-named copies. The file is validated, written
@@ -660,7 +659,7 @@ boundary is "is this your own computer, logged in as you." claude.ai (the web ap
 be used with this server: it runs in the cloud and can only reach a network address, never
 a process on someone's own machine. Claude Desktop or Claude Code are required.
 
-**44 tools.** Don't maintain this list by hand — it drifted to 19 entries with one duplicated
+**37 tools.** Don't maintain this list by hand — it drifted to 19 entries with one duplicated
 and two missing. Get the truth from the code:
 
 ```bash
@@ -691,67 +690,18 @@ to confirm the numbers after the person says yes. **Read `system/term_sheet/CLAU
 touching any of it** — every decision, the gold-standard check and the writing rules (which
 live in the team folder, not in code) are recorded there. `check_portfolio_comparison.py` §11
 holds its regression checks; `check_term_sheet_page.py` opens the dashboard in headless Edge.
-**Deal tracker** (`system/deal_tracker/`, built 2026-10-29, not yet shipped) — `open_deal_tracker`,
-`get_deal_tracker_documents`, `save_deal_tracker_update`, `save_deal_pipeline_update`,
-`edit_deal_tracker`, `import_deal_tracker`, `schedule_deal_tracker`, `settle_deal_tracker_question`.
-**The email inbox changed on 2026-11-17** (`deal_tracker/inbox.py`; design in vaulter-copilot's
-`docs/superpowers/specs/2026-11-16-deal-tracker-cowork-design.md`, "The inbox"): Ava's flows save
-attachments, code-named, in `Attachments/` with a row each in `Attachments Log.xlsx`, and add a row
-to `Date Updates.xlsx` (Calendar / Email tabs) for any event or email naming a deal date; a third flow
-copies Deal and Status back from `system/deal_tracker/inbox status.json`. Rows are screened in code
-like files; an email or calendar date REPLACES the tracker's date (owner's rule); what cannot be
-settled is "Needs a look", and settling one keeps a lesson the reading run is given every time.
-Notes below about `.name.txt` and `Calendar - <title>.txt` describe the old layout.
-The firm's acquisitions and
-dispositions: the live pipeline (laid out like the team's own pipeline workbook) and every past
-deal, as `Deal Tracker.html` and `Deal Tracker.xlsx` in the team folder's `Deal Tracker/`, plus a
-`Drop papers here/` folder (2026-11-05) where anyone can hand in a paper by hand, which is moved
-into its `Read/` folder once recorded, and nothing else there (owner's rule); the record and the
-"do not open" word list sit under `system/deal_tracker/`. **Ava's flow is Microsoft's stock "save email
-attachments" template, so the TRACKER does the filtering** (owner, 2026-11-05: setup must be easy for a
-non-technical person). Every handed-in file is SCREENED in code on Ava's laptop before Claude sees
-it (`tracker._screen`): the opening text is read, any `CONFIDENTIAL_TEXT` phrase stops it there and
-it is left out, and only a file named as a deal paper (`PAPER_WORDS`), a `Calendar - <title>.txt` note
-of one colleague's meetings whose title names a date, or a file whose text carries two `DEAL_SIGNALS` is offered.
-Screened-out files are kept in the TEAM record by a fingerprint, never by name. The confidential list
-deliberately leaves out 1099 and W-9, which ordinary PSAs mention. A folder quiet for 30 days puts a
-warning on the page (`note_inbox`, daily run only). Each daily run also writes its own lines (never
-other modules', never a screened file's name, only counts) to `system/deal_tracker/daily run log.txt`
-in the team folder, so the maintainer can see how Ava's laptop did without touching it. **Papers in the library are read where
-they are filed, never copied in**: the team folder is open to everyone while the library has
-folder permissions, so a copy would show a restricted paper to the whole team. "What changed"
-names each paper, which is the history. It updates itself from Smartsheet, the summary cards, closing statements
-and offer papers found by NAME in the file list (one offer folder = one pipeline deal, newest paper
-only), and a saved-attachments folder named only in one machine's `.env`
-(`VAULTER_DEAL_INBOX_DIR`); nothing reads email. Files whose names suggest accounting are never
-opened and never listed. The Excel copy is two-way: `excel.pull_edits` compares the saved file with
-a snapshot of what was written, so only a person's edits are applied. The daily run is a Windows
-scheduled task on ONE machine (`scripts/deal_tracker_daily.py`, registered by
-`schedule_deal_tracker`; the record names the machine and any other stands down). Three lessons
-from building it: a machine whose OneDrive stopped syncing the library (2026-10-19 reset) sees
-nothing new and cannot download cloud-only files, so the routine must run where sync works; two
-closings on one day at one price to two buyers are two sales; and Excel refuses a whole workbook
-over one unbalanced bracket, so check a generated workbook by opening it in Excel, not openpyxl.
-`scripts/check_deal_tracker.py` (2026-11-02) found on its first run that **"k-1" and "w-9" never
-blocked anything**: file names had their dashes turned into spaces and the words did not, so
-`K-1 2025.pdf` would have been offered for reading. The word now goes through the same cleaning.
-Since 2026-11-03 the daily run also reads each project's **Smartsheet dashboard**
-(`deal_tracker/smartsheet_dashboards.py`): place, cross streets, parcel numbers, zoning, acreage, lots,
-from an ALLOWLIST of labels, so budget and investor boxes are never read. That puts the read-only
-Smartsheet key on a SECOND machine, the daily run's (owner's choice, 2026-11-03), and the dashboards
-must be shared as Viewer with the key's account (only one was, that day). Every change the tracker
-makes now goes into "What changed" (`tracker.log_update`): old to new, and a reason only when a
-paper or a person gave one, never a guess.
-**A sale price needs TWO papers that agree (owner, 2026-11-17).** The final signed statement, plus a
-recorded affidavit of property value or deed, or the signed PSA and its latest amendment
-(`drive_closings` lists these as `checks`, found by name in the property's folder). With no second
-paper, or one that disagrees, `record_event` HOLDS the sale on the deal (`held_sales`) and asks a
-person; `edit_deal_tracker(field='confirm sale')` records it once checked. A sale is never recorded
-from an estimated statement (`is_estimate`). **Juniper Square's sale price is not a second paper**:
-it is the gross finished-lot price before the cost-to-complete credit. Measured on one real sale:
-Juniper Square's figure was about a hundred times the price the final statement and the latest
-amendment both state (real figures stay out of this public file). The recorded affidavits are
-scans, unreadable without OCR, so on a machine without Tesseract the PSA is the working second paper.
+**Deal tracker: open only** — `open_deal_tracker`. **Cut to this on 2026-11-24, at the owner's
+request**: the team's Copilot run now keeps the tracker up to date (vaulter-copilot, branch
+`deal-tracker-cowork`) and saves `Deal Tracker.html` and `Deal Tracker.xlsx` in the team folder's
+`Deal Tracker/`; this program only opens one of them and says when it was last saved. Everything
+that updated the tracker went: `system/deal_tracker/` (record, pipeline, Excel two-way copy,
+Smartsheet dashboards, the Power Automate inbox and `VAULTER_DEAL_INBOX_DIR`), the seven other
+tools, `scripts/deal_tracker_daily.py` and its scheduled task, and `check_deal_tracker.py`. The
+whole design and its lessons are in git history up to `0343ccb`, and vaulter-copilot's
+`tracker-engine/` holds a copy taken at `41668d0`; **that copy is now the one maintained**, so a
+fresh copy into vaulter-copilot can no longer come from a vaulter_ai commit after the removal.
+**Do not build a second updater here**: two programs writing one tracker is the failure the old
+`daily_run.machine` rule existed to prevent.
 **A DocuSigned scan looked like text and was never scanned (fixed 2026-11-17, `extract._needs_ocr`):**
 the envelope-id stamp is a real text line, so a scanned amendment came back as two ids and a name.
 A page whose text is only e-signature stamps plus under 40 characters is now OCR'd.

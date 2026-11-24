@@ -1467,7 +1467,7 @@ import mcp_server as ms  # noqa: E402
 
 _real = {k: getattr(config, k) for k in ("PENDING_UPDATE_DIR", "INSTALLS_DIR", "DATA_DIR", "UPDATE_CHECK_STAMP_FILE")}
 _real_fns = {k: getattr(ms, k, None) for k in ("_auto_update_active", "_write_install_checkin",
-             "_ensure_deal_tracker_daily_run", "_ensure_restart_task", "_restart_task", "_RESTART_TASK_CHECKED",
+             "_ensure_restart_task", "_restart_task", "_RESTART_TASK_CHECKED",
              "_auto_update_eligible", "_RESTART_TASK_OK", "_GAVE_UP_SHOWN", "_VERSION_AT_STARTUP")}
 _MISSING = object()
 _real_flags = {k: getattr(ms, k, _MISSING) for k in ("_RESTART_TASK_CHECKED", "_RESTART_TASK_OK",
@@ -1503,7 +1503,6 @@ try:
             v.mkdir(parents=True, exist_ok=True)
     (_tmp4 / "stamp.txt").write_text("frozen")
     ms._write_install_checkin = lambda *a, **k: None
-    ms._ensure_deal_tracker_daily_run = lambda *a, **k: ""
     ms._ensure_restart_task = lambda *a, **k: None
     (_tmp4 / "pending" / "ready.json").write_text(json.dumps({"version": "zzzzzz9", "zip_filename": "f.zip"}))
     body = "ANSWER" * 40
@@ -2343,7 +2342,7 @@ _s7 = {k: getattr(config, k) for k in ("PENDING_UPDATE_DIR", "DATA_DIR", "UPDATE
 _f7 = {k: getattr(ms, k, None) for k in ("_restart_task", "_auto_update_eligible", "_restart_task_runner",
                                          "_RESTART_TASK_CHECKED", "_RESTART_TASK_OK", "_RESTART_TASK_PENDING",
                                          "_get_code_version", "_write_install_checkin",
-                                         "_ensure_deal_tracker_daily_run", "_check_and_stage_update",
+                                         "_check_and_stage_update",
                                          "_GAVE_UP_SHOWN")}
 _t7 = Path(tempfile.mkdtemp())
 try:
@@ -2355,7 +2354,6 @@ try:
     ms._auto_update_eligible = lambda: True
     ms._get_code_version = lambda: "1.0"
     ms._write_install_checkin = lambda *a, **k: None
-    ms._ensure_deal_tracker_daily_run = lambda *a, **k: ""
     ms._check_and_stage_update = lambda *a, **k: None
     RUN7 = Path(sys.executable).with_name("pythonw.exe")
     ms._restart_task_runner = lambda: RUN7

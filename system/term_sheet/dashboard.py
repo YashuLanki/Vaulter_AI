@@ -291,15 +291,63 @@ def build_payload(book: dict, today: _dt.date | None = None) -> dict:
     }
 
 
+# Words a site's name and a sheet's name may differ by without being different places.
+_STOP = {"rmg", "llc", "lp", "lllp", "llp", "inc", "the", "of", "and", "investors", "investments",
+         "investment", "holdings", "holding", "properties", "property", "partners", "ltd", "co"}
+
+
+def _tokens(name: str) -> frozenset:
+    s = str(name or "").lower().replace("&", " and ")
+    s = re.sub(r"\(.*?\)", lambda m: " " + m.group(0)[1:-1] + " ", s)
+    return frozenset(t for t in re.findall(r"[a-z]+|\d+", s) if t not in _STOP)
+
+
+def _phrase(s: str) -> str:
+    return " " + " ".join(re.findall(r"[a-z]+|\d+", str(s).lower().replace("&", " and "))) + " "
+
+
 def _site(name: str, folder: str) -> dict | None:
-    """A Google Earth link from the team's checked locations, matched as the deal tracker matches; never guessed."""
+    """
+    A Google Earth link from the team's hand-checked locations
+    (property_coordinates.csv, the table proximity uses); never a location
+    worked out from a name, which was measured wrong 5 times in 8. A sheet
+    matching two locations equally gets no link. "rough" marks a location known
+    only to the town. Moved here from the deal tracker's page code, which was
+    removed on 2026-11-24; the matching is unchanged: an exact name wins,
+    otherwise every word of the shorter name must be in the longer one (numbers
+    count, so "Oak 40" never matches "Oak 80"), or the site's whole name sits
+    in the sheet's name as a phrase.
+    """
     try:
-        from deal_tracker.dashboard import add_sites
-        row = [{"name": name or folder, "aliases": [folder] if folder and name else []}]
-        add_sites(row, "name")
-        return row[0].get("site")
+        import config
+        from pipeline import property_coordinates as PC
+        coords = PC.load_coordinates(config.DATA_DIR)
     except Exception:
         return None
+    names = [n for n in [name or folder, folder if folder and name else ""] if n]
+    have = [_tokens(n) for n in names]
+    found = []
+    for key, c in coords.items():
+        want = _tokens(key)
+        if not want:
+            continue
+        hit = want in have
+        for t in have:
+            if hit or not t:
+                continue
+            small, big = (want, t) if len(want) <= len(t) else (t, want)
+            hit = len(small) >= 2 and small <= big
+        if not hit and len(want) >= 2:
+            hit = any(_phrase(key) in _phrase(n) for n in names)
+        if hit:
+            found.append((max(len(want & t) for t in have), c["lat"], c["lon"], c["precision"] == "city"))
+    if not found:
+        return None
+    found.sort(reverse=True)
+    if len(found) == 1 or found[0][0] > found[1][0] or found[0][1:] == found[1][1:]:
+        _, lat, lon, rough = found[0]
+        return {"url": f"https://earth.google.com/web/search/{lat},{lon}", "rough": rough}
+    return None
 
 
 def write_dashboard(xlsx: Path, today: _dt.date | None = None) -> Path:

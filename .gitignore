@@ -86,9 +86,7 @@ system/data/last_error_report.txt
 # clone would then start life believing it had already checked in today.
 system/data/last_checkin.txt
 system/data/last_update_check.txt
-# Per-machine state of the automatic update: the last deal-tracker schedule check,
-# the restart task's counters (restarts per version), and the install lock.
-system/data/deal_tracker_schedule_check.txt
+# Per-machine state of the automatic update: the restart task's counters (restarts per version), and the install lock.
 system/data/auto_restart.json
 system/data/apply.lock
 # The version last installed at startup (so the restart task owes no restart for it).
